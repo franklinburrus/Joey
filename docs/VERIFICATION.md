@@ -4,7 +4,7 @@ Verification date: 2026-10-30 EDT. Outcome: **PARTIAL**. The native implementati
 
 ## Checkout and preserved work
 
-Repository: `https://github.com/franklinburrus/Joey.git`, branch `codex/native-consolidated`. Merge `5e35d4d` preserves native starter `bc34efbf88b95c726da3fe8e1eb3dcb69120bb3c` and remote main `f265a5ad2c44b933d6da4aafc752c9c6c8646a83`. Existing Xcode project was retained. User scheme preferences are excluded from the implementation commit. Preservation hashes and historical failed-run logs remain under `/Users/frank/Library/Caches/Joey-Native-Build/`.
+Repository: `https://github.com/franklinburrus/Joey.git`, branch `codex/native-consolidated`. Merge `5e35d4d` preserves native starter `bc34efbf88b95c726da3fe8e1eb3dcb69120bb3c` and remote main `f265a5ad2c44b933d6da4aafc752c9c6c8646a83`. Implementation commit `a4a08dfcd365acd3d0ed1d8b237a6a2185871628` was pushed to the feature branch and independently read back with `git ls-remote`; remote main remained unchanged. Existing Xcode project was retained. User scheme preferences are excluded from the implementation commit. Preservation hashes and historical failed-run logs remain under `/Users/frank/Library/Caches/Joey-Native-Build/`.
 
 Changed implementation groups: native SwiftUI intake/history/setup/progress; shared core identity, planning, acquisition, transcription, rendering, QA, checkpoints, supervision and delivery; standalone runner; dependency-free test harness; active specification, operating guide and helper provenance. No production media, transcripts, credentials or models are included in Git.
 
