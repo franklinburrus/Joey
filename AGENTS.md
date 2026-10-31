@@ -45,3 +45,7 @@ The vendored Caveman and Ultracave files are response instructions only.
 Their source and hashes are recorded in `third_party/caveman/provenance.json`.
 Keep their licenses and NOTICE. They do not require a Caveman runtime,
 Caveman Cloud, paid API, proxy, global Codex changes or Joey runtime dependency.
+
+## Current native product direction
+
+Read `docs/STATUS.md`, `docs/REQUIREMENTS.md`, and `docs/IMPLEMENTATION_PLAN.md`. REQUIREMENTS is the sole current product specification; the consolidated user request supersedes historical Python architecture, platform-specific variants, old destinations and human-QA holds. Keep temporary progress in STATUS. Use the existing SwiftUI/Xcode project; local media tools are helpers, not a browser application runtime.
