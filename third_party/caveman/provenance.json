@@ -1,0 +1,37 @@
+{
+  "repository": "https://github.com/JuliusBrussee/caveman",
+  "tag": "v3.2.0",
+  "commit": "e20f07e8152a0c0360f58c09e79d30ac94329991",
+  "files": [
+    {
+      "path": ".agents/skills/caveman/SKILL.md",
+      "upstream_path": "skills/caveman/SKILL.md",
+      "git_blob_sha1": "9a94044529e5ee1576361c891b4a271504518e6f",
+      "modified": false
+    },
+    {
+      "path": ".agents/skills/ultracave/SKILL.md",
+      "upstream_path": "skills/ultracave/SKILL.md",
+      "git_blob_sha1": "136db7e5c8804043c5329df8f767789b7d30228f",
+      "modified": false
+    },
+    {
+      "path": "third_party/caveman/LICENSE",
+      "upstream_path": "LICENSE",
+      "git_blob_sha1": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+      "modified": false
+    },
+    {
+      "path": "third_party/caveman/LICENSE-MIT",
+      "upstream_path": "LICENSE-MIT",
+      "git_blob_sha1": "d8c0ee8a752aeb14ee42044c3238e191f7571ac6",
+      "modified": false
+    },
+    {
+      "path": "third_party/caveman/NOTICE",
+      "upstream_path": "NOTICE",
+      "git_blob_sha1": "5b6c03199300662964c1c27906d9bdff47349e26",
+      "modified": false
+    }
+  ]
+}
