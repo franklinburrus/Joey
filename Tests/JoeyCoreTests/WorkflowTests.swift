@@ -2,6 +2,36 @@ import XCTest
 @testable import JoeyCore
 
 final class WorkflowTests: XCTestCase {
+    func testAcquisitionCommandsIgnoreAmbientDownloaderConfiguration() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {try? FileManager.default.removeItem(at:root)}
+        let config = root.appendingPathComponent(".config/yt-dlp/config")
+        try FileManager.default.createDirectory(at:config.deletingLastPathComponent(),withIntermediateDirectories:true)
+        // Deliberately invalid and harmless: proves configuration loading without
+        // running hooks, changing the user's configuration, or using a provider.
+        try Data("--joey-synthetic-configuration-canary\n".utf8).write(to:config)
+        let source = URL(string:"https://www.youtube.com/watch?v=abcdefghijk")!
+        let commands = [Acquisition.metadataArguments(for:source),Acquisition.downloadArguments(for:source,directory:root)]
+        for arguments in commands {
+            do {
+                _ = try await Processes.run("yt-dlp",arguments.filter {$0 != "--ignore-config"}+["--list-extractors"],
+                    environment:["HOME":root.path])
+                XCTFail("Synthetic user configuration was not loaded by the negative control")
+            } catch {
+                XCTAssertTrue(error.localizedDescription.contains("--joey-synthetic-configuration-canary"),error.localizedDescription)
+            }
+            do {
+                // Listing built-in extractor classes exits after configuration
+                // parsing, before extraction or any provider request.
+                let result = try await Processes.run("yt-dlp",arguments+["--list-extractors"],environment:["HOME":root.path])
+                XCTAssertEqual(result.status,0)
+                XCTAssertFalse(result.stdout.isEmpty)
+            } catch {XCTFail("Acquisition loaded ambient downloader configuration: \(error.localizedDescription)")}
+        }
+        XCTAssertEqual(try String(contentsOf:config,encoding:.utf8),"--joey-synthetic-configuration-canary\n")
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath:root.path).contains {$0.hasPrefix("original.")})
+    }
+
     func testSelectedDurationSurvivesRequestAndControlsBothPlanningPaths() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)

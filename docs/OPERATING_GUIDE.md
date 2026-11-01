@@ -2,13 +2,13 @@
 
 ## Start a job
 
-Open Joey Native.app. Choose New job, choose DUB or Taxstone, select the authorized original or enter its direct YouTube/X URL, and supply its stable source ID, source title and authorization basis. Use the complete local original when already available. Supply the verified existing archive file link when available; the app checks its bytes before reusing it. Full-show coverage is the default. Highlights are explicit and may specify a count. Imported job requests can also specify exact intervals, verified episode date evidence, a source-bound transcript and artwork bindings.
+Open Joey Native.app, choose Import Link, paste the original YouTube/X URL and choose DUB, Taxstone or Joe Budden. Source identity and metadata are resolved from that link. Full-show coverage is the default; DUB/Taxstone Highlights explicitly selects one highlight per 15-minute source block, including the final partial block. Advanced Settings accepts an existing full-length archive link and source-bound transcript. Complete-original filing is required before new production clips. Imported legacy job requests retain local-source recovery and may specify exact intervals, verified date evidence and artwork bindings.
 
-Unknown dates stay `Date Unknown`. Uncertain ad material stays in the program. Full-show planning targets 8–10 minutes, constrained by verified shared limits, and preserves short sources/remainders. Native clips contain the original picture/audio with proportional black padding and no new branding. Audio uses its approved presentation and source-driven fixed-position bars. Taxstone art must match the episode; it never falls back to DUB artwork.
+Unknown dates stay `Date Unknown`. Uncertain ad material stays in the program. Full-show planning targets 8–10 minutes, constrained by verified shared limits, and preserves retained coverage. The Buffer shared profile enforces measured 5–139.9-second clips; plans reserve encoder tolerance and rebalance remainders. DUB/Taxstone native clips preserve original picture/audio with proportional black padding and no new branding. Joe Budden's separate Drive-only workflow uses 8–10-minute source-content clips with the approved DUB logo and complete outro, as required by the later product amendment. Audio uses its approved presentation and source-driven fixed-position bars. Taxstone art must match the episode; it never falls back to DUB artwork.
 
 ## One-time operational setup
 
-Import a verified shared profile through Setup. It records each platform's actual account, upload surface, checked/expiry dates, maximum duration, dimensions, file size and frame rate, official documentation URLs and a local evidence file/hash. A historical `verified` flag is insufficient. The app selects 1080×1920 only when both records allow it, otherwise 720×1280. A JSON profile is configuration evidence, not an assertion that platform ingestion has succeeded. Never populate production settings with the test fixture profile.
+Open Production Configuration for the selected owner, or Taxstone Production Setup from the library. DUB and Taxstone profiles remain separate. Setup records each platform's actual account, upload surface, checked/expiry dates, maximum duration, dimensions, file size and frame rate, official documentation URLs and a local evidence file/hash. A historical `verified` flag is insufficient. The app selects 1080×1920 only when both records allow it, otherwise 720×1280. Profile evidence does not establish successful platform ingestion. Never populate production settings with the test fixture profile.
 
 Local settings are at `~/Library/Application Support/Joey Native/settings.json`. Initial setup locates the existing local Python Whisper environment/model, installs the bundled ASR adapter into the app-owned helpers directory, and reuses verified DUB artwork. Configure a different existing local Python/model path there when needed. Approved Taxstone episode bindings are keyed by exact source ID; known matching art is copied byte-for-byte into the owned asset catalog. When absent, Joey inspects the configured catalog and established Drive asset locations and reports the exact dependency.
 
@@ -33,10 +33,10 @@ Drive file ID/name/parent/size/MD5/link/access state are independently read back
 ## Standalone runner
 
 ```sh
-joey-run setup
-joey-run list
-joey-run check-drive
-joey-run run /absolute/path/request.json
+python3 Tools/run-local.py .build/debug/joey-run setup
+python3 Tools/run-local.py .build/debug/joey-run list
+python3 Tools/run-local.py .build/debug/joey-run check-drive
+python3 Tools/run-local.py .build/debug/joey-run run /absolute/path/request.json
 ```
 
 `--root /absolute/path` selects an isolated application-owned runtime directory for controlled acceptance. A local-only request returns `QA_PASSED`, never `COMPLETED`. CLI exit 0 means the requested local-only QA or complete delivery succeeded; consult the explicit job state. Runtime JSON, media, logs, models and credentials belong outside Git.

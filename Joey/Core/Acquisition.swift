@@ -1,6 +1,13 @@
 import Foundation
 
 public enum Acquisition {
+    static func metadataArguments(for url: URL) -> [String] {
+        ["--ignore-config","--no-playlist","--skip-download","--dump-single-json",url.absoluteString]
+    }
+    static func downloadArguments(for url: URL, directory: URL) -> [String] {
+        ["--ignore-config","--no-playlist","--continue","--no-overwrites","--retries","3","--fragment-retries","3",
+         "--write-info-json","--merge-output-format","mp4","-o",directory.appendingPathComponent("original.%(ext)s").path,url.absoluteString]
+    }
     public static func validateOriginalURL(_ raw: String) throws -> URL {
         guard let u = URL(string:raw), u.scheme == "https", u.user == nil, u.password == nil,
               let host = u.host?.lowercased(), ["youtube.com","www.youtube.com","youtu.be","x.com","www.x.com","twitter.com"].contains(host) else {
@@ -23,7 +30,7 @@ public enum Acquisition {
         let url = try validateOriginalURL(raw)
         let metadataURL = directory.appendingPathComponent("acquisition.json")
         let metadata = try await Processes.retry {
-            try await Processes.run("yt-dlp",["--no-playlist","--skip-download","--dump-single-json",url.absoluteString])
+            try await Processes.run("yt-dlp",metadataArguments(for:url))
         }
         let object = try JSONSerialization.jsonObject(with:metadata.stdout) as? [String:Any]
         guard let expected = object?["duration"] as? Double, expected > 0,
@@ -34,8 +41,7 @@ public enum Acquisition {
         try metadata.stdout.write(to: metadataURL, options:.atomic)
         try Persistence.checkDisk(at:directory,requiredBytes:Int64(expected*1_500_000))
         _ = try await Processes.retry {
-            try await Processes.run("yt-dlp",["--no-playlist","--continue","--no-overwrites","--retries","3","--fragment-retries","3",
-                "--write-info-json","--merge-output-format","mp4","-o",directory.appendingPathComponent("original.%(ext)s").path,url.absoluteString])
+            try await Processes.run("yt-dlp",downloadArguments(for:url,directory:directory))
         }
         let files = try FileManager.default.contentsOfDirectory(at:directory,includingPropertiesForKeys:nil)
             .filter { $0.deletingPathExtension().lastPathComponent == "original" && ["mp4","mkv","webm","m4a","mp3","opus"].contains($0.pathExtension) }

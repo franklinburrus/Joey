@@ -2,6 +2,9 @@ import Foundation
 import CoreGraphics
 
 public struct StreamInfo: Codable, Equatable, Sendable {
+    public struct SideData: Codable, Equatable, Sendable {
+        public var rotation: Double?
+    }
     public var index: Int?
     public var codec_type: String?
     public var codec_name: String?
@@ -17,6 +20,7 @@ public struct StreamInfo: Codable, Equatable, Sendable {
     public var channels: Int?
     public var sample_rate: String?
     public var bit_rate: String?
+    public var side_data_list: [SideData]?
     public var fps: Double {
         let p = (avg_frame_rate ?? "0/1").split(separator:"/").compactMap { Double($0) }
         return p.count == 2 && p[1] != 0 ? p[0]/p[1] : (p.first ?? 0)
@@ -109,6 +113,11 @@ public enum Media {
         guard ends.count == media.count,let end = ends.max(),end > origin else {throw JoeyError.failed("Cannot establish the source's actual timestamped timeline extent")}
         return (end-origin,streams)
     }
+    static func validateVideoMapping(_ streams: [StreamInfo]) throws {
+        guard streams.filter({$0.codec_type == "video"}).count <= 1 else {
+            throw JoeyError.dependency("Multiple source video tracks require an explicit preservation mapping")
+        }
+    }
     public static func inspect(_ url: URL, request: JobRequest) async throws -> SourceRecord {
         let p = try await probe(url)
         let timeline = try await sourceTimeline(url,probe:p)
@@ -116,6 +125,7 @@ public enum Media {
             guard expected.isFinite, abs(timeline.duration-expected) <= max(0.1,expected*0.001) else { throw JoeyError.invalid("Incomplete source: duration conflicts with source evidence") }
         }
         guard p.streams.filter({$0.codec_type == "audio"}).count <= 1 else { throw JoeyError.dependency("Multiple source audio tracks require an explicit preservation mapping") }
+        try validateVideoMapping(p.streams)
         guard p.streams.allSatisfy({$0.codec_type != "subtitle"}) else { throw JoeyError.dependency("Separate subtitle stream needs a preservation mapping; source has not been changed") }
         try await decode(url)
         let attrs = try FileManager.default.attributesOfItem(atPath:url.path)
@@ -183,6 +193,24 @@ public enum Media {
     static func fitFilter(_ profile: SharedProfile) -> String {
         "fps=30,scale=w='min(iw,\(profile.width))':h='min(ih,\(profile.height))':force_original_aspect_ratio=decrease:force_divisible_by=2:reset_sar=1,pad=\(profile.width):\(profile.height):(ow-iw)/2:(oh-ih)/2:black,setsar=1,format=yuv420p"
     }
+    static func fittedPictureDimensions(_ video: StreamInfo, profile: SharedProfile) throws -> (width: Int, height: Int) {
+        guard let codedWidth = video.width, let codedHeight = video.height, codedWidth > 0, codedHeight > 0 else {
+            throw JoeyError.failed("Source picture display dimensions are unavailable")
+        }
+        let parts = (video.sample_aspect_ratio ?? "1:1").split(separator:":").compactMap {Double($0)}
+        let ratio = parts.count == 2 && parts[0] > 0 && parts[1] > 0 ? parts[0]/parts[1] : 1
+        guard ratio.isFinite, ratio > 0 else {throw JoeyError.failed("Source picture sample aspect is invalid")}
+        var width = Double(codedWidth), height = Double(codedHeight), aspect = ratio
+        let rotation = video.side_data_list?.compactMap(\.rotation).first ?? 0
+        // FFmpeg autorotation precedes the fit filter. Quarter turns swap both
+        // coded axes and the pixel aspect; other display rotations keep its
+        // decoded frame dimensions. The output is always square-pixel video.
+        let turn = abs(rotation.truncatingRemainder(dividingBy:180))
+        if abs(turn-90) < 0.001 {swap(&width,&height); aspect = 1/aspect}
+        let displayWidth = width*aspect
+        let scale = min(min(width,Double(profile.width))/displayWidth,min(height,Double(profile.height))/height)
+        return (Int(displayWidth*scale/2)*2,Int(height*scale/2)*2)
+    }
     static func nativeFilter(_ source: SourceRecord, _ clip: ClipRecord, _ profile: SharedProfile) -> String {
         var filters: [String] = []
         for i in clip.intervals.indices {
@@ -218,6 +246,7 @@ public enum Media {
     }
     public static func render(source: SourceRecord, clip: ClipRecord, profile: SharedProfile, artwork: Artwork?, work: URL, output: URL, branding: JoeBranding? = nil) async throws -> RenderReceipt {
         try Task.checkCancellation()
+        try validateVideoMapping(source.streams)
         try FileManager.default.createDirectory(at:work,withIntermediateDirectories:true)
         try Persistence.checkDisk(at:work,requiredBytes:StorageManager.peakBytes(duration:clip.expectedDuration,sourceBytes:0,clipDuration:clip.expectedDuration+(branding?.outroDuration ?? 0),audio:source.kind == .audio))
         var receipt = RenderReceipt(pictureWidth:0,pictureHeight:0)
@@ -227,9 +256,13 @@ public enum Media {
             receipt.joeBranding = branding;receipt.recipe = "joe-dub-lower-left-and-approved-outro-v1"
         }
         let outputDuration = clip.expectedDuration + (branding?.outroDuration ?? 0)
-        let scale = min(1,min(Double(profile.width)/Double(max(1,source.width)),Double(profile.height)/Double(max(1,source.height))))
-        receipt.pictureWidth = Int(Double(source.width)*scale/2)*2
-        receipt.pictureHeight = Int(Double(source.height)*scale/2)*2
+        if source.kind == .nativeVideo {
+            // Re-probe display metadata so older source checkpoints, which did
+            // not serialize display matrices, remain recoverable unchanged.
+            guard let video = try await probe(URL(fileURLWithPath:source.path)).video else {throw JoeyError.failed("Native source picture is unavailable")}
+            let picture = try fittedPictureDimensions(video,profile:profile)
+            receipt.pictureWidth = picture.width;receipt.pictureHeight = picture.height
+        }
         let input = intervalInputs(source:source,intervals:clip.intervals)
         if source.hasAudio {
             let selected = work.appendingPathComponent("selected.wav")
@@ -373,6 +406,9 @@ public enum Media {
         var offset = 0.0, comparisons = 0
         let width = render.pictureWidth, height = render.pictureHeight
         guard width > 0, height > 0, width <= profile.width, height <= profile.height else {throw JoeyError.failed("Source picture timeline geometry is absent")}
+        guard let video = probe.video else {throw JoeyError.failed("Source picture timeline stream is absent")}
+        let picture = try fittedPictureDimensions(video,profile:profile)
+        guard width == picture.width, height == picture.height else {throw JoeyError.failed("Source picture timeline geometry conflicts with display metadata")}
         var comparison = "scale=160:90,format=gray"
         if render.joeBranding != nil {
             // Map only the approved logo footprint into the fitted picture
@@ -413,6 +449,7 @@ public enum Media {
             + (render.joeBranding == nil ? "" : "; only the approved logo footprint masked during source content; outro checked separately")
     }
     public static func validate(output: URL, source: SourceRecord, clip: ClipRecord, profile: SharedProfile, render: RenderReceipt, work: URL) async throws -> QAReport {
+        try validateVideoMapping(source.streams)
         try await decode(output)
         let p = try await probe(output)
         let branding = render.joeBranding

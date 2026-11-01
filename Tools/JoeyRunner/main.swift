@@ -6,49 +6,46 @@ import JoeyCore
         if ProcessSupervisor.handleInvocation() {return}
         do {
             let args = Array(CommandLine.arguments.dropFirst())
-            let root: URL
-            if let i = args.firstIndex(of:"--root"), i+1 < args.count {root = URL(fileURLWithPath:args[i+1])}
-            else {root = Persistence.defaultRoot}
-            let coordinator = try Coordinator(root:root)
-            guard let command = args.first else {
+            guard !args.isEmpty else {
                 print("Usage: joey-run run REQUEST.json [--root PATH] | list [--root PATH] | setup [--root PATH]")
                 return
             }
-            switch command {
-            case "storage":
+            let invocation = try RunnerArguments(args)
+            let root = invocation.root
+            let coordinator = try Coordinator(root:root)
+            switch invocation.command {
+            case .storage:
                 print(String(decoding:try Persistence.encoder.encode(StorageManager.inspect(root:root)),as:UTF8.self))
-            case "storage-clean":
+            case .storageClean:
                 print(String(decoding:try Persistence.encoder.encode(StorageManager.clean(root:root)),as:UTF8.self))
-            case "taxstone-inventory":
+            case .taxstoneInventory:
                 let library = try TaxstoneLibrary(root:root)
                 let state = try await library.inventory()
                 print(String(decoding:try Persistence.encoder.encode(state),as:UTF8.self))
-            case "taxstone-run":
+            case .taxstoneRun:
                 let library = try TaxstoneLibrary(root:root)
-                let limit = args.firstIndex(of:"--limit").flatMap {$0+1 < args.count ? Int(args[$0+1]):nil}
-                let state = try await library.run(limit:limit,jobProgress:{job in print("\(job.id): \(job.stage) \(job.error ?? "")")})
+                let state = try await library.run(limit:invocation.limit,jobProgress:{job in print("\(job.id): \(job.stage) \(job.error ?? "")")})
                 print("Discovered: \(state.discoveredCount); completed: \(state.completedCount); remaining: \(state.remainingCount)")
-            case "check-drive":
+            case .checkDrive:
                 let config = try Configuration.load(root:root)
                 let delivery = try DriveDelivery(remote:config.rcloneRemote)
                 let result = try await delivery.preflight(tab:config.registerTab)
                 for key in result.keys.sorted() {print("\(key): \(result[key]!)")}
-            case "setup":
+            case .setup:
                 let config = try Configuration.load(root:root)
                 print("Settings: \(root.appendingPathComponent("settings.json").path)")
                 print("Local ASR: \(config.modelPath == nil ? "missing":"found"); shared profile: \(config.profile == nil ? "requires account evidence":"configured")")
-            case "list":
+            case .list:
                 let jobs = try await coordinator.jobs()
                 print(String(decoding:try Persistence.encoder.encode(jobs),as:UTF8.self))
-            case "run":
-                guard args.count >= 2 else {throw JoeyError.invalid("Request path required")}
-                let request: JobRequest = try Persistence.load(URL(fileURLWithPath:args[1]))
+            case .run:
+                guard let path = invocation.request else {throw JoeyError.invalid("Request path required")}
+                let request: JobRequest = try Persistence.load(path)
                 let job = try await coordinator.run(request) {job in
                     print("\(job.state.rawValue): \(job.stage)\(job.error.map {" — "+$0} ?? "")")
                 }
                 print("Checkpoint: \(root.appendingPathComponent("jobs/"+job.id+"/job.json").path)")
                 if job.state != .completed && !(job.state == .qaPassed && !request.fileToDrive) {exit(1)}
-            default: throw JoeyError.invalid("Unknown command: \(command)")
             }
         } catch {FileHandle.standardError.write(Data((error.localizedDescription+"\n").utf8));exit(1)}
     }

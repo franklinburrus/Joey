@@ -76,9 +76,9 @@ public final class BufferHandoffStore: @unchecked Sendable {
             // An exported handoff may already be in another GPT session. Reuse its
             // immutable identity even when receipts have not returned yet.
             let existing = state.batches.last(where:{$0.selection == normalized})
-            if let existing, existing.evidenceValidUntil.map({$0 > now}) == true,
-               !state.receipts.contains(where:{r in existing.operations.contains {$0.id == r.operationID}}),
-               existing.operations.allSatisfy({$0.state == .prepared && state.prepared[$0.clip.key]?.sha256 == $0.clip.sha256}) {return existing}
+            // Rebuild eligibility from the latest preparation and channel evidence
+            // before reusing an export. An unchanged output hash cannot override a
+            // newer failed preflight or a disconnected/locked channel observation.
             let parentID = existing?.id ?? UUID().uuidString
             var operations: [BufferOperation] = []
             for key in normalized.clipKeys {
@@ -223,7 +223,7 @@ public final class BufferHandoffStore: @unchecked Sendable {
         return batch.operations.filter {op in
             guard let receipt = state.receipts.last(where:{$0.operationID == op.id && $0.batchID == batch.id && $0.manifestSHA256 == batch.manifestSHA256}) else {return true}
             return receipt.reconciliationState != .reconciled || receipt.providerState == .error ||
-                (op.requestedMode == .draft && receipt.providerState != .draft)
+                (op.requestedMode == .draft ? receipt.providerState != .draft : receipt.providerState == .draft)
         }.count
     }
 }

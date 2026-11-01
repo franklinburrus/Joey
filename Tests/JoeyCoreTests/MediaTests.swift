@@ -2,6 +2,102 @@ import XCTest
 @testable import JoeyCore
 
 final class MediaTests: XCTestCase {
+    private func assertDisplayGeometry(sampleAspect: String, rotation: Int?, width: Int, height: Int) async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("joey-geometry-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:dir)}
+        let encoded = dir.appendingPathComponent("encoded.mp4")
+        _ = try await Processes.run("ffmpeg",["-v","error","-f","lavfi","-i","testsrc2=s=320x180:r=30:d=2",
+            "-vf","setsar=\(sampleAspect)","-c:v","libx264","-pix_fmt","yuv420p",encoded.path])
+        let sourceURL: URL
+        if let rotation {
+            sourceURL = dir.appendingPathComponent("rotated.mp4")
+            _ = try await Processes.run("ffmpeg",["-v","error","-display_rotation",String(rotation),"-i",encoded.path,"-c","copy",sourceURL.path])
+        } else {sourceURL = encoded}
+        var source = try await Media.inspect(sourceURL,request:Fixtures.request(dir:dir,path:sourceURL.path))
+        XCTAssertEqual(source.kind,.nativeVideo)
+        if let rotation {
+            XCTAssertEqual(source.streams.first(where: {$0.codec_type == "video"})?.side_data_list?.compactMap(\.rotation).first,Double(rotation),"The fixture must carry actual display rotation")
+            // Legacy checkpoints did not serialize display matrices. Rendering
+            // must recover metadata from the unchanged original, not rerun intake.
+            for index in source.streams.indices {source.streams[index].side_data_list = nil}
+        }
+        let profile = try Fixtures.profile(dir:dir)
+        let clip = ClipRecord(id:1,title:"Display geometry",intervals:[Interval(0,2)],filename:"clip.mp4")
+        let output = dir.appendingPathComponent(clip.filename)
+        let render = try await Media.render(source:source,clip:clip,profile:profile,artwork:nil,work:dir,output:output)
+        XCTAssertEqual(render.pictureWidth,width,"Effective picture width must describe the displayed source, not coded pixels")
+        XCTAssertEqual(render.pictureHeight,height,"Effective picture height must include sample aspect and display rotation")
+        let qa = try await Media.validate(output:output,source:source,clip:clip,profile:profile,render:render,work:dir)
+        XCTAssertTrue(qa.passed,"A correctly fitted source must pass the independent picture-timing check")
+    }
+
+    func testAnamorphicSourceRetainsDisplayProportionsAndPassesQA() async throws {
+        try await assertDisplayGeometry(sampleAspect:"2/1",rotation:nil,width:320,height:90)
+    }
+
+    func testRotatedSourceRetainsDisplayOrientationAndPassesQA() async throws {
+        try await assertDisplayGeometry(sampleAspect:"1/1",rotation:90,width:180,height:320)
+    }
+
+    func testInspectionRejectsUnmappedMultipleVideoTracks() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("joey-multivideo-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:dir)}
+        let source = dir.appendingPathComponent("two-angles.mp4")
+        _ = try await Processes.run("ffmpeg",["-v","error","-f","lavfi","-i","testsrc2=s=160x90:r=30:d=1",
+            "-f","lavfi","-i","testsrc2=s=128x96:r=30:d=1","-map","0:v","-map","1:v","-c:v","libx264","-pix_fmt","yuv420p",source.path])
+        do {
+            _ = try await Media.inspect(source,request:Fixtures.request(dir:dir,path:source.path))
+            XCTFail("A second source video track would be silently omitted by the single-video render mapping")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("video tracks") && error.localizedDescription.contains("preservation mapping"),"Unexpected inspection error: \(error)")
+        }
+    }
+
+    func testSingleArtworkVideoStreamRemainsAudioContent() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("joey-audio-artwork-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:dir)}
+        let source = dir.appendingPathComponent("artwork.mp4")
+        _ = try await Processes.run("ffmpeg",["-v","error","-f","lavfi","-i","color=blue:s=160x90:r=30:d=1",
+            "-f","lavfi","-i","sine=frequency=440:duration=1","-c:v","libx264","-pix_fmt","yuv420p","-c:a","aac",source.path])
+        let inspected = try await Media.inspect(source,request:Fixtures.request(dir:dir,path:source.path))
+        XCTAssertEqual(inspected.kind,.audio)
+        XCTAssertTrue(inspected.hasAudio)
+    }
+
+    func testResumedMultivideoCheckpointCannotRenderOrPassQA() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("joey-multivideo-resume-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:dir)}
+        let sourceURL = dir.appendingPathComponent("two-angles.mp4")
+        _ = try await Processes.run("ffmpeg",["-v","error","-f","lavfi","-i","testsrc2=s=160x90:r=30:d=1",
+            "-f","lavfi","-i","testsrc2=s=128x96:r=30:d=1","-map","0:v","-map","1:v","-c:v","libx264","-pix_fmt","yuv420p",sourceURL.path])
+        let probe = try await Media.probe(sourceURL)
+        // Older inspection accepted both visual tracks. Its saved source can
+        // reach render or partial-output QA without another inspection.
+        let legacy = SourceRecord(id:"two-angles",owner:.dub,title:"Two source angles",path:sourceURL.path,
+            bytes:Int64(try Data(contentsOf:sourceURL).count),sha256:try Integrity.sha256(sourceURL),duration:1,
+            width:160,height:90,fps:30,hasAudio:false,kind:.nativeVideo,streams:probe.streams,
+            authorizationBasis:"Generated test media",classificationEvidence:"Legacy multiple-track inspection")
+        let profile = try Fixtures.profile(dir:dir)
+        let clip = ClipRecord(id:1,title:"Two angles",intervals:[Interval(0,1)],filename:"clip.mp4")
+        do {
+            _ = try await Media.render(source:legacy,clip:clip,profile:profile,artwork:nil,work:dir,output:dir.appendingPathComponent(clip.filename))
+            XCTFail("Resuming an old source checkpoint silently discarded its second video track")
+        } catch {XCTAssertTrue(error.localizedDescription.contains("preservation mapping"),"Unexpected render error: \(error)")}
+
+        let partial = dir.appendingPathComponent("legacy-partial.mp4")
+        _ = try await Processes.run("ffmpeg",["-v","error","-i",sourceURL.path,"-map","0:v:0","-vf",
+            "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,setsar=1","-c:v","libx264","-pix_fmt","yuv420p","-movflags","+faststart",partial.path])
+        do {
+            _ = try await Media.validate(output:partial,source:legacy,clip:clip,profile:profile,
+                render:RenderReceipt(pictureWidth:160,pictureHeight:90),work:dir)
+            XCTFail("QA accepted a legacy output after a source video track was silently omitted")
+        } catch {XCTAssertTrue(error.localizedDescription.contains("preservation mapping"),"Unexpected QA error: \(error)")}
+    }
+
     func testAudioFidelityUsesPlannedIntervalAndStillRejectsDamage() throws {
         // A decoder/resampler can produce a few samples after an exact cut.
         // These are not source coverage and cannot form a fidelity window.

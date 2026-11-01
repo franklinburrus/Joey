@@ -11,14 +11,28 @@ final class TaxstoneReuseRegressionTests: XCTestCase {
         try fm.createDirectory(at:job,withIntermediateDirectories:true)
         var request = try Fixtures.request(dir:base,path:"unused")
         request.owner = .taxstone
+        let artwork = base.appendingPathComponent("artwork.fixture")
+        try Data("Synthetic artwork identity for cached QA".utf8).write(to:artwork)
         request.artwork = Artwork(owner:.taxstone,sourceID:request.sourceID,driveID:"synthetic_artwork",
-            file:EvidenceFile(path:"unused",sha256:"synthetic",basis:"Synthetic reuse fixture only"))
+            file:EvidenceFile(path:artwork.path,sha256:try Integrity.sha256(artwork),basis:"Synthetic reuse fixture only"))
         let source = SourceRecord(id:request.sourceID,owner:.taxstone,title:"Synthetic episode",path:"unused",bytes:1,
             sha256:"synthetic-source",duration:12,width:0,height:0,fps:0,hasAudio:true,kind:.audio,streams:[],
             authorizationBasis:"Synthetic reuse fixture only",classificationEvidence:"Synthetic audio")
         let transcript = Transcript(sourceID:source.id,sourceSHA256:source.sha256,duration:12,engine:"synthetic",
             segments:(0..<12).map {TranscriptSegment(start:Double($0),end:Double($0+1),text:"Sentence \($0).")})
         return (base,job,request,source,transcript)
+    }
+
+    private func cache(_ qa: QAReport, driveID: String, intervals: [Interval], request: JobRequest,
+                       source: SourceRecord, transcript: Transcript, job: URL) throws {
+        let title = transcript.segments.first {segment in
+            intervals.contains {segment.start >= $0.start && segment.end <= $0.end}
+        }?.text ?? source.title
+        let clip = ClipRecord(id:0,title:String(title.split(separator:" ").prefix(12).joined(separator:" ")),
+            intervals:intervals,filename:"candidate.mp4")
+        let accepted = TaxstoneReuseAcceptance(source:source,clip:clip,profile:request.profile,
+            artwork:try XCTUnwrap(request.artwork),qa:qa)
+        try Persistence.save(accepted,to:job.appendingPathComponent("legacy-reuse/\(driveID)/accepted-qa-bound.json"))
     }
 
     func testUnsafeImportedIDsNeverCreatePathsOrCallProvider() async throws {
@@ -40,7 +54,7 @@ final class TaxstoneReuseRegressionTests: XCTestCase {
             }
             XCTAssertFalse(fm.fileExists(atPath:job.appendingPathComponent("legacy-reuse").path),id)
             XCTAssertFalse(fm.fileExists(atPath:base.appendingPathComponent("escaped").path),id)
-            XCTAssertEqual(Set(try fm.contentsOfDirectory(atPath:base.path)),["job","capability-evidence.txt"],id)
+            XCTAssertEqual(Set(try fm.contentsOfDirectory(atPath:base.path)),["job","capability-evidence.txt","artwork.fixture"],id)
             let calls = await provider.calls
             XCTAssertEqual(calls,[],id)
         }
@@ -150,7 +164,7 @@ final class TaxstoneReuseRegressionTests: XCTestCase {
                 let id = "synthetic_legacy_object_\(index)"
                 let qa = QAReport(checkedAt:Date(timeIntervalSince1970:1_000),checks:["provider_identity":id],
                     outputSHA256:hash,passed:true,limitations:["Synthetic cached acceptance for reuse planning only"])
-                try Persistence.save(qa,to:job.appendingPathComponent("legacy-reuse/\(id)/accepted-qa.json"))
+                try cache(qa,driveID:id,intervals:intervals,request:request,source:source,transcript:transcript,job:job)
                 return TaxstoneReuseInput(driveID:id,intervals:intervals,sourceSHA256:source.sha256,
                     md5:md5,evidence:"Synthetic accepted object")
             }
@@ -193,6 +207,49 @@ final class TaxstoneReuseRegressionTests: XCTestCase {
         }
     }
 
+    func testSameProviderObjectCannotReuseQAForDifferentSourceIntervals() async throws {
+        let (base,job,initial,_,_) = try fixture()
+        defer {try? fm.removeItem(at:base)}
+        let original = base.appendingPathComponent("source.wav")
+        let artworkURL = base.appendingPathComponent("artwork.png")
+        _ = try await Processes.run("ffmpeg",["-v","error","-f","lavfi","-i",
+            "aevalsrc=0.25*sin(2*PI*(440+220*floor(t))*t):s=48000:d=3",original.path])
+        _ = try await Processes.run("ffmpeg",["-v","error","-f","lavfi","-i","testsrc2=s=300x300",
+            "-frames:v","1",artworkURL.path])
+        var request = initial
+        request.artwork = Artwork(owner:.taxstone,sourceID:request.sourceID,driveID:"synthetic_artwork",
+            file:EvidenceFile(path:artworkURL.path,sha256:try Integrity.sha256(artworkURL),basis:"Synthetic episode artwork"))
+        let source = try await Media.inspect(original,request:request)
+        let transcript = Transcript(sourceID:source.id,sourceSHA256:source.sha256,duration:source.duration,engine:"synthetic",
+            segments:(0..<3).map {TranscriptSegment(start:Double($0),end:Double($0+1),text:"Sentence \($0).")})
+        let clip = ClipRecord(id:1,title:"Sentence 0.",intervals:[Interval(0,1)],filename:"accepted.mp4")
+        let media = base.appendingPathComponent(clip.filename)
+        _ = try await Media.render(source:source,clip:clip,profile:request.profile,artwork:request.artwork,
+            work:base,output:media)
+        let hash = try Integrity.sha256(media),md5 = try Integrity.md5(media)
+        let historicalURL = job.appendingPathComponent("legacy-reuse/\(validID)/accepted-qa.json")
+        try Persistence.save(QAReport(checkedAt:Date(timeIntervalSince1970:1_000),checks:["unbound":"historical"],
+            outputSHA256:hash,passed:true,limitations:["Unbound synthetic historical QA"]),to:historicalURL)
+        let historicalBytes = try Data(contentsOf:historicalURL)
+        request.taxstoneReuse = [Interval(0,1),Interval(2,3)].map {
+            TaxstoneReuseInput(driveID:validID,intervals:[$0],sourceSHA256:source.sha256,md5:md5,
+                evidence:"Conflicting historical mappings for the same provider object")
+        }
+        do {
+            _ = try await TaxstoneReuse.plan(request:request,source:source,transcript:transcript,exclusions:[],
+                provider:ReuseFixtureProvider(media:media,md5:md5),directory:job)
+            XCTFail("Identical legacy media was accepted for two different source intervals")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("Audio fidelity/sync failed"),error.localizedDescription)
+        }
+        XCTAssertEqual(try Integrity.sha256(media),hash)
+        XCTAssertEqual(try Integrity.sha256(job.appendingPathComponent("legacy-reuse/\(validID)/original.mp4")),hash)
+        XCTAssertEqual(try Data(contentsOf:historicalURL),historicalBytes,"Unbound historical evidence must be preserved")
+        let accepted: TaxstoneReuseAcceptance = try Persistence.load(job.appendingPathComponent("legacy-reuse/\(validID)/accepted-qa-bound.json"))
+        XCTAssertNil(accepted.qa.checks["unbound"],"Historical QA must be independently revalidated before reuse")
+        XCTAssertFalse(try fm.contentsOfDirectory(atPath:job.path).contains {$0.hasSuffix(".mp4")})
+    }
+
     func testBufferReuseCompactsAdsWithinGapsAndRejectsCachedOutOfPolicyDuration() async throws {
         let cases: [(Double,Double,Interval,[Interval],Bool)] = [
             (6,30,Interval(12,18),[Interval(1,5)],true),
@@ -214,7 +271,7 @@ final class TaxstoneReuseRegressionTests: XCTestCase {
                 segments:[TranscriptSegment(start:0,end:total,text:"Synthetic full episode.")])
             let qa = QAReport(checkedAt:Date(timeIntervalSince1970:1_000),checks:["provider_identity":validID],
                 outputSHA256:hash,passed:true,limitations:["Synthetic cached acceptance only"])
-            try Persistence.save(qa,to:job.appendingPathComponent("legacy-reuse/\(validID)/accepted-qa.json"))
+            try cache(qa,driveID:validID,intervals:[interval],request:request,source:source,transcript:transcript,job:job)
             request.taxstoneReuse = [TaxstoneReuseInput(driveID:validID,intervals:[interval],sourceSHA256:source.sha256,
                 md5:md5,evidence:"Synthetic cached acceptance")]
             let provider = ReuseFixtureProvider(media:media,md5:md5)
@@ -250,9 +307,9 @@ final class TaxstoneReuseRegressionTests: XCTestCase {
         var request = initial; request.profile.x?.surface = "Buffer synthetic test surface"
         request.taxstoneReuse = [TaxstoneReuseInput(driveID:validID,intervals:[Interval(1,7)],sourceSHA256:source.sha256,
             md5:md5,evidence:"Synthetic accepted six-second clip")]
-        try Persistence.save(QAReport(checkedAt:Date(timeIntervalSince1970:1_000),checks:[:],outputSHA256:hash,
-            passed:true,limitations:["Synthetic cached acceptance only"]),
-            to:job.appendingPathComponent("legacy-reuse/\(validID)/accepted-qa.json"))
+        try cache(QAReport(checkedAt:Date(timeIntervalSince1970:1_000),checks:[:],outputSHA256:hash,
+            passed:true,limitations:["Synthetic cached acceptance only"]),driveID:validID,intervals:[Interval(1,7)],
+            request:request,source:source,transcript:transcript,job:job)
         do {
             _ = try await TaxstoneReuse.plan(request:request,source:source,transcript:transcript,exclusions:[],
                 provider:ReuseFixtureProvider(media:media,md5:md5),directory:job)

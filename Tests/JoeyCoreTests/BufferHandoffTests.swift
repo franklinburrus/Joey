@@ -9,12 +9,13 @@ final class BufferHandoffTests: XCTestCase {
         for clip in clips {try store.savePreparation(clip)}
         var selection = BufferSelection();selection.clipKeys = clips.map(\.key);selection.platforms = [.x,.instagram]
         selection.instagramPresentation = .reelSharedToFeed;selection.instagramAcknowledged = true
-        let first = try store.generate(selection:selection,channels:channels())
+        let currentChannels = channels()
+        let first = try store.generate(selection:selection,channels:currentChannels)
         XCTAssertEqual(first.expectedOperationCount,6)
         XCTAssertEqual(first.subBatches.map { $0.operationIDs.count },[5,1])
         XCTAssertTrue(first.operations.allSatisfy {$0.state == .prepared})
         let restart = try BufferHandoffStore(root:root)
-        let repeated = try restart.generate(selection:selection,channels:channels())
+        let repeated = try restart.generate(selection:selection,channels:currentChannels)
         XCTAssertEqual(first.id,repeated.id,"Exporting twice must reuse the reservation")
         XCTAssertEqual(try restart.snapshot().batches.count,1)
         XCTAssertEqual(try restart.unresolved(first.id),6,"No receipt is not success")
@@ -55,6 +56,46 @@ final class BufferHandoffTests: XCTestCase {
         XCTAssertEqual(try store.unresolved(batch.id),1)
         var downgrade = good;downgrade.reconciliationState = .unconfirmed;downgrade.readbackAt = nil
         package.results = [downgrade];XCTAssertThrowsError(try store.importReceipts(package))
+    }
+
+    func testFailedPreflightInvalidatesAnUnexpiredPreparedManifest() throws {
+        let root = try temporaryRoot();defer {try? FileManager.default.removeItem(at:root)}
+        let store = try BufferHandoffStore(root:root)
+        var clip = try prepared(root:root,id:1)
+        try store.savePreparation(clip)
+        var selection = BufferSelection();selection.clipKeys = [clip.key]
+        let original = try store.generate(selection:selection,channels:channels())
+        let originalExport = try store.export(original)
+        clip.error = "Current Drive output is no longer accessible"
+        clip.media = nil
+        try store.savePreparation(clip)
+
+        let refreshed = try store.generate(selection:selection,channels:channels())
+
+        XCTAssertEqual(refreshed.id,original.id)
+        XCTAssertEqual(refreshed.operations[0].id,original.operations[0].id)
+        XCTAssertEqual(refreshed.operations[0].state,.blocked)
+        XCTAssertTrue(refreshed.operations[0].blockers.contains(clip.error!))
+        XCTAssertNotEqual(refreshed.manifestSHA256,original.manifestSHA256)
+        let preserved: BufferManifest = try Persistence.load(originalExport.appendingPathComponent("manifest.json"))
+        XCTAssertEqual(preserved.manifestSHA256,original.manifestSHA256)
+    }
+
+    func testChangedChannelEvidenceInvalidatesAnUnexpiredPreparedManifest() throws {
+        let root = try temporaryRoot();defer {try? FileManager.default.removeItem(at:root)}
+        let store = try BufferHandoffStore(root:root),clip = try prepared(root:root,id:1)
+        try store.savePreparation(clip)
+        var selection = BufferSelection();selection.clipKeys = [clip.key]
+        var currentChannels = channels()
+        let original = try store.generate(selection:selection,channels:currentChannels)
+        currentChannels[0].locked = true
+
+        let refreshed = try store.generate(selection:selection,channels:currentChannels)
+
+        XCTAssertEqual(refreshed.id,original.id)
+        XCTAssertEqual(refreshed.operations[0].id,original.operations[0].id)
+        XCTAssertEqual(refreshed.operations[0].state,.blocked)
+        XCTAssertEqual(refreshed.operations[0].channel?.locked,true)
     }
 
     func testInvalidChannelExpiredEvidenceAndCompetingLockBlock() throws {
@@ -121,6 +162,25 @@ final class BufferHandoffTests: XCTestCase {
         XCTAssertEqual(try store.unresolved(queue.id),1,"An earlier draft cannot complete a queue request")
         XCTAssertEqual(queue.operations[0].state,.blocked)
         XCTAssertEqual(queue.priorReceipts.first?.postID,known.postID)
+    }
+
+    func testCurrentManifestExistingDraftReceiptCannotResolveQueueOrSchedule() throws {
+        for mode in [BufferMode.queue,.scheduled] {
+            let root = try temporaryRoot();defer {try? FileManager.default.removeItem(at:root)}
+            let store = try BufferHandoffStore(root:root),clip = try prepared(root:root,id:1)
+            try store.savePreparation(clip)
+            var selection = BufferSelection();selection.clipKeys = [clip.key];selection.mode = mode
+            if mode == .scheduled {selection.scheduledAt = Date().addingTimeInterval(3600)}
+            let batch = try store.generate(selection:selection,channels:channels())
+            var known = receipt(batch,operation:batch.operations[0])
+            known.requestedMode = mode
+            known.submissionOrigin = .existingPost
+            known.submittedAt = Date().addingTimeInterval(-86400)
+            try store.importReceipts(BufferReceiptPackage(batchID:batch.id,manifestSHA256:batch.manifestSHA256,results:[known]))
+
+            XCTAssertEqual(try store.unresolved(batch.id),1,"An existing draft does not fulfill a \(mode.rawValue) request")
+            XCTAssertEqual(try store.snapshot().receipts.last?.postID,known.postID,"Keep existing provider identity for reconciliation")
+        }
     }
 
     func testExistingScheduledSentSendingAndErrorRecordsPreventRecreation() throws {

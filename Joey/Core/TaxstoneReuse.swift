@@ -16,6 +16,48 @@ protocol TaxstoneReuseProvider {
 
 extension DriveDelivery: TaxstoneReuseProvider {}
 
+/// QA proves a particular source mapping and presentation, not just output bytes.
+/// Keep the entire binding and report in one atomic receipt so interruption cannot
+/// pair a new report with an older interval or artwork identity.
+struct TaxstoneReuseAcceptance: Codable {
+    private struct Context: Codable, Equatable {
+        var sourceID: String
+        var owner: Owner
+        var sourceSHA256: String
+        var sourceDuration: Double
+        var sourceKind: MediaKind
+        var hasAudio: Bool
+        var intervals: [Interval]
+        var title: String
+        var profile: SharedProfile
+        var artworkOwner: Owner
+        var artworkSourceID: String?
+        var artworkDriveID: String
+        var artworkSHA256: String
+
+        init(source: SourceRecord, clip: ClipRecord, profile: SharedProfile, artwork: Artwork) {
+            sourceID = source.id; owner = source.owner; sourceSHA256 = source.sha256
+            sourceDuration = source.duration; sourceKind = source.kind; hasAudio = source.hasAudio
+            intervals = clip.intervals; title = clip.title; self.profile = profile.identityContract
+            artworkOwner = artwork.owner; artworkSourceID = artwork.sourceID
+            artworkDriveID = artwork.driveID; artworkSHA256 = artwork.file.sha256
+        }
+    }
+    private var version: Int
+    private var context: Context
+    var qa: QAReport
+
+    init(source: SourceRecord, clip: ClipRecord, profile: SharedProfile, artwork: Artwork, qa: QAReport) {
+        version = 1
+        context = Context(source:source,clip:clip,profile:profile,artwork:artwork)
+        self.qa = qa
+    }
+
+    func matches(source: SourceRecord, clip: ClipRecord, profile: SharedProfile, artwork: Artwork) -> Bool {
+        version == 1 && context == Context(source:source,clip:clip,profile:profile,artwork:artwork)
+    }
+}
+
 /// Reconcile legacy candidates through the existing media QA. No historical
 /// approved flag or filename can bypass source audio, artwork, waveform or profile checks.
 public enum TaxstoneReuse {
@@ -78,13 +120,16 @@ public enum TaxstoneReuse {
                     try workspace.save(["status":"INCOMPATIBLE","reason":error.localizedDescription,"driveID":candidate.driveID],to:resultURL)
                     continue
                 }
-                let qaURL = work.appendingPathComponent("accepted-qa.json")
+                // Historical accepted-qa.json lacks input bindings. Preserve it,
+                // but independently validate its media before issuing a bound receipt.
+                let qaURL = work.appendingPathComponent("accepted-qa-bound.json")
                 try workspace.check(qaURL)
-                let cached: QAReport? = try? Persistence.load(qaURL)
+                let cached: TaxstoneReuseAcceptance? = try? Persistence.load(qaURL)
                 var qa: QAReport
-                if let cached,cached.passed,try Integrity.sha256(local) == cached.outputSHA256 {
-                    // Work belongs to this immutable job request, source and profile.
-                    qa = cached
+                if let cached,cached.matches(source:source,clip:clip,profile:request.profile,artwork:artwork),
+                   cached.qa.passed,try Integrity.sha256(local) == cached.qa.outputSHA256 {
+                    try artwork.file.validate()
+                    qa = cached.qa
                 } else {
                     try workspace.checkTree(work)
                     let reference = try await Media.audioReference(source:source,clip:clip,profile:request.profile,artwork:artwork,output:local,work:work)
@@ -95,7 +140,7 @@ public enum TaxstoneReuse {
                 clip.qa = qa;clip.sha256 = qa.outputSHA256;clip.measuredDuration = probe.duration
                 clip.bytes = ((try FileManager.default.attributesOfItem(atPath:local.path))[.size] as? NSNumber)?.int64Value
                 accepted.append((clip,local))
-                try workspace.save(qa,to:qaURL)
+                try workspace.save(TaxstoneReuseAcceptance(source:source,clip:clip,profile:request.profile,artwork:artwork,qa:qa),to:qaURL)
                 try workspace.save(["status":"ADOPTED","driveID":candidate.driveID],to:resultURL)
             } catch {
                 if error is CancellationError {throw error}
