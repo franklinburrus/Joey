@@ -139,6 +139,20 @@ final class RecoveryRegressionTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf:checkpoint),original)
         XCTAssertEqual(try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename)),saved.clips[0].sha256)
     }
+    func testCompletedCheckpointRejectsDriveReceiptForDifferentAcceptedBytes() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused");request.fileToDrive = true
+        var (saved,directory) = try completed(request,root:root)
+        saved.clips[0].drive!.sha256 = String(repeating:"b",count:64)
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let persisted: JobRecord = try Persistence.load(directory.appendingPathComponent("job.json"))
+        let result = try await Coordinator(root:root).run(request)
+        XCTAssertEqual(result.state,.qaPassed)
+        XCTAssertTrue(result.error?.contains("Completed checkpoint lacks required delivery evidence") == true)
+        XCTAssertFalse(JobPresentation(job:result).completed)
+        XCTAssertEqual(result.clips[0].drive,persisted.clips[0].drive,"Preserve conflicting evidence for reconciliation")
+        XCTAssertEqual(try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename)),saved.clips[0].sha256)
+    }
     func testRenewedRequestFindsLegacyCheckpointInsteadOfCreatingSecondJob() async throws {
         let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
         let request = try Fixtures.request(dir:root,path:"unused")

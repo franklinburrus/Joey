@@ -104,12 +104,9 @@ public actor Coordinator {
         var completedReadbackPassed = false
         do {
             if job.state == .completed {
-                guard job.unavailableTranscriptFeatures.isEmpty,
-                      !job.clips.isEmpty, job.companions["clip_manifest.json"] != nil,
-                      job.request.owner != .dub || job.registerRows.count == job.clips.count else {throw JoeyError.failed("Completed checkpoint lacks required delivery evidence")}
+                guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Completed checkpoint lacks required delivery evidence")}
                 for clip in job.clips {
-                    guard clip.qa?.passed == true, clip.drive != nil,
-                          try Integrity.sha256(dir.appendingPathComponent(clip.filename)) == clip.sha256 else {throw JoeyError.failed("Completed output changed: \(clip.filename)")}
+                    guard try Integrity.sha256(dir.appendingPathComponent(clip.filename)) == clip.sha256 else {throw JoeyError.failed("Completed output changed: \(clip.filename)")}
                 }
                 // Current local bytes match accepted receipts. Reopening does
                 // not claim a new provider readback or require network access.

@@ -26,7 +26,7 @@ final class PresentationTests: XCTestCase {
         XCTAssertNil(view.clipProgress)
         XCTAssertTrue(view.stages.allSatisfy {!$0.verified})
         XCTAssertEqual(view.activeStageID,"transcript")
-        XCTAssertEqual(view.stages.first {$0.id == "delivery"}!.detail,"Not requested")
+        XCTAssertEqual(view.stages.first {$0.id == "delivery"}!.detail,"Required for every clip")
     }
     func testJobSelectionSurvivesBackgroundUpdatesAndFallsBackWhenRemoved() throws {
         let request = try Fixtures.request(dir:FileManager.default.temporaryDirectory,path:"fixture")
@@ -70,10 +70,62 @@ final class PresentationTests: XCTestCase {
         job.state = .cancelled
         XCTAssertEqual(JobPresentation(job:job).status,"Stopped — progress saved")
         job.error = nil;job.state = .qaPassed;job.request.fileToDrive = false
-        XCTAssertEqual(JobPresentation(job:job).status,"Local clips ready")
+        XCTAssertEqual(JobPresentation(job:job).status,"Drive filing required")
         XCTAssertFalse(JobPresentation(job:job).completed)
         job.state = .completed
-        XCTAssertTrue(JobPresentation(job:job).completed)
-        XCTAssertEqual(JobPresentation(job:job).status,"Completed")
+        XCTAssertFalse(JobPresentation(job:job).completed)
+        XCTAssertEqual(JobPresentation(job:job).status,"Delivery incomplete")
+    }
+
+    private func deliveredJob() throws -> JobRecord {
+        var request = try Fixtures.request(dir:FileManager.default.temporaryDirectory,path:"fixture")
+        request.owner = .taxstone;request.fileToDrive = true
+        var job = JobRecord(id:"fixture",request:request)
+        job.state = .completed;job.stage = "complete";job.folderID = "fixture-folder"
+        job.transcript = Transcript(sourceID:request.sourceID,sourceSHA256:"fixture-source",duration:10,
+            engine:"Synthetic UI regression",segments:[TranscriptSegment(start:0,end:10,text:"Synthetic complete transcript.")])
+        job.clips = (1...2).map {number in
+            let hash = "fixture-hash-\(number)", name = "\(number).mp4"
+            let receipt = DriveReceipt(id:"fixture-file-\(number)",name:name,parent:job.folderID!,bytes:100,
+                sha256:hash,url:"https://example.invalid/fixture-\(number)",permissions:[],verifiedAt:Date())
+            return ClipRecord(id:number,title:"Fixture \(number)",intervals:[Interval(Double(number-1)*5,Double(number)*5)],
+                filename:name,bytes:100,sha256:hash,
+                qa:QAReport(checkedAt:Date(),checks:[:],outputSHA256:hash,passed:true,limitations:["Synthetic only"]),drive:receipt)
+        }
+        job.companions["clip_manifest.json"] = job.clips[0].drive
+        return job
+    }
+
+    func testCompletedBadgeRequiresDriveForEveryClipEvenForLegacyLocalJobs() throws {
+        let delivered = try deliveredJob()
+        XCTAssertTrue(JobPresentation(job:delivered).completed)
+        for requested in [true,false] {
+            var job = delivered;job.request.fileToDrive = requested;job.clips[1].drive = nil
+            let original = try Persistence.encoder.encode(job)
+            let view = JobPresentation(job:job)
+            XCTAssertFalse(view.completed)
+            XCTAssertEqual(view.status,"Delivery incomplete")
+            XCTAssertEqual(view.stage,"Drive filing required")
+            XCTAssertEqual(view.stages.first {$0.id == "delivery"}!.detail,"Required · 1/2 clips verified")
+            XCTAssertFalse(view.stages.first {$0.id == "delivery"}!.verified)
+            XCTAssertFalse(view.stages.first {$0.id == "records"}!.verified)
+            XCTAssertEqual(try Persistence.encoder.encode(job),original,"Presentation must preserve checkpoints")
+        }
+    }
+
+    func testMismatchedDriveReceiptsCannotMakeDeliveryGreen() throws {
+        let delivered = try deliveredJob()
+        var variants: [JobRecord] = []
+        var job = delivered;job.clips[1].drive!.sha256 = "other";variants.append(job)
+        job = delivered;job.clips[1].drive!.name = "other.mp4";variants.append(job)
+        job = delivered;job.clips[1].drive!.parent = "other-folder";variants.append(job)
+        job = delivered;job.clips[1].drive!.bytes = 101;variants.append(job)
+        job = delivered;job.clips[1].qa!.outputSHA256 = "other";variants.append(job)
+        for invalid in variants {
+            let view = JobPresentation(job:invalid)
+            XCTAssertEqual(view.filed,1)
+            XCTAssertFalse(view.completed)
+            XCTAssertFalse(view.stages.first {$0.id == "delivery"}!.verified)
+        }
     }
 }

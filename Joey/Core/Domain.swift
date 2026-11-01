@@ -332,6 +332,25 @@ public struct JobRecord: Codable, Identifiable, Sendable {
         }
         return missing
     }
+    /// Saved delivery evidence must identify the accepted bytes in this job's
+    /// episode folder. This does not perform a fresh provider readback.
+    public var verifiedDriveClipCount: Int {
+        guard let folderID, !folderID.isEmpty else {return 0}
+        return clips.filter {clip in
+            guard let receipt = clip.drive, !receipt.id.isEmpty,
+                  let hash = clip.sha256, !hash.isEmpty, let bytes = clip.bytes, bytes > 0 else {return false}
+            return receipt.parent == folderID && receipt.name == clip.filename &&
+                receipt.sha256 == hash && receipt.bytes == bytes &&
+                clip.qa?.passed == true && clip.qa?.outputSHA256 == hash
+        }.count
+    }
+    /// Shared completion evidence for recovery and presentation. The coordinator
+    /// also checks current local bytes before reopening a completed checkpoint.
+    public var hasRequiredCompletionEvidence: Bool {
+        !clips.isEmpty && unavailableTranscriptFeatures.isEmpty &&
+        verifiedDriveClipCount == clips.count && companions["clip_manifest.json"] != nil &&
+        (request.owner != .dub || registerRows.count == clips.count)
+    }
     public var resumesAutomatically: Bool {
         state == .processing || state == .planned || state == .filed ||
         (state == .qaPassed && request.fileToDrive && unavailableTranscriptFeatures.isEmpty)

@@ -112,9 +112,9 @@ struct JobDetailView: View {
     private var results: some View {
         VStack(alignment:.leading,spacing:14) {
             Text("Results").font(JoeyTheme.font(13,weight:.medium))
-            if job.state == .completed, let onPrepare {Button("Prepare for Buffer",action:onPrepare)}
+            if presentation.completed, let onPrepare {Button("Prepare for Buffer",action:onPrepare)}
             LabeledContent("QA passed",value:"\(presentation.accepted)/\(presentation.total)")
-            LabeledContent("Drive verified",value:job.request.fileToDrive ? "\(presentation.filed)/\(presentation.total)" : "Not requested")
+            LabeledContent("Drive",value:presentation.deliveryStatus)
             Text(presentation.recordStatus).foregroundStyle(.secondary)
             if let folder = job.folderID, let url = URL(string:"https://drive.google.com/drive/folders/"+folder) {
                 Link("Episode folder",destination:url)

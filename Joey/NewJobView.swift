@@ -26,6 +26,12 @@ struct NewJobView: View {
     var productionSetup: ProductionSetupView {
         ProductionSetupView(model:model,owner:content == .taxstone ? .taxstone:.dub)
     }
+    private var validSourceLink: Bool {
+        (try? Acquisition.validateOriginalURL(url.trimmingCharacters(in:.whitespacesAndNewlines))) != nil
+    }
+    private var canStart: Bool {
+        validSourceLink && !model.busy && !model.libraryBusy && !model.preparingSource
+    }
     var body: some View {
         ScrollView {
             VStack(alignment:.leading,spacing:24) {
@@ -34,28 +40,30 @@ struct NewJobView: View {
                     Spacer()
                     Button("Cancel") {dismiss()}.keyboardShortcut(.cancelAction).disabled(model.preparingSource)
                 }
-                JoeyPanel {
-                    Text("Paste Link").font(.headline)
-                    TextField("Paste Link",text:$url).textFieldStyle(.roundedBorder).accessibilityLabel("Paste Link")
-                    Text("YouTube or X. The complete original is filed before clips are created.").font(.caption).foregroundStyle(.secondary)
+                HStack(spacing:20) {
+                    selectionStep("Source link",complete:validSourceLink)
+                    selectionStep("Content",complete:true)
+                    selectionStep("Workflow",complete:true)
                 }
                 JoeyPanel {
-                    Picker("Content",selection:$content) {
-                        Text("DUB").tag(LinkContent.dub)
-                        Text("Taxstone").tag(LinkContent.taxstone)
-                        Text("Joe Budden").tag(LinkContent.joeBudden)
-                    }.pickerStyle(.segmented)
+                    Text("Paste Link").font(JoeyTheme.font(18,weight:.medium))
+                    TextField("Paste Link",text:$url).textFieldStyle(.roundedBorder).accessibilityLabel("Paste Link")
+                    Text("YouTube or X. The complete original is filed before clips are created.").font(JoeyTheme.font(14)).foregroundStyle(.secondary)
+                }
+                JoeyPanel {
+                    JoeyChoiceGroup(title:"Content",selection:$content,options:[
+                        ("DUB",.dub),("Taxstone",.taxstone),("Joe Budden",.joeBudden)
+                    ])
                     if content == .joeBudden {
                         Text("Workflow: Clip Entire Show").font(.headline)
                         Text("YouTube full episode → file original → 8–10-minute clips with DUB logo and approved outro → Drive.")
-                        Text("Drive-only delivery. No platform-upload compatibility claim.").font(.caption).foregroundStyle(.secondary)
+                        Text("Drive-only delivery. No platform-upload compatibility claim.").font(JoeyTheme.font(14)).foregroundStyle(.secondary)
                     } else {
-                        Picker("Workflow",selection:$mode) {
-                            Text("Clip Entire Show").tag(JobMode.fullShow)
-                            Text("Highlights").tag(JobMode.highlights)
-                        }.pickerStyle(.segmented)
+                        JoeyChoiceGroup(title:"Workflow",selection:$mode,options:[
+                            ("Clip Entire Show",.fullShow),("Highlights",.highlights)
+                        ])
                         Text(mode == .fullShow ? "Clip the complete retained show chronologically, using the verified shared limits." : "One highlight per 15-minute block, including the final partial block. Clip length fits X and Instagram together.")
-                            .font(.callout).foregroundStyle(.secondary)
+                            .font(JoeyTheme.font(14)).foregroundStyle(.secondary)
                     }
                 }
                 DisclosureGroup("Advanced Settings",isExpanded:$advanced) {
@@ -71,23 +79,33 @@ struct NewJobView: View {
                             TextField("Existing source-bound transcript (optional)",text:$transcript).textFieldStyle(.roundedBorder)
                             Button("Choose Transcript…") {model.chooseFile {if let path = $0 {transcript = path}}}
                         }
-                        Text("Complete-original filing, transcript-assisted processing, automated QA and verified Drive records are required.").font(.caption)
+                        Text("Complete-original filing, transcript-assisted processing, automated QA and verified Drive records are required.").font(JoeyTheme.font(14))
                         Button("Production Configuration…") {setup = true}
                     }.padding(.top,16)
                 }
             }.padding(32).frame(maxWidth:850,alignment:.leading).frame(maxWidth:.infinity,alignment:.topLeading)
-        }.background(JoeyTheme.background(scheme)).tint(JoeyTheme.primary(scheme))
+        }.font(JoeyTheme.font(16)).controlSize(.large)
+        .background(JoeyTheme.background(scheme)).tint(JoeyTheme.primary(scheme))
         .safeAreaInset(edge:.bottom) {
             HStack(spacing:20) {
-                Text(model.preparingSource ? "Reading source details…" : model.busy ? "Processing continues in Jobs." : "Full original and clips are filed to Drive. Nothing is published.")
-                    .font(.callout).foregroundStyle(.secondary).frame(maxWidth:.infinity,alignment:.leading)
+                Text(model.preparingSource ? "Reading source details…" : model.busy || model.libraryBusy ? "Processing continues in Jobs." : validSourceLink ? "Selections complete. Source and delivery checks run next." : "Add a valid source link to complete your selections.")
+                    .font(JoeyTheme.font(14)).foregroundStyle(canStart ? JoeyTheme.primary(scheme) : .secondary)
+                    .frame(maxWidth:.infinity,alignment:.leading)
                 Button("Start Processing",systemImage:"play.fill") {
                     model.startLink(url,content:content,mode:mode,archive:archive,archiveRoot:archiveRoot,transcript:transcript)
-                }.modifier(JoeyPrimaryButton()).disabled(model.busy || model.libraryBusy || model.preparingSource || url.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
+                }.modifier(JoeyPrimaryButton()).disabled(!canStart)
             }.padding(20).background(JoeyTheme.panel(scheme))
         }
         .interactiveDismissDisabled(model.preparingSource)
         .onChange(of:model.busy) {_,busy in if busy {started()}}
         .sheet(isPresented:$setup) {productionSetup}
+    }
+
+    private func selectionStep(_ title: String, complete: Bool) -> some View {
+        Label(title,systemImage:complete ? "checkmark.circle.fill" : "circle")
+            .font(JoeyTheme.font(14,weight:.medium))
+            .foregroundStyle(complete ? JoeyTheme.primary(scheme) : .secondary)
+            .accessibilityValue(complete ? "Selected" : "Required")
+            .frame(maxWidth:.infinity,alignment:.leading)
     }
 }

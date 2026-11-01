@@ -48,6 +48,23 @@ final class ProductionIntakeTests: XCTestCase {
         request.transcriptPolicy = nil;request.fileToDrive = false
         XCTAssertThrowsError(try request.validate())
     }
+    func testEveryProductionLaneRequiresDriveForAllClipWorkflows() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:root)}
+        let profile = try Fixtures.profile(dir:root)
+        let source = DiscoveredSource(id:"youtube:abcdefghijk",title:"Synthetic episode",
+            url:"https://www.youtube.com/watch?v=abcdefghijk",duration:1800)
+        for content in LinkContent.allCases {
+            for mode in [JobMode.fullShow,.highlights] {
+                var request = try ProductionIntake.request(source:content == .joeBudden ? episode(976):source,
+                    content:content,mode:mode,sharedProfile:profile)
+                XCTAssertTrue(request.fileToDrive)
+                request.fileToDrive = false
+                XCTAssertThrowsError(try request.validate(),"\(content) / \(mode) must require Drive")
+            }
+        }
+    }
     func testHighlightsUseFifteenMinuteBlocksAndSharedLimit() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)

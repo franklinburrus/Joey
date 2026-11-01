@@ -10,7 +10,7 @@ private enum JoeyDestination: String, CaseIterable {
 
 struct ContentView: View {
     @ObservedObject var model: JobModel
-    @StateObject private var buffer = BufferViewModel()
+    @StateObject private var buffer: BufferViewModel
     @State private var destination: JoeyDestination = .process
     @State private var selectedID: String?
     @State private var intake = false
@@ -25,25 +25,31 @@ struct ContentView: View {
     private var selectedJob: JobRecord? {JobPresentation.selectedJob(in:model.jobs,id:selectedID)}
     private var working: Bool {model.busy || model.libraryBusy || model.preparingSource}
 
+    init(model: JobModel) {
+        self.model = model
+        _buffer = StateObject(wrappedValue:BufferViewModel(root:model.root))
+    }
+
     var body: some View {
         HStack(spacing:0) {
-            sidebar.frame(width:172)
+            sidebar.frame(width:220)
             Divider()
-            workspace.frame(minWidth:390,maxWidth:.infinity,maxHeight:.infinity)
-            Divider()
-            inspector.frame(width:350).frame(maxHeight:.infinity)
+            HSplitView {
+                workspace.frame(minWidth:420,maxWidth:.infinity,maxHeight:.infinity)
+                inspector.frame(minWidth:350,idealWidth:400,maxWidth:500,maxHeight:.infinity)
+            }
         }
-        .font(JoeyTheme.font(14))
+        .font(JoeyTheme.font(16))
         .foregroundStyle(.primary)
         .background(JoeyTheme.background(scheme))
         .tint(JoeyTheme.primary(scheme))
-        .frame(minWidth:960,minHeight:660)
+        .frame(minWidth:1040,minHeight:660)
         .preferredColorScheme(selectedAppearance.colorScheme)
         .onAppear {selectedAppearance.apply()}
         .onChange(of:appearance) {_,_ in selectedAppearance.apply()}
         .sheet(isPresented:$intake) {
             NewJobView(model:model,initialURL:intakeURL,initialContent:intakeContent) {intake = false}
-                .frame(width:620,height:610)
+                .frame(width:760,height:700)
         }
         .sheet(isPresented:$settings) {
             VStack(spacing:0) {
@@ -60,13 +66,13 @@ struct ContentView: View {
 
     private var sidebar: some View {
         VStack(alignment:.leading,spacing:36) {
-            Text("Joey").font(JoeyTheme.font(44,weight:.bold)).tracking(-2).padding(.top,24)
+            Text("Joey").font(JoeyTheme.font(38,weight:.bold)).tracking(-2).padding(.top,24)
             VStack(spacing:8) {
                 ForEach(JoeyDestination.allCases,id:\.self) {item in
                     Button {destination = item} label: {
                         HStack(spacing:12) {
                             Image(systemName:item.symbol).font(.system(size:19)).frame(width:24)
-                            Text(item.rawValue).font(JoeyTheme.font(15,weight:.medium))
+                            Text(item.rawValue).font(JoeyTheme.font(16,weight:.medium)).fixedSize(horizontal:false,vertical:true)
                             Spacer(minLength:0)
                         }.padding(.horizontal,12).padding(.vertical,14)
                             .foregroundStyle(destination == item ? JoeyTheme.primary(scheme) : Color.primary)
@@ -86,7 +92,7 @@ struct ContentView: View {
             Label {
                 Text(working ? "Working" : model.error != nil ? "Needs attention" : "Ready")
             } icon: {
-                Circle().fill(working ? JoeyTheme.primary(scheme) : model.error != nil ? Color.secondary : JoeyTheme.verified).frame(width:7,height:7)
+                Circle().fill(working || model.error != nil ? Color.secondary : JoeyTheme.verified).frame(width:7,height:7)
             }.font(JoeyTheme.font(12)).foregroundStyle(.secondary)
         }.padding(.horizontal,18).padding(.bottom,24)
     }
@@ -206,7 +212,7 @@ private struct JobRow: View {
                     .font(.system(size:21,weight:.light)).frame(width:44,height:54)
                     .background(Color.primary.opacity(0.04),in:RoundedRectangle(cornerRadius:3))
                 VStack(alignment:.leading,spacing:7) {
-                    Text(job.request.title).font(JoeyTheme.font(14,weight:.medium)).lineLimit(2)
+                    Text(job.request.title).font(JoeyTheme.font(18,weight:.medium)).lineLimit(2)
                     Text(presentation.status).font(JoeyTheme.font(11)).foregroundStyle(.secondary)
                     JobProgressView(presentation:presentation,isRunning:isRunning)
                         .allowsHitTesting(false).accessibilityHidden(true)
@@ -214,7 +220,7 @@ private struct JobRow: View {
                 Spacer(minLength:0)
                 if presentation.completed {Image(systemName:"checkmark.circle.fill").foregroundStyle(JoeyTheme.verified)}
                 else if job.error != nil {Image(systemName:"exclamationmark.circle").foregroundStyle(.secondary)}
-                else if isRunning {Circle().fill(JoeyTheme.primary(scheme)).frame(width:7,height:7)}
+                else if isRunning {Circle().fill(Color.secondary).frame(width:7,height:7)}
             }.padding(.vertical,16).padding(.horizontal,10)
                 .frame(maxWidth:.infinity,alignment:.leading)
                 .background(selected ? Color.primary.opacity(0.035) : Color.clear)
@@ -237,12 +243,12 @@ struct JobProgressView: View {
         VStack(alignment:.leading,spacing:5) {
             if let progress = presentation.clipProgress {
                 ProgressView(value:progress)
-                    .progressViewStyle(JoeyMeasuredProgressStyle(color:presentation.completed ? JoeyTheme.verified : isRunning ? JoeyTheme.primary(scheme) : .secondary))
+                    .progressViewStyle(JoeyMeasuredProgressStyle(color:presentation.completed ? JoeyTheme.verified : .secondary))
                     .accessibilityLabel("Clips passed automated QA")
                     .accessibilityValue("\(presentation.accepted) of \(presentation.total)")
                 Text("QA · \(presentation.accepted)/\(presentation.total) clips").font(JoeyTheme.font(11)).foregroundStyle(.secondary).monospacedDigit()
             } else if isRunning {
-                ProgressView().progressViewStyle(.linear).tint(JoeyTheme.primary(scheme))
+                ProgressView().progressViewStyle(.linear).tint(.secondary)
                     .accessibilityLabel("Processing; clip count not yet available")
             } else {
                 Text("No clips planned").font(JoeyTheme.font(11)).foregroundStyle(.secondary)

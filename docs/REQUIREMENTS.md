@@ -213,6 +213,8 @@ A filing outage leaves accepted media as QA_PASSED — NOT FILED.
 
 COMPLETED requires every planned output exactly once, passing applicable automated QA, reconciled required coverage, verified Drive outputs and companion records, required register readback and a current manifest matching the actual files. Render success, an exported CSV or a queued upload cannot independently establish completion.
 
+2026-11-01 explicit clarification: Drive filing is required for every Joey clip. The UI must never describe it as "Not requested" or label local-only outputs Completed. Local processing and accepted-file recovery remain available while delivery is pending; they do not waive Drive filing. Completed badges and delivery checkmarks require saved evidence matching every accepted clip. Preview fixtures must show this same workflow and must remain clearly identified as synthetic sample data.
+
 16. ACTIVE ASSETS AND EXISTING ARCHIVES
 
 DUB approved audio artwork:

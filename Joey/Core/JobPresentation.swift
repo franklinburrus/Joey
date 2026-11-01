@@ -21,8 +21,8 @@ struct JobPresentation {
             Stage(id:"transcript",title:"Transcript",detail:job.transcript != nil ? "Source-bound transcript" : job.planningBasis == .deterministicTime ? "Unavailable · time-based planning" : "Pending",verified:job.transcript != nil),
             Stage(id:"planning",title:"Clip plan",detail:total > 0 ? "\(total) clips" : "Pending",verified:total > 0),
             Stage(id:"qa",title:"Automatic QA",detail:"\(accepted)/\(total) passed",verified:total > 0 && accepted == total),
-            Stage(id:"delivery",title:"Drive",detail:job.request.fileToDrive ? "\(filed)/\(total) clips verified" : "Not requested",verified:job.request.fileToDrive && total > 0 && filed == total),
-            Stage(id:"records",title:"Records",detail:job.request.fileToDrive ? recordStatus : "Local package",verified:completed)
+            Stage(id:"delivery",title:"Drive",detail:deliveryStatus,verified:total > 0 && filed == total),
+            Stage(id:"records",title:"Records",detail:recordStatus,verified:completed)
         ]
     }
     var activeStageID: String? {
@@ -41,19 +41,23 @@ struct JobPresentation {
     }
     var total: Int { job.clips.count }
     var accepted: Int { job.clips.filter { $0.qa?.passed == true }.count }
-    var filed: Int { job.clips.filter { $0.drive != nil }.count }
-    var completed: Bool { job.state == .completed }
+    var filed: Int { job.verifiedDriveClipCount }
+    var completed: Bool { job.state == .completed && job.hasRequiredCompletionEvidence }
+    var deliveryStatus: String {
+        guard total > 0 else {return "Required for every clip"}
+        return (filed == total ? "" : "Required · ")+"\(filed)/\(total) clips verified"
+    }
     var status: String {
         if completed { return "Completed" }
         if job.error != nil && job.state != .cancelled { return "Needs attention" }
         switch job.state {
         case .cancelled: return "Stopped — progress saved"
-        case .qaPassed: return job.request.fileToDrive ? "Delivery pending" : "Local clips ready"
+        case .qaPassed: return job.request.fileToDrive ? "Delivery pending" : "Drive filing required"
         case .filed: return "Finishing records"
         case .failed: return "Needs attention"
         case .processing: return "Processing"
         case .planned: return "Ready to process"
-        case .completed: return "Completed"
+        case .completed: return "Delivery incomplete"
         }
     }
     var stage: String {
@@ -68,7 +72,7 @@ struct JobPresentation {
         case "Drive folder": return "Finding the episode folder"
         case "companion records": return "Filing the index and transcript"
         case "register reconciliation": return "Verifying delivery records"
-        case "complete": return "Delivery verified"
+        case "complete": return completed ? "Delivery verified" : filed < total ? "Drive filing required" : "Verifying delivery records"
         default:
             if job.stage.hasPrefix("render clip ") { return job.stage.replacingOccurrences(of:"render clip ",with:"Creating clip ")+" of \(total)" }
             if job.stage.hasPrefix("QA clip ") { return job.stage.replacingOccurrences(of:"QA clip ",with:"Checking clip ")+" of \(total)" }

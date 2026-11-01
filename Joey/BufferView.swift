@@ -17,8 +17,9 @@ import Combine
     @Published var error: String?
     @Published var lastExport: URL?
     private var store: BufferHandoffStore?
-    let root = Persistence.defaultRoot
-    init() {
+    let root: URL
+    init(root: URL = Persistence.defaultRoot) {
+        self.root = root
         do {
             store = try BufferHandoffStore(root:root)
             state = try store!.snapshot();selection = state.selection;channels = try store!.channels()
@@ -28,7 +29,7 @@ import Combine
         guard !busy else {return}
         do {state = try store?.snapshot() ?? state;channels = try store?.channels() ?? []}
         catch {self.error = error.localizedDescription}
-        for job in jobs where job.state == .completed {
+        for job in jobs where JobPresentation(job:job).completed {
             for clip in job.clips {
                 let key = BufferPreparedClip.key(jobID:job.id,clipID:clip.id)
                 guard recommendations[key] == nil, recommendationErrors[key] == nil else {continue}
@@ -108,13 +109,14 @@ import Combine
 struct BufferReadyView: View {
     @ObservedObject var buffer: BufferViewModel
     @ObservedObject var model: JobModel
+    @Environment(\.colorScheme) private var scheme
     private struct Row: Identifiable {
         let job: JobRecord
         let clip: ClipRecord
         var id: String {BufferPreparedClip.key(jobID:job.id,clipID:clip.id)}
     }
     private var rows: [Row] {
-        model.jobs.filter {$0.state == .completed && (buffer.episodeID == nil || $0.id == buffer.episodeID) &&
+        model.jobs.filter {JobPresentation(job:$0).completed && (buffer.episodeID == nil || $0.id == buffer.episodeID) &&
             (buffer.lane == "All" || $0.request.owner.rawValue == buffer.lane)}
             .flatMap {job in job.clips.map {Row(job:job,clip:$0)}}
             .sorted {
@@ -125,42 +127,96 @@ struct BufferReadyView: View {
     }
     var body: some View {
         ScrollView {
-            VStack(alignment:.leading,spacing:20) {
-                Text("Ready for Buffer").font(JoeyTheme.font(24,weight:.medium))
-                Text("Completed clips · Recommended first").foregroundStyle(.secondary)
-                Text("Scores are editorial heuristics, not probabilities of virality.").font(JoeyTheme.font(11)).foregroundStyle(.secondary)
-                Picker("Content",selection:$buffer.lane) {
-                    Text("All").tag("All");Text("DUB").tag("dub");Text("Taxstone").tag("taxstone")
-                }.pickerStyle(.segmented)
+            VStack(alignment:.leading,spacing:24) {
+                VStack(alignment:.leading,spacing:8) {
+                    HStack(alignment:.firstTextBaseline) {
+                        Text("Ready for Buffer").font(JoeyTheme.font(28,weight:.medium))
+                        Spacer()
+                        Text("\(rows.count) clips").foregroundStyle(.secondary)
+                    }
+                    Text("Completed clips · Recommended first").font(JoeyTheme.font(16)).foregroundStyle(.secondary)
+                }
+                JoeyChoiceGroup(title:"Content",selection:$buffer.lane,options:[
+                    ("All","All"),("DUB","dub"),("Taxstone","taxstone")
+                ]).frame(maxWidth:390)
+                Text("Scores are editorial heuristics, not probabilities of virality.").font(JoeyTheme.font(14)).foregroundStyle(.secondary)
                 if buffer.episodeID != nil {Button("Show all completed episodes") {buffer.episodeID = nil}}
                 if rows.isEmpty {Text("No completed clips in this selection.").foregroundStyle(.secondary)}
-                LazyVStack(alignment:.leading,spacing:20) {
+                LazyVStack(alignment:.leading,spacing:0) {
                     ForEach(rows) {row in
-                        VStack(alignment:.leading,spacing:8) {
-                            Toggle(isOn:Binding(get:{buffer.selection.clipKeys.contains(row.id)},set:{buffer.select(row.id,$0)})) {
-                                Text(buffer.recommendations[row.id]?.title ?? row.clip.title).font(JoeyTheme.font(14,weight:.medium))
-                            }.disabled(buffer.busy)
-                            Text("\(row.job.request.owner.rawValue.uppercased()) · \(row.job.request.title) · Clip \(row.clip.id)").font(JoeyTheme.font(11)).foregroundStyle(.secondary)
-                            Text("\(row.clip.measuredDuration ?? row.clip.expectedDuration,specifier:"%.3f") s · X \(buffer.recommendations[row.id]?.xScore ?? 0)/100 · Instagram \(buffer.recommendations[row.id]?.instagramScore ?? 0)/100")
-                                .font(JoeyTheme.font(12)).monospacedDigit()
-                            Text(buffer.eligibility(row.id)).font(JoeyTheme.font(11)).textSelection(.enabled)
-                            Text(buffer.history(row.id)).font(JoeyTheme.font(11)).foregroundStyle(.secondary)
-                            Button("Preview") {
-                                NSWorkspace.shared.open(model.root.appendingPathComponent("jobs/\(row.job.id)/\(row.clip.filename)"))
-                            }.controlSize(.small)
-                            DisclosureGroup("Recommendation details") {
-                                if let recommendation = buffer.recommendations[row.id] {
-                                    Text(recommendation.confidence)
-                                    ForEach(recommendation.rationale,id:\.self) {Text($0)}
-                                    ForEach(recommendation.boundaryNotes + recommendation.restrictions,id:\.self) {Text($0)}
-                                } else {Text(buffer.recommendationErrors[row.id] ?? "Unavailable")}
-                            }.font(JoeyTheme.font(11)).foregroundStyle(.secondary)
-                            Divider()
-                        }
+                        clipRow(row)
+                        Divider()
                     }
                 }
             }.padding(28)
         }.task {buffer.refresh(jobs:model.jobs)}
+    }
+
+    private func clipRow(_ row: Row) -> some View {
+        VStack(alignment:.leading,spacing:14) {
+            ViewThatFits(in:.horizontal) {
+                HStack(alignment:.top,spacing:24) {
+                    clipIdentity(row).frame(minWidth:240,maxWidth:.infinity,alignment:.leading)
+                    clipMetrics(row).frame(width:160,alignment:.leading)
+                    clipStatus(row).frame(width:210,alignment:.leading)
+                    previewButton(row)
+                }.frame(minWidth:760)
+                VStack(alignment:.leading,spacing:16) {
+                    clipIdentity(row)
+                    HStack(alignment:.top,spacing:20) {
+                        clipMetrics(row).frame(maxWidth:.infinity,alignment:.leading)
+                        previewButton(row)
+                    }
+                    clipStatus(row)
+                }
+            }
+            DisclosureGroup("Recommendation details") {
+                VStack(alignment:.leading,spacing:8) {
+                    if let recommendation = buffer.recommendations[row.id] {
+                        Text(recommendation.confidence)
+                        ForEach(recommendation.rationale,id:\.self) {Text($0)}
+                        ForEach(recommendation.boundaryNotes + recommendation.restrictions,id:\.self) {Text($0)}
+                    } else {Text(buffer.recommendationErrors[row.id] ?? "Unavailable")}
+                }.padding(.top,8)
+            }.font(JoeyTheme.font(14)).foregroundStyle(.secondary)
+        }
+        .padding(18)
+        .background(buffer.selection.clipKeys.contains(row.id) ? JoeyTheme.primary(scheme).opacity(0.055) : Color.clear)
+    }
+
+    private func clipIdentity(_ row: Row) -> some View {
+        VStack(alignment:.leading,spacing:8) {
+            Toggle(isOn:Binding(get:{buffer.selection.clipKeys.contains(row.id)},set:{buffer.select(row.id,$0)})) {
+                Text(buffer.recommendations[row.id]?.title ?? row.clip.title)
+                    .font(JoeyTheme.font(18,weight:.medium)).fixedSize(horizontal:false,vertical:true)
+            }.toggleStyle(JoeySelectionToggleStyle()).disabled(buffer.busy)
+            Text("\(row.job.request.owner.rawValue.uppercased()) · Clip \(row.clip.id)")
+                .font(JoeyTheme.font(14,weight:.medium)).foregroundStyle(.secondary)
+            Text(row.job.request.title).font(JoeyTheme.font(14)).foregroundStyle(.secondary)
+                .fixedSize(horizontal:false,vertical:true)
+        }
+    }
+
+    private func clipMetrics(_ row: Row) -> some View {
+        VStack(alignment:.leading,spacing:8) {
+            Text("\(row.clip.measuredDuration ?? row.clip.expectedDuration,specifier:"%.3f") s")
+                .font(JoeyTheme.font(16,weight:.medium))
+            Text("X \(buffer.recommendations[row.id]?.xScore ?? 0)/100")
+            Text("Instagram \(buffer.recommendations[row.id]?.instagramScore ?? 0)/100")
+        }.font(JoeyTheme.font(14)).monospacedDigit()
+    }
+
+    private func clipStatus(_ row: Row) -> some View {
+        VStack(alignment:.leading,spacing:8) {
+            Text(buffer.eligibility(row.id)).font(JoeyTheme.font(14)).textSelection(.enabled)
+            Text(buffer.history(row.id)).font(JoeyTheme.font(14)).foregroundStyle(.secondary)
+        }.fixedSize(horizontal:false,vertical:true)
+    }
+
+    private func previewButton(_ row: Row) -> some View {
+        Button("Preview") {
+            NSWorkspace.shared.open(model.root.appendingPathComponent("jobs/\(row.job.id)/\(row.clip.filename)"))
+        }.controlSize(.large).font(JoeyTheme.font(14))
     }
 }
 
@@ -171,8 +227,8 @@ struct BufferHandoffPanel: View {
     var body: some View {
         ScrollView {
             VStack(alignment:.leading,spacing:18) {
-                Text("Selected Clips").font(JoeyTheme.font(22,weight:.medium))
-                Text("\(buffer.selection.clipKeys.count) clips · \(buffer.selection.clipKeys.count * buffer.selection.platforms.count) operations")
+                Text("Selected Clips").font(JoeyTheme.font(24,weight:.medium))
+                Text("\(buffer.selection.clipKeys.count) \(buffer.selection.clipKeys.count == 1 ? "clip" : "clips") · \(buffer.selection.clipKeys.count * buffer.selection.platforms.count) \(buffer.selection.clipKeys.count * buffer.selection.platforms.count == 1 ? "operation" : "operations")")
                 Picker("Destination",selection:Binding(get:{buffer.selection.platforms.count == 2 ? "Both":buffer.selection.platforms.first?.rawValue ?? "X"},set:{buffer.selection.platforms = $0 == "Both" ? [.x,.instagram]:[$0 == "X" ? .x:.instagram];buffer.saveSelection();review = false})) {
                     Text("X").tag("X");Text("Instagram").tag("Instagram");Text("X + Instagram").tag("Both")
                 }
@@ -181,7 +237,7 @@ struct BufferHandoffPanel: View {
                 }.onChange(of:buffer.selection.mode) {_,_ in buffer.saveSelection();review = false}
                 if buffer.selection.mode == .scheduled {
                     DatePicker("Requested schedule",selection:Binding(get:{buffer.selection.scheduledAt ?? Date()},set:{buffer.selection.scheduledAt = $0;buffer.saveSelection();review = false}))
-                    Text(TimeZone.current.identifier).font(.caption)
+                    Text(TimeZone.current.identifier).font(JoeyTheme.font(14))
                 }
                 if buffer.selection.platforms.contains(.instagram) {
                     Picker("Instagram presentation",selection:$buffer.selection.instagramPresentation) {
@@ -206,11 +262,11 @@ struct BufferHandoffPanel: View {
                     .disabled(buffer.busy || buffer.selection.clipKeys.isEmpty)
                 if buffer.busy {
                     ProgressView(value:Double(buffer.checked),total:Double(max(1,buffer.total)))
-                    Text("\(buffer.checked)/\(buffer.total) clips checked").font(.caption)
+                    Text("\(buffer.checked)/\(buffer.total) clips checked").font(JoeyTheme.font(14))
                 }
                 ForEach(buffer.selection.clipKeys,id:\.self) {key in
                     VStack(alignment:.leading,spacing:4) {
-                        Text(buffer.state.prepared[key]?.recommendation?.title ?? key).font(JoeyTheme.font(11,weight:.medium))
+                        Text(buffer.state.prepared[key]?.recommendation?.title ?? key).font(JoeyTheme.font(16,weight:.medium))
                         Text(buffer.eligibility(key)).font(JoeyTheme.font(10))
                     }
                 }
@@ -240,7 +296,8 @@ struct BufferHandoffPanel: View {
                     }
                     Text("Imported receipts are GPT-mediated evidence. Buffer ingestion and publication remain separate.")
                 }.font(JoeyTheme.font(10))
-            }.padding(24).controlSize(.small)
+            }.font(JoeyTheme.font(16)).padding(24).controlSize(.large)
+                .toggleStyle(JoeySelectionToggleStyle())
         }
         .onChange(of:buffer.selection.clipKeys) {_,_ in review = false}
     }
