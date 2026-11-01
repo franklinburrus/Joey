@@ -1,6 +1,6 @@
 import Foundation
 
-public enum LinkContent: String, CaseIterable, Sendable {case dub, taxstone, joeBudden}
+public enum LinkContent: String, Codable, CaseIterable, Sendable {case dub, taxstone, joeBudden}
 
 public enum ProductionIntake {
     public static func request(source: DiscoveredSource, content: LinkContent, mode: JobMode,

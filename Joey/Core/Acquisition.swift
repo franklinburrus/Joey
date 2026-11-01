@@ -10,6 +10,7 @@ public enum Acquisition {
     }
     public static func validateOriginalURL(_ raw: String) throws -> URL {
         guard let u = URL(string:raw), u.scheme == "https", u.user == nil, u.password == nil,
+              u.port == nil || u.port == 443,
               let host = u.host?.lowercased(), ["youtube.com","www.youtube.com","youtu.be","x.com","www.x.com","twitter.com"].contains(host) else {
             throw JoeyError.invalid("Paste an original YouTube or X HTTPS link")
         }
