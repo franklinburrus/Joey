@@ -256,6 +256,9 @@ public enum Media {
             receipt.joeBranding = branding;receipt.recipe = "joe-dub-lower-left-and-approved-outro-v1"
         }
         let outputDuration = clip.expectedDuration + (branding?.outroDuration ?? 0)
+        // Preserve mono/stereo and fit multichannel sources to the shared
+        // upload contract. Joe's approved composition already uses stereo.
+        let audioChannels = branding != nil ? 2 : min(2,source.streams.first {$0.codec_type == "audio"}?.channels ?? 1)
         if source.kind == .nativeVideo {
             // Re-probe display metadata so older source checkpoints, which did
             // not serialize display matrices, remain recoverable unchanged.
@@ -277,7 +280,7 @@ public enum Media {
         let maxVideoRate = Int(max(64_000,min(6_000_000,Double(profile.maxBytes)*8/outputDuration*0.90-Double(audioEncodingBitrate))))
         if source.kind == .nativeVideo {
             var args = ["-nostdin","-v","error","-y"]+compositionInputs(source:source,clip:clip,branding:branding)+["-filter_complex",compositionFilter(source,clip,profile,branding:branding),"-map","[v]"]
-            if source.hasAudio { args += ["-map","[a]","-c:a","aac","-profile:a","aac_low","-b:a",String(audioEncodingBitrate)] }
+            if source.hasAudio { args += ["-map","[a]","-c:a","aac","-profile:a","aac_low","-ac",String(audioChannels),"-b:a",String(audioEncodingBitrate)] }
             args += ["-c:v","libx264","-preset","veryfast","-crf","18","-maxrate",String(maxVideoRate),"-bufsize",String(maxVideoRate*2),"-pix_fmt","yuv420p","-r","30","-g","60","-movflags","+faststart","-t",String(outputDuration),output.path]
             _ = try await Processes.run("ffmpeg",args)
         } else {
@@ -287,7 +290,7 @@ public enum Media {
                   source.owner != .dub || artwork.file.sha256 == "1522d2fbbbb6d943cd08cb07b617212be4fafcb841c7dcdba713fe81c4fdc790",
                   let selected = receipt.selectedAudio else { throw JoeyError.dependency("Missing approved \(source.owner.rawValue) artwork matching source \(source.id)") }
             let audio = work.appendingPathComponent("final-audio.m4a")
-            _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-y","-i",selected,"-c:a","aac","-profile:a","aac_low","-b:a",String(audioEncodingBitrate),audio.path])
+            _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-y","-i",selected,"-c:a","aac","-profile:a","aac_low","-ac",String(audioChannels),"-b:a",String(audioEncodingBitrate),audio.path])
             let pcm = work.appendingPathComponent("waveform.f32")
             _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-i",audio.path,"-vn","-ac","1","-ar","48000","-f","f32le","-"],output:pcm)
             let wave = AudioPresentation.envelope(samples:try AudioPresentation.samples(pcm),sampleRate:48000)
@@ -465,10 +468,11 @@ public enum Media {
               bytes > 0, bytes <= profile.maxBytes,
               videoBitrate > 0, videoBitrate < maximumVideoBitrate,
               (source.hasAudio ? p.audio?.codec_name == "aac" && p.audio?.profile == "LC"
-                  && p.audio?.sample_rate == "48000" && audioBitrate > 0 && audioBitrate < maximumAudioBitrate : p.audio == nil),
+                  && p.audio?.sample_rate == "48000" && (1...2).contains(p.audio?.channels ?? 0)
+                  && audioBitrate > 0 && audioBitrate < maximumAudioBitrate : p.audio == nil),
               p.streams.count == (source.hasAudio ? 2:1) else { throw JoeyError.failed("Output technical profile/duration/stream/size validation failed") }
         var checks = ["complete_decode":"FFmpeg full decode with error escalation passed",
-            "technical":"H.264/yuv420p/progressive/SAR 1:1/30fps; measured video bitrate \(videoBitrate) bps below 25000000; AAC-LC/48kHz where source has audio, measured audio bitrate \(audioBitrate) bps below 128000; measured \(p.duration)s, \(bytes) bytes",
+            "technical":"H.264/yuv420p/progressive/SAR 1:1/30fps; measured video bitrate \(videoBitrate) bps below 25000000; AAC-LC/48kHz/mono or stereo where source has audio, measured audio bitrate \(audioBitrate) bps below 128000; measured \(p.duration)s, \(bytes) bytes",
             "intervals":"Exact planned source intervals assembled; measured duration tolerance 0.075s",
             "framing":"Source \(source.width)x\(source.height); effective picture \(render.pictureWidth)x\(render.pictureHeight) inside \(profile.width)x\(profile.height), no quality-upscale claim"]
         let file = try FileHandle(forReadingFrom:output); defer {try? file.close()}

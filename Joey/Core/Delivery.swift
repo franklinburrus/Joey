@@ -7,10 +7,15 @@ public actor DriveDelivery {
     private let remote: String
     private var token: String?
     private let session: URLSession
+    private let helperRunner: @Sendable (String, [String], Int) async throws -> ProcessResult
     private var nextSheetsRequest = ContinuousClock.now
-    public init(remote: String, session: URLSession = .shared) throws {
+    public init(remote: String, session: URLSession = .shared,
+                runHelper: @escaping @Sendable (String, [String], Int) async throws -> ProcessResult = {try await Processes.run($0,$1,maxOutput:$2)}) throws {
         guard remote.range(of:"^[A-Za-z0-9_-]+$",options:.regularExpression) != nil else { throw JoeyError.invalid("Invalid existing rclone remote name") }
-        self.remote = remote; self.session = session
+        self.remote = remote; self.session = session; self.helperRunner = runHelper
+    }
+    private func runHelper(_ executable: String, _ arguments: [String], maxOutput: Int = 16*1024*1024) async throws -> ProcessResult {
+        try await helperRunner(executable,arguments,maxOutput)
     }
     public func preflight(tab: String) async throws -> [String:String] {
         var result: [String:String] = [:]
@@ -28,8 +33,8 @@ public actor DriveDelivery {
     private func authenticate() async throws {
         // Let the already authorized rclone remote refresh its own token. Secrets
         // stay in process memory and its existing config, never job records/logs.
-        _ = try await Processes.run("rclone",["lsjson",remote+":","--drive-root-folder-id",Self.videoRoot,"--max-depth","1"])
-        let config = try await Processes.run("rclone",["config","dump"],maxOutput:1024*1024)
+        _ = try await runHelper("rclone",["lsjson",remote+":","--drive-root-folder-id",Self.videoRoot,"--max-depth","1"])
+        let config = try await runHelper("rclone",["config","dump"],maxOutput:1024*1024)
         guard let root = try JSONSerialization.jsonObject(with:config.stdout) as? [String:Any],
               let entry = root[remote] as? [String:Any], entry["type"] as? String == "drive",
               let raw = entry["token"] as? String, let data = raw.data(using:.utf8),
@@ -111,36 +116,47 @@ public actor DriveDelivery {
             return props?["joeySourceID"] == source.id && props?["joeyOwner"] == source.owner.rawValue || file["name"] as? String == name
         }
         guard matching.count <= 1 else { throw JoeyError.dependency("Duplicate matching source folders require reconciliation; no new folder created") }
-        if let found = matching.first, let id = found["id"] as? String {
-            let props = found["appProperties"] as? [String:String]
-            if props?["joeyOwner"] != source.owner.rawValue || props?["joeySourceID"] != source.id {
-                let intent: [String:String]? = try? Persistence.load(intentURL)
-                let meta = try await metadata(id)
-                let created = ISO8601DateFormatter.fractional.date(from:meta["createdTime"] as? String ?? "")
-                    ?? ISO8601DateFormatter().date(from:meta["createdTime"] as? String ?? "")
-                let started = ISO8601DateFormatter().date(from:intent?["started"] ?? "")
-                guard intent?["root"] == root, intent?["name"] == name, intent?["jobID"] == jobID,
-                      let created, let started, created >= started,
-                      props?["joeyOwner"] == nil, props?["joeySourceID"] == nil,
-                      try await children(id).isEmpty else {
-                    throw JoeyError.dependency("Existing folder lacks matching Joey ownership/source identity or a recoverable creation intent: \(id)")
-                }
-                _ = try await request("files/"+id,method:"PATCH",query:["fields":"id,appProperties"],body:["appProperties":["joeySourceID":source.id,"joeyOwner":source.owner.rawValue,"joeyJobID":jobID]])
-                let fresh = try await metadata(id)
-                guard (fresh["appProperties"] as? [String:String])?["joeyOwner"] == source.owner.rawValue else {throw JoeyError.failed("Recovered folder tagging readback failed")}
-            }
-            return id
+        if let found = matching.first {
+            guard let id = found["id"] as? String else {throw JoeyError.failed("Matching episode folder has no provider identity")}
+            return try await reconcileEpisodeFolder(id:id,root:root,name:name,source:source,jobID:jobID,intentURL:intentURL)
         }
         // rclone creates the folder; an uncertain mkdir is reconciled by listing.
         try Persistence.save(["root":root,"name":name,"jobID":jobID,"started":ISO8601DateFormatter().string(from:Date())],to:intentURL)
-        do { _ = try await Processes.run("rclone",["mkdir",remote+":"+name,"--drive-root-folder-id",root]) }
+        do { _ = try await runHelper("rclone",["mkdir",remote+":"+name,"--drive-root-folder-id",root]) }
         catch { if try await children(root).filter({$0["name"] as? String == name}).isEmpty { throw error } }
         let matches = try await children(root).filter {$0["name"] as? String == name}
         guard matches.count == 1, let id = matches[0]["id"] as? String else { throw JoeyError.failed("Cannot read back unique episode folder") }
-        _ = try await request("files/"+id,method:"PATCH",query:["fields":"id,appProperties"],body:["appProperties":["joeySourceID":source.id,"joeyOwner":source.owner.rawValue,"joeyJobID":jobID]])
-        let fresh = try await metadata(id)
-        guard (fresh["parents"] as? [String])?.contains(root) == true,
-              (fresh["appProperties"] as? [String:String])?["joeyOwner"] == source.owner.rawValue else { throw JoeyError.failed("Episode folder identity readback failed") }
+        return try await reconcileEpisodeFolder(id:id,root:root,name:name,source:source,jobID:jobID,intentURL:intentURL)
+    }
+    private func reconcileEpisodeFolder(id: String, root: String, name: String, source: SourceRecord, jobID: String, intentURL: URL) async throws -> String {
+        let expected = ["joeySourceID":source.id,"joeyOwner":source.owner.rawValue,"joeyJobID":jobID]
+        func matchesLocation(_ metadata: [String:Any]) -> Bool {
+            metadata["id"] as? String == id && metadata["mimeType"] as? String == "application/vnd.google-apps.folder"
+                && metadata["trashed"] as? Bool != true && metadata["parents"] as? [String] == [root]
+        }
+        // Listing identity is only a candidate. Fresh metadata must bind the
+        // folder to this immutable job before any clips or records are written.
+        let meta = try await metadata(id)
+        guard matchesLocation(meta) else {throw JoeyError.failed("Episode folder identity/location readback failed: \(id)")}
+        let props = meta["appProperties"] as? [String:String] ?? [:]
+        if expected.allSatisfy({props[$0.key] == $0.value}) {return id}
+        guard expected.keys.allSatisfy({props[$0] == nil}) else {
+            throw JoeyError.dependency("Existing episode folder has conflicting or unverified job ownership; prior package preserved: \(id)")
+        }
+        let intent: [String:String]? = try? Persistence.load(intentURL)
+        let created = ISO8601DateFormatter.fractional.date(from:meta["createdTime"] as? String ?? "")
+            ?? ISO8601DateFormatter().date(from:meta["createdTime"] as? String ?? "")
+        let started = ISO8601DateFormatter().date(from:intent?["started"] ?? "")
+        guard intent?["root"] == root, intent?["name"] == name, intent?["jobID"] == jobID,
+              meta["name"] as? String == name, let created, let started, created >= started,
+              try await children(id).isEmpty else {
+            throw JoeyError.dependency("Existing folder lacks verified job ownership or a recoverable empty-folder creation intent: \(id)")
+        }
+        _ = try await request("files/"+id,method:"PATCH",query:["fields":"id,appProperties"],body:["appProperties":expected])
+        let fresh = try await metadata(id), freshProps = fresh["appProperties"] as? [String:String] ?? [:]
+        guard matchesLocation(fresh), expected.allSatisfy({freshProps[$0.key] == $0.value}) else {
+            throw JoeyError.failed("Episode folder job/source/owner identity readback failed: \(id)")
+        }
         return id
     }
     public func archive(source: SourceRecord, request: JobRequest) async throws -> String {
@@ -187,7 +203,7 @@ public actor DriveDelivery {
         if FileManager.default.fileExists(atPath:local.path), (try? Integrity.md5(local)) == md5 {return local}
         try Persistence.checkDisk(at:directory,requiredBytes:bytes)
         let partial = directory.appendingPathComponent("original-download.partial")
-        _ = try await Processes.retry {try await Processes.run("rclone",["copyto",self.remote+":"+name,partial.path,"--drive-root-folder-id",parent,"--transfers","1","--checkers","1"])}
+        _ = try await Processes.retry {try await self.runHelper("rclone",["copyto",self.remote+":"+name,partial.path,"--drive-root-folder-id",parent,"--transfers","1","--checkers","1"])}
         guard try Integrity.md5(partial) == md5 else {throw JoeyError.failed("Downloaded original differs from existing archive bytes")}
         if FileManager.default.fileExists(atPath:local.path) {throw JoeyError.failed("Different existing local original preserved; cannot overwrite")}
         try FileManager.default.moveItem(at:partial,to:local)
@@ -209,7 +225,7 @@ public actor DriveDelivery {
             }
             var args = ["copyto",local.path,remote+":"+filename,"--drive-root-folder-id",parent,"--retries","1","--low-level-retries","1","--transfers","1","--checkers","1"]
             args += replaceCompanion ? ["--ignore-times"] : ["--immutable"]
-            do { _ = try await Processes.run("rclone",args) }
+            do { _ = try await runHelper("rclone",args) }
             catch {
                 if error is CancellationError { throw error }
                 // Re-list before retry: provider may have committed the write.
@@ -248,7 +264,7 @@ public actor DriveDelivery {
             let meta = try await metadata(id)
             guard let parent = (meta["parents"] as? [String])?.first, let name = meta["name"] as? String else { throw JoeyError.dependency("Approved DUB art metadata unavailable") }
             let local = root.appendingPathComponent("approved-dub-art.png")
-            _ = try await Processes.run("rclone",["copyto",remote+":"+name,local.path,"--drive-root-folder-id",parent])
+            _ = try await runHelper("rclone",["copyto",remote+":"+name,local.path,"--drive-root-folder-id",parent])
             let sha = try Integrity.sha256(local)
             guard sha == "1522d2fbbbb6d943cd08cb07b617212be4fafcb841c7dcdba713fe81c4fdc790" else { throw JoeyError.failed("Approved DUB artwork bytes changed") }
             return Artwork(owner:.dub,sourceID:nil,driveID:id,file:EvidenceFile(path:local.path,sha256:sha,basis:"Exact approved Drive artwork"))
@@ -262,7 +278,7 @@ public actor DriveDelivery {
             }
             if matches.count == 1, let name = matches[0]["name"] as? String, let id = matches[0]["id"] as? String {
                 let local = root.appendingPathComponent("taxstone-"+Persistence.safeName(source.id)+".art")
-                _ = try await Processes.run("rclone",["copyto",remote+":"+name,local.path,"--drive-root-folder-id",parent])
+                _ = try await runHelper("rclone",["copyto",remote+":"+name,local.path,"--drive-root-folder-id",parent])
                 return Artwork(owner:.taxstone,sourceID:source.id,driveID:id,file:EvidenceFile(path:local.path,sha256:try Integrity.sha256(local),basis:"Unique source-ID-matching image in established Taxstone archive"))
             }
         }
