@@ -1,0 +1,23 @@
+# Development and local runtime artifacts
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+*.xcresult
+.superpowers/
+.env*
+*.log
+*.sqlite*
+*.mp4
+*.mp3
+*.wav
+*.m4a
+*.mov
+*.bin
+*.safetensors
+runtime/
+
+# Python test bytecode
+__pycache__/
+*.py[cod]
