@@ -38,7 +38,7 @@ final class SharedAudioChannelTests: XCTestCase {
             XCTAssertEqual(probe.audio?.channels,channels == 6 ? 2 : channels)
             let qa = try await Media.validate(output:output,source:source,clip:clip,profile:profile,render:render,work:directory)
             XCTAssertTrue(qa.passed)
-            XCTAssertNoThrow(try BufferPreflight.validateTechnical(probe,bytes:Int64(Data(contentsOf:output).count),expectedDuration:6,hasAudio:true,profile:profile))
+            XCTAssertNoThrow(try BufferPreflight.validateTechnical(probe,bytes:Int64(Data(contentsOf:output).count),expectedDuration:6,hasAudio:true,profile:profile.outputProfile(for:.nativeVideo)))
         }
     }
 

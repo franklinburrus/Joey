@@ -247,6 +247,7 @@ public enum Media {
     public static func render(source: SourceRecord, clip: ClipRecord, profile: SharedProfile, artwork: Artwork?, work: URL, output: URL, branding: JoeBranding? = nil) async throws -> RenderReceipt {
         try Task.checkCancellation()
         try validateVideoMapping(source.streams)
+        let outputProfile = profile.outputProfile(for:source.kind)
         try FileManager.default.createDirectory(at:work,withIntermediateDirectories:true)
         try Persistence.checkDisk(at:work,requiredBytes:StorageManager.peakBytes(duration:clip.expectedDuration,sourceBytes:0,clipDuration:clip.expectedDuration+(branding?.outroDuration ?? 0),audio:source.kind == .audio))
         var receipt = RenderReceipt(pictureWidth:0,pictureHeight:0)
@@ -263,7 +264,7 @@ public enum Media {
             // Re-probe display metadata so older source checkpoints, which did
             // not serialize display matrices, remain recoverable unchanged.
             guard let video = try await probe(URL(fileURLWithPath:source.path)).video else {throw JoeyError.failed("Native source picture is unavailable")}
-            let picture = try fittedPictureDimensions(video,profile:profile)
+            let picture = try fittedPictureDimensions(video,profile:outputProfile)
             receipt.pictureWidth = picture.width;receipt.pictureHeight = picture.height
         }
         let input = intervalInputs(source:source,intervals:clip.intervals)
@@ -279,7 +280,7 @@ public enum Media {
         }
         let maxVideoRate = Int(max(64_000,min(6_000_000,Double(profile.maxBytes)*8/outputDuration*0.90-Double(audioEncodingBitrate))))
         if source.kind == .nativeVideo {
-            var args = ["-nostdin","-v","error","-y"]+compositionInputs(source:source,clip:clip,branding:branding)+["-filter_complex",compositionFilter(source,clip,profile,branding:branding),"-map","[v]"]
+            var args = ["-nostdin","-v","error","-y"]+compositionInputs(source:source,clip:clip,branding:branding)+["-filter_complex",compositionFilter(source,clip,outputProfile,branding:branding),"-map","[v]"]
             if source.hasAudio { args += ["-map","[a]","-c:a","aac","-profile:a","aac_low","-ac",String(audioChannels),"-b:a",String(audioEncodingBitrate)] }
             args += ["-c:v","libx264","-preset","veryfast","-crf","18","-maxrate",String(maxVideoRate),"-bufsize",String(maxVideoRate*2),"-pix_fmt","yuv420p","-r","30","-g","60","-movflags","+faststart","-t",String(outputDuration),output.path]
             _ = try await Processes.run("ffmpeg",args)
@@ -294,7 +295,7 @@ public enum Media {
             let pcm = work.appendingPathComponent("waveform.f32")
             _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-i",audio.path,"-vn","-ac","1","-ar","48000","-f","f32le","-"],output:pcm)
             let wave = AudioPresentation.envelope(samples:try AudioPresentation.samples(pcm),sampleRate:48000)
-            let background = try AudioPresentation.background(artwork:artwork,title:clip.title,width:profile.width,height:profile.height)
+            let background = try AudioPresentation.background(artwork:artwork,title:clip.title,width:outputProfile.width,height:outputProfile.height)
             let backgroundURL = work.appendingPathComponent("background.png")
             try AudioPresentation.writePNG(background,to:backgroundURL)
             let video = work.appendingPathComponent("audio-video.mp4")
@@ -304,7 +305,7 @@ public enum Media {
                 "-c:v","libx264","-preset","veryfast","-crf","18","-maxrate",String(maxVideoRate),"-bufsize",String(maxVideoRate*2),"-pix_fmt","yuv420p","-vf","setsar=1","-r","30","-c:a","copy","-movflags","+faststart","-t",String(clip.expectedDuration),output.path])
             receipt.recipe = "approved-\(source.owner.rawValue)-audio-fixed-bars-v1"
             receipt.background = backgroundURL.path; receipt.waveformPCM = pcm.path; receipt.waveform = wave
-            receipt.pictureWidth = profile.width; receipt.pictureHeight = profile.height
+            receipt.pictureWidth = outputProfile.width; receipt.pictureHeight = outputProfile.height
         }
         try Persistence.save(receipt,to:work.appendingPathComponent("render.json"))
         return receipt
@@ -453,6 +454,7 @@ public enum Media {
     }
     public static func validate(output: URL, source: SourceRecord, clip: ClipRecord, profile: SharedProfile, render: RenderReceipt, work: URL) async throws -> QAReport {
         try validateVideoMapping(source.streams)
+        let outputProfile = profile.outputProfile(for:source.kind)
         try await decode(output)
         let p = try await probe(output)
         let branding = render.joeBranding
@@ -463,7 +465,7 @@ public enum Media {
         let bytes = ((try FileManager.default.attributesOfItem(atPath:output.path))[.size] as? NSNumber)?.int64Value ?? 0
         let videoBitrate = Int(p.video?.bit_rate ?? "") ?? 0
         let audioBitrate = Int(p.audio?.bit_rate ?? "") ?? 0
-        guard let v = p.video, v.codec_name == "h264", v.pix_fmt == "yuv420p", v.width == profile.width, v.height == profile.height,
+        guard let v = p.video, v.codec_name == "h264", v.pix_fmt == "yuv420p", v.width == outputProfile.width, v.height == outputProfile.height,
               abs(v.fps-30) < 0.001, v.sample_aspect_ratio == "1:1", v.field_order == "progressive",
               bytes > 0, bytes <= profile.maxBytes,
               videoBitrate > 0, videoBitrate < maximumVideoBitrate,
@@ -474,7 +476,7 @@ public enum Media {
         var checks = ["complete_decode":"FFmpeg full decode with error escalation passed",
             "technical":"H.264/yuv420p/progressive/SAR 1:1/30fps; measured video bitrate \(videoBitrate) bps below 25000000; AAC-LC/48kHz/mono or stereo where source has audio, measured audio bitrate \(audioBitrate) bps below 128000; measured \(p.duration)s, \(bytes) bytes",
             "intervals":"Exact planned source intervals assembled; measured duration tolerance 0.075s",
-            "framing":"Source \(source.width)x\(source.height); effective picture \(render.pictureWidth)x\(render.pictureHeight) inside \(profile.width)x\(profile.height), no quality-upscale claim"]
+            "framing":"Source \(source.width)x\(source.height); effective picture \(render.pictureWidth)x\(render.pictureHeight) inside \(outputProfile.width)x\(outputProfile.height), no quality-upscale claim"]
         let file = try FileHandle(forReadingFrom:output); defer {try? file.close()}
         let header = try file.read(upToCount:min(Int(bytes),4*1024*1024)) ?? Data()
         guard let moov = header.range(of:Data("moov".utf8)), let mdat = header.range(of:Data("mdat".utf8)), moov.lowerBound < mdat.lowerBound else { throw JoeyError.failed("MP4 faststart metadata not before media") }
@@ -494,7 +496,7 @@ public enum Media {
         }
         if source.kind == .nativeVideo {
             let expected = work.appendingPathComponent("expected-picture.gray")
-            var filter = compositionFilter(source,clip,profile,branding:branding)
+            var filter = compositionFilter(source,clip,outputProfile,branding:branding)
             if source.hasAudio { filter += ";[a]anullsink" }
             filter += ";[v]fps=2,scale=160:284,format=gray[q]"
             _ = try await Processes.run("ffmpeg",["-nostdin","-v","error"]+compositionInputs(source:source,clip:clip,branding:branding)+["-filter_complex",filter,"-map","[q]","-t",String(outputDuration),"-f","rawvideo","-"],output:expected)
@@ -505,7 +507,7 @@ public enum Media {
             let mean = zip(a,b).reduce(0.0) {$0+abs(Double($1.0)-Double($1.1))}/Double(min(a.count,b.count))
             guard mean <= 6 else { throw JoeyError.failed("Source-only picture fidelity failed: mean pixel error \(mean)") }
             checks["picture_fidelity"] = "2fps whole-frame 160x284 grayscale comparison; mean pixel error \(mean)/255; includes padding and source graphics"
-            checks["source_picture_timeline"] = try await validateSourcePictureTiming(output:output,source:source,clip:clip,profile:profile,render:render)
+            checks["source_picture_timeline"] = try await validateSourcePictureTiming(output:output,source:source,clip:clip,profile:outputProfile,render:render)
             checks["unrequested_additions"] = branding == nil ? "Source-only render recipe and whole-frame comparison; no added artwork, captions, logos or outro" : "Only hash-pinned DUB logo at x34 y866 size180×180, plus the full approved 7.300-second outro; whole-composition picture and audio comparison passed"
             if let branding {
                 checks["approved_logo"] = JoeBranding.logoID+" SHA-256 "+branding.logo.sha256
@@ -520,7 +522,7 @@ public enum Media {
             let wave = AudioPresentation.envelope(samples:finalSamples,sampleRate:48000)
             guard zip(wave.levels,waveform.levels).allSatisfy({abs($0-$1) < 0.05}) else { throw JoeyError.failed("Waveform response does not match final audio") }
             checks["waveform"] = "Fixed 120 horizontal positions, vertical source-PCM amplitude; decoded final audio envelope matched within 0.05; PCM SHA256 \(try Integrity.sha256(URL(fileURLWithPath:pcm)))"
-            let box = AudioPresentation.waveBox(owner:source.owner,width:profile.width)
+            let box = AudioPresentation.waveBox(owner:source.owner,width:outputProfile.width)
             let wavePixels = work.appendingPathComponent("qa-wave.rgb")
             let bw = Int(box.width), bh = Int(box.height)
             _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-i",output.path,"-vf",

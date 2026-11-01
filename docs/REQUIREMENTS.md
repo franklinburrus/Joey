@@ -148,6 +148,8 @@ Automatically select a compliant shared profile or report the exact incompatibil
 
 11. AUTHORITATIVE JOEY OUTPUT DESTINATIONS
 
+2026-11-01 filing amendment: the original Dub hierarchy, root `1owpGIsjztPdlIIVb7DaszgtlbgEwrJ0Q`, is authoritative. The following existing Joey folders remain unchanged under `Dub/Content/Media/Clips/X Video Clips` and `Dub/Content/Media/Clips/X Audio Clips`, respectively. Core `1a2p1KpTrnBO842DfPZmekVSayaIsH4NW` is retained only as inactive historical navigation and is not a production dependency. Use the existing automatic DriveDelivery path and exact destination IDs; no per-job manual folder selection or new hierarchy is required. Current filing guidance is consolidated in the existing `Dub_Media_End_to_End_Process.md` (Drive ID `1tSTbif1nx1vttyX-6-234e7zumm1sXxh`). This amendment changes no media-production format or platform requirement.
+
 Native-video clips: Joey Video Clips
 https://drive.google.com/drive/folders/1fgABGYTtNC_h2u-v6fwTcPkVKjFd7GQx
 

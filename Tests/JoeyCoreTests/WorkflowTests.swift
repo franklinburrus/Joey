@@ -62,6 +62,7 @@ final class WorkflowTests: XCTestCase {
         let media = dir.appendingPathComponent("source.mp4")
         _ = try await Processes.run("ffmpeg",["-v","error","-f","lavfi","-i","testsrc2=s=320x180:r=30:d=2","-f","lavfi","-i","sine=frequency=440:duration=2","-c:v","libx264","-c:a","aac","-shortest",media.path])
         var request = try Fixtures.request(dir:dir,path:media.path)
+        request.profile = try Fixtures.landscapeProfile(dir:dir)
         let transcriptURL = dir.appendingPathComponent("input-transcript.json")
         let transcript = Transcript(sourceID:request.sourceID,sourceSHA256:try Integrity.sha256(media),duration:2,engine:"fixture",segments:[TranscriptSegment(start:0,end:2,text:"A complete synthetic test sentence.")])
         try Persistence.save(transcript,to:transcriptURL); request.transcriptPath = transcriptURL.path

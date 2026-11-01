@@ -22,7 +22,7 @@ final class MediaTests: XCTestCase {
             // must recover metadata from the unchanged original, not rerun intake.
             for index in source.streams.indices {source.streams[index].side_data_list = nil}
         }
-        let profile = try Fixtures.profile(dir:dir)
+        let profile = try Fixtures.landscapeProfile(dir:dir)
         let clip = ClipRecord(id:1,title:"Display geometry",intervals:[Interval(0,2)],filename:"clip.mp4")
         let output = dir.appendingPathComponent(clip.filename)
         let render = try await Media.render(source:source,clip:clip,profile:profile,artwork:nil,work:dir,output:output)
@@ -81,7 +81,7 @@ final class MediaTests: XCTestCase {
             bytes:Int64(try Data(contentsOf:sourceURL).count),sha256:try Integrity.sha256(sourceURL),duration:1,
             width:160,height:90,fps:30,hasAudio:false,kind:.nativeVideo,streams:probe.streams,
             authorizationBasis:"Generated test media",classificationEvidence:"Legacy multiple-track inspection")
-        let profile = try Fixtures.profile(dir:dir)
+        let profile = try Fixtures.landscapeProfile(dir:dir)
         let clip = ClipRecord(id:1,title:"Two angles",intervals:[Interval(0,1)],filename:"clip.mp4")
         do {
             _ = try await Media.render(source:legacy,clip:clip,profile:profile,artwork:nil,work:dir,output:dir.appendingPathComponent(clip.filename))
@@ -122,7 +122,7 @@ final class MediaTests: XCTestCase {
         let source = try await Media.inspect(sourceURL,request:Fixtures.request(dir:dir,path:sourceURL.path))
         let clip = ClipRecord(id:1,title:"Audio contract",intervals:[Interval(0,4)],filename:"clip.mp4")
         let output = dir.appendingPathComponent(clip.filename)
-        let profile = try Fixtures.profile(dir:dir)
+        let profile = try Fixtures.landscapeProfile(dir:dir)
         let render = try await Media.render(source:source,clip:clip,profile:profile,artwork:nil,work:dir,output:output)
         let result = try await Processes.run("ffprobe",["-v","error","-select_streams","a:0","-show_entries","stream=bit_rate","-of","json",output.path])
         let object = try JSONSerialization.jsonObject(with:result.stdout) as! [String:Any]
@@ -140,7 +140,7 @@ final class MediaTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("technical"),"Expected technical-contract rejection, got: \(error)")
         }
     }
-    func testNativeRenderPreservesFrameAndRejectsCorruption() async throws {
+    func testNativeRenderPreservesCompleteFrameAt1920x1080AndRejectsCorruption() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
         defer { try? FileManager.default.removeItem(at:dir) }
@@ -150,12 +150,12 @@ final class MediaTests: XCTestCase {
         XCTAssertEqual(source.kind,.nativeVideo)
         let clip = ClipRecord(id:1,title:"fixture",intervals:[Interval(0.25,1.25),Interval(2,3)],filename:"clip.mp4")
         let output = dir.appendingPathComponent("clip.mp4")
-        let profile = try Fixtures.profile(dir:dir)
+        let profile = try Fixtures.landscapeProfile(dir:dir)
         let render = try await Media.render(source:source,clip:clip,profile:profile,artwork:nil,work:dir,output:output)
         let qa = try await Media.validate(output:output,source:source,clip:clip,profile:profile,render:render,work:dir)
         XCTAssertTrue(qa.passed)
         let p = try await Media.probe(output)
-        XCTAssertEqual(p.video?.width,720); XCTAssertEqual(p.video?.height,1280)
+        XCTAssertEqual(p.video?.width,1920); XCTAssertEqual(p.video?.height,1080)
         XCTAssertEqual(p.duration,2,accuracy:0.075)
         XCTAssertEqual(render.pictureWidth,320); XCTAssertEqual(render.pictureHeight,180)
         try Data("corrupt".utf8).write(to:output)
@@ -184,6 +184,12 @@ enum Fixtures {
         let x = SurfaceCapability(platform:"X",account:"fixture",surface:"fixture",checkedAt:Date().addingTimeInterval(-60),validUntil:Date().addingTimeInterval(3600),maxDuration:600,maxBytes:512_000_000,maxWidth:720,maxHeight:1280,maxFPS:30,officialURLs:["https://help.x.com/en/using-x/x-videos"],accountEvidence:proof)
         let ig = SurfaceCapability(platform:"Instagram",account:"fixture",surface:"fixture",checkedAt:x.checkedAt,validUntil:x.validUntil,maxDuration:900,maxBytes:1_000_000_000,maxWidth:1080,maxHeight:1920,maxFPS:60,officialURLs:["https://developers.facebook.com/docs/instagram-platform/content-publishing"],accountEvidence:proof)
         return try SharedProfile.select(x:x,instagram:ig)
+    }
+    static func landscapeProfile(dir: URL) throws -> SharedProfile {
+        var profile = try profile(dir:dir)
+        profile.x!.maxWidth = 1920;profile.x!.maxHeight = 1920
+        profile.instagram!.maxWidth = 1920;profile.instagram!.maxHeight = 1920
+        return profile
     }
     static func request(dir: URL, path: String) throws -> JobRequest {
         JobRequest(owner:.dub,sourceID:"fixture-source",title:"Fixture",localPath:path,authorizationBasis:"Generated test media",profile:try profile(dir:dir),fileToDrive:false)

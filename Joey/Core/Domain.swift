@@ -93,6 +93,12 @@ public struct SharedProfile: Codable, Equatable, Sendable {
     }
     public var maxDuration: Double { driveOnlyJoe == true ? 607.3 : min(x?.maxDuration ?? 0, instagram?.maxDuration ?? 0) }
     public var maxBytes: Int64 { driveOnlyJoe == true ? 2_000_000_000 : min(x?.maxBytes ?? 0, instagram?.maxBytes ?? 0) }
+    func outputProfile(for kind: MediaKind) -> SharedProfile {
+        guard kind == .nativeVideo, driveOnlyJoe != true else {return self}
+        var landscape = self
+        landscape.width = 1920;landscape.height = 1080
+        return landscape
+    }
     public func validate(now: Date = Date(), requireCurrentEvidence: Bool = true) throws {
         if driveOnlyJoe == true {
             guard x == nil, instagram == nil, width == 1920, height == 1080 else {
