@@ -1,130 +1,266 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
-struct ContentView: View {
-    @StateObject private var model = JobModel()
-    @State private var newJob = false
-    var body: some View {
-        NavigationSplitView {
-            List(selection:$model.selected) {
-                Section("Jobs") {
-                    ForEach(model.jobs) {job in
-                        VStack(alignment:.leading,spacing:5) {
-                            Text(job.request.title).font(.headline).lineLimit(2)
-                            Text("\(job.request.owner.rawValue.uppercased()) · \(job.state.rawValue)")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }.padding(.vertical,5).tag(job.id)
-                    }
-                }
-            }
-            .navigationSplitViewColumnWidth(min:240,ideal:280,max:360)
-            .navigationTitle("Joey")
-            .toolbar {
-                Button("New job",systemImage:"plus") {newJob = true}.disabled(model.busy)
-                Menu("Setup",systemImage:"gearshape") {
-                    Button("Import verified shared profile…") {model.importProfile()}
-                    Button("Import job request…") {model.importJob()}.disabled(model.busy)
-                    Button("Open local settings") {model.openSettings()}
-                }
-            }
-        } detail: {
-            if let job = model.jobs.first(where:{$0.id == model.selected}) {
-                ScrollView {
-                    VStack(alignment:.leading,spacing:18) {
-                        Text(job.request.title).font(.largeTitle.bold())
-                        Text("\(job.request.owner.rawValue.uppercased()) · \(job.request.sourceID)").foregroundStyle(.secondary).textSelection(.enabled)
-                        HStack {
-                            Label(job.state == .qaPassed && job.request.fileToDrive ? "QA_PASSED — NOT FILED" : job.state.rawValue,
-                                  systemImage:job.state == .completed ? "checkmark.circle.fill":"clock")
-                            if model.busy {ProgressView().controlSize(.small)}
-                            Spacer()
-                            if model.busy {Button("Cancel") {model.cancel()}}
-                            else if job.state != .completed {Button("Resume") {model.start(job.request)}}
-                            Button("Show files") {model.reveal(job)}
-                        }
-                        Text(job.stage).font(.headline)
-                        if let error = job.error {Text(error).foregroundStyle(.red).textSelection(.enabled)}
-                        if let source = job.source {
-                            Text("\(source.kind == .nativeVideo ? "Native video":"Audio presentation") · \(source.duration, specifier:"%.2f") seconds · \(job.clips.count) clips")
-                        }
-                        if let folder = job.folderID, let url = URL(string:"https://drive.google.com/drive/folders/"+folder) {Link("Open episode folder",destination:url)}
-                        Divider()
-                        ForEach(job.clips) {clip in
-                            VStack(alignment:.leading,spacing:7) {
-                                Text("\(clip.id). \(clip.title)").font(.headline)
-                                Text(clip.intervals.map {String(format:"%.3f–%.3f s",$0.start,$0.end)}.joined(separator:"; ")).monospacedDigit()
-                                Text("Duration: \(clip.measuredDuration ?? clip.expectedDuration, specifier:"%.3f") s · QA: \(clip.qa?.passed == true ? "passed":"pending")").foregroundStyle(.secondary)
-                                if let link = clip.drive?.url, let url = URL(string:link) {Link("Open verified clip",destination:url)}
-                                if let qa = clip.qa {
-                                    DisclosureGroup("Automatic checks") {
-                                        ForEach(qa.checks.keys.sorted(),id:\.self) {key in Text("\(key): \(qa.checks[key]!)").font(.caption).textSelection(.enabled)}
-                                    }
-                                }
-                            }.frame(maxWidth:.infinity,alignment:.leading).padding().background(.quaternary,in:RoundedRectangle(cornerRadius:12))
-                        }
-                    }.padding(28).frame(maxWidth:1000,alignment:.leading)
-                }
-            } else {
-                ContentUnavailableView {
-                    Label("Your media, ready to share",systemImage:"film.stack")
-                } description: {
-                    Text("Create shared X and Instagram clips from authorized DUB or Taxstone sources. Joey handles local processing, automatic checks and verified Drive filing.")
-                } actions: {Button("New job") {newJob = true}.buttonStyle(.borderedProminent)}
-            }
-        }
-        .frame(minWidth:960,minHeight:640)
-        .sheet(isPresented:$newJob) {NewJobView(model:model,isPresented:$newJob)}
-        .alert("Joey needs an input",isPresented:Binding(get:{model.error != nil},set:{if !$0 {model.error = nil}})) {
-            Button("OK") {model.error = nil}
-        } message: {Text(model.error ?? "")}
+private enum JoeyDestination: String, CaseIterable {
+    case process = "Process", jobs = "Jobs", shows = "Shows", buffer = "Ready for Buffer"
+    var symbol: String {
+        switch self {case .process: return "record.circle"; case .jobs: return "list.bullet.rectangle"; case .shows: return "mic";case .buffer:return "square.and.arrow.up"}
     }
 }
 
-private struct NewJobView: View {
+struct ContentView: View {
     @ObservedObject var model: JobModel
-    @Binding var isPresented: Bool
-    @State private var owner: Owner = .dub
-    @State private var mode: JobMode = .fullShow
-    @State private var path = ""
-    @State private var url = ""
-    @State private var title = ""
-    @State private var sourceID = ""
-    @State private var authorization = ""
-    @State private var archive = ""
-    @State private var count = 10
-    @State private var transcript = ""
-    @State private var file = true
+    @StateObject private var buffer = BufferViewModel()
+    @State private var destination: JoeyDestination = .process
+    @State private var selectedID: String?
+    @State private var intake = false
+    @State private var intakeURL = ""
+    @State private var intakeContent: LinkContent = .dub
+    @State private var settings = false
+    @State private var assistant = false
+    @State private var dropTargeted = false
+    @AppStorage("joey.appearance") private var appearance = JoeyAppearance.light.rawValue
+    @Environment(\.colorScheme) private var scheme
+    private var selectedAppearance: JoeyAppearance {JoeyAppearance(rawValue:appearance) ?? .system}
+    private var selectedJob: JobRecord? {JobPresentation.selectedJob(in:model.jobs,id:selectedID)}
+    private var working: Bool {model.busy || model.libraryBusy || model.preparingSource}
+
     var body: some View {
-        VStack(alignment:.leading,spacing:16) {
-            Text("New media job").font(.title.bold())
-            Form {
-                Picker("Owner",selection:$owner) {Text("DUB").tag(Owner.dub);Text("Taxstone").tag(Owner.taxstone)}
-                HStack {TextField("Local original",text:$path);Button("Choose…") {if let p = model.chooseFile() {path = p}}}
-                TextField("Original YouTube / X URL",text:$url)
-                TextField("Stable source ID",text:$sourceID)
-                TextField("Source title",text:$title)
-                TextField("Authorization basis",text:$authorization)
-                TextField("Existing full-length archive link",text:$archive)
-                Picker("Coverage",selection:$mode) {Text("Full show").tag(JobMode.fullShow);Text("Highlights").tag(JobMode.highlights)}
-                if mode == .highlights {Stepper("Highlights: \(count)",value:$count,in:1...100)}
-                HStack {TextField("Existing full transcript (optional)",text:$transcript);Button("Choose…") {if let p = model.chooseFile() {transcript = p}}}
-                Toggle("File verified outputs to Joey’s Drive folders",isOn:$file)
-            }.formStyle(.grouped)
-            if let profile = model.configuration?.profile {
-                Text("Shared profile: \(profile.width)×\(profile.height), up to \(profile.maxDuration,specifier:"%.0f") seconds. Full-show planning uses natural boundaries up to ten minutes within this limit.").font(.caption).foregroundStyle(.secondary)
+        HStack(spacing:0) {
+            sidebar.frame(width:172)
+            Divider()
+            workspace.frame(minWidth:390,maxWidth:.infinity,maxHeight:.infinity)
+            Divider()
+            inspector.frame(width:350).frame(maxHeight:.infinity)
+        }
+        .font(JoeyTheme.font(14))
+        .foregroundStyle(.primary)
+        .background(JoeyTheme.background(scheme))
+        .tint(JoeyTheme.primary(scheme))
+        .frame(minWidth:960,minHeight:660)
+        .preferredColorScheme(selectedAppearance.colorScheme)
+        .onAppear {selectedAppearance.apply()}
+        .onChange(of:appearance) {_,_ in selectedAppearance.apply()}
+        .sheet(isPresented:$intake) {
+            NewJobView(model:model,initialURL:intakeURL,initialContent:intakeContent) {intake = false}
+                .frame(width:620,height:610)
+        }
+        .sheet(isPresented:$settings) {
+            VStack(spacing:0) {
+                HStack {Text("Settings").font(.headline);Spacer();Button("Done") {settings = false}}.padding()
+                Divider()
+                JoeySettingsView(model:model,appearance:$appearance)
+            }.frame(width:680,height:650)
+        }
+        .sheet(isPresented:$assistant) {AssistantView(mediaBusy:model.busy || model.libraryBusy)}
+        .alert("Joey needs attention",isPresented:Binding(get:{model.error != nil},set:{if !$0 {model.error = nil}})) {
+            Button("OK") {model.error = nil}
+        } message: {Text(model.error ?? "")}
+    }
+
+    private var sidebar: some View {
+        VStack(alignment:.leading,spacing:36) {
+            Text("Joey").font(JoeyTheme.font(44,weight:.bold)).tracking(-2).padding(.top,24)
+            VStack(spacing:8) {
+                ForEach(JoeyDestination.allCases,id:\.self) {item in
+                    Button {destination = item} label: {
+                        HStack(spacing:12) {
+                            Image(systemName:item.symbol).font(.system(size:19)).frame(width:24)
+                            Text(item.rawValue).font(JoeyTheme.font(15,weight:.medium))
+                            Spacer(minLength:0)
+                        }.padding(.horizontal,12).padding(.vertical,14)
+                            .foregroundStyle(destination == item ? JoeyTheme.primary(scheme) : Color.primary)
+                            .background(destination == item ? Color.primary.opacity(0.045) : Color.clear,in:RoundedRectangle(cornerRadius:4))
+                            .overlay(alignment:.leading) {
+                                if destination == item {Rectangle().fill(JoeyTheme.primary(scheme)).frame(width:2).padding(.vertical,12)}
+                            }
+                    }.buttonStyle(.plain).accessibilityAddTraits(destination == item ? .isSelected : [])
+                }
+            }
+            Spacer()
+            Menu {
+                Button("Settings…") {settings = true}
+                Button("Local Assistant…") {assistant = true}.disabled(working)
+            } label: {Label("Settings",systemImage:"gearshape").font(JoeyTheme.font(12))}
+                .menuStyle(.borderlessButton).fixedSize().foregroundStyle(.secondary)
+            Label {
+                Text(working ? "Working" : model.error != nil ? "Needs attention" : "Ready")
+            } icon: {
+                Circle().fill(working ? JoeyTheme.primary(scheme) : model.error != nil ? Color.secondary : JoeyTheme.verified).frame(width:7,height:7)
+            }.font(JoeyTheme.font(12)).foregroundStyle(.secondary)
+        }.padding(.horizontal,18).padding(.bottom,24)
+    }
+
+    @ViewBuilder private var workspace: some View {
+        if destination == .buffer {
+            BufferReadyView(buffer:buffer,model:model)
+        } else if destination == .shows {
+            ShowsView(model:model) {url in openIntake(url,content:.joeBudden)}
+        } else {
+            ScrollView {
+                VStack(alignment:.leading,spacing:28) {
+                    if destination == .process {dropArea}
+                    HStack {
+                        Text(destination == .process ? "Recent jobs" : "Jobs").font(JoeyTheme.font(20,weight:.medium))
+                        Spacer()
+                        if destination == .jobs {
+                            Button("Import Link",systemImage:"plus") {openIntake()}.disabled(working)
+                        }
+                    }
+                    if model.jobs.isEmpty {
+                        Text("No jobs yet").foregroundStyle(.secondary).padding(.vertical,32)
+                    } else {
+                        LazyVStack(spacing:0) {
+                            ForEach(destination == .process ? Array(model.jobs.prefix(8)) : model.jobs) {job in
+                                JobRow(job:job,selected:selectedJob?.id == job.id,isRunning:isRunning(job)) {selectedID = job.id}
+                                Divider()
+                            }
+                        }
+                    }
+                    if destination == .process && model.jobs.count > 8 {
+                        Button("View all jobs") {destination = .jobs}.buttonStyle(.plain).foregroundStyle(.secondary)
+                    }
+                }.padding(28)
+            }
+        }
+    }
+
+    private var dropArea: some View {
+        Button {openIntake()} label: {
+            VStack(spacing:18) {
+                Image(systemName:"square.and.arrow.up").font(.system(size:38,weight:.light))
+                Text("Drop a link or import").font(JoeyTheme.font(17,weight:.medium))
+                Text("YouTube or X").font(JoeyTheme.font(12)).foregroundStyle(.secondary)
+            }.frame(maxWidth:.infinity).frame(height:250)
+                .background(dropTargeted ? JoeyTheme.primary(scheme).opacity(0.06) : Color.primary.opacity(0.015))
+                .overlay(RoundedRectangle(cornerRadius:4).strokeBorder(Color.primary.opacity(dropTargeted ? 0.5 : 0.2),style:StrokeStyle(lineWidth:1,dash:[5,4])))
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain).disabled(working)
+            .accessibilityLabel("Import a YouTube or X link")
+            .onDrop(of:[UTType.url, UTType.plainText],isTargeted:$dropTargeted) {providers in
+                guard !working, providers.count == 1, let provider = providers.first else {return false}
+                if provider.canLoadObject(ofClass:NSURL.self) {
+                    _ = provider.loadObject(ofClass:NSURL.self) {value,_ in
+                        guard let value = value as? NSURL else {return}
+                        let raw = (value as URL).absoluteString
+                        Task { @MainActor in
+                            guard !working else {return}
+                            _ = acceptLink(raw)
+                        }
+                    }
+                    return true
+                }
+                if provider.canLoadObject(ofClass:NSString.self) {
+                    _ = provider.loadObject(ofClass:NSString.self) {value,_ in
+                        guard let value = value as? NSString else {return}
+                        let raw = value as String
+                        Task { @MainActor in
+                            guard !working else {return}
+                            _ = acceptLink(raw)
+                        }
+                    }
+                    return true
+                }
+                return false
+            }
+    }
+
+    private func acceptLink(_ raw: String) -> Bool {
+        do {
+            let url = try Acquisition.validateOriginalURL(raw.trimmingCharacters(in:.whitespacesAndNewlines))
+            openIntake(url.absoluteString)
+            return true
+        } catch {model.error = error.localizedDescription;return false}
+    }
+    private func openIntake(_ url: String = "", content: LinkContent = .dub) {intakeURL = url;intakeContent = content;intake = true}
+    private func isRunning(_ job: JobRecord) -> Bool {
+        (model.busy && model.jobs.first?.id == job.id) ||
+        (model.libraryBusy && model.taxstoneLibrary.currentSourceID == job.request.sourceID && job.state != .completed)
+    }
+    @ViewBuilder private var inspector: some View {
+        if destination == .buffer {
+            BufferHandoffPanel(buffer:buffer,model:model)
+        } else if let job = selectedJob {
+            JobDetailView(model:model,job:job,isRunning:isRunning(job),onPrepare:{buffer.episodeID = job.id;destination = .buffer})
+        } else {
+            VStack(spacing:16) {
+                Image(systemName:"film.stack").font(.system(size:30,weight:.light))
+                Text("Select a job").font(JoeyTheme.font(18,weight:.medium))
+                Text("Preview, progress and results").font(JoeyTheme.font(12)).foregroundStyle(.secondary)
+            }.frame(maxWidth:.infinity,maxHeight:.infinity)
+        }
+    }
+}
+
+private struct JobRow: View {
+    let job: JobRecord
+    let selected: Bool
+    let isRunning: Bool
+    var select: () -> Void
+    @Environment(\.colorScheme) private var scheme
+    private var presentation: JobPresentation {JobPresentation(job:job)}
+    var body: some View {
+        Button(action:select) {
+            HStack(spacing:14) {
+                Image(systemName:job.source?.kind == .audio ? "waveform" : "film")
+                    .font(.system(size:21,weight:.light)).frame(width:44,height:54)
+                    .background(Color.primary.opacity(0.04),in:RoundedRectangle(cornerRadius:3))
+                VStack(alignment:.leading,spacing:7) {
+                    Text(job.request.title).font(JoeyTheme.font(14,weight:.medium)).lineLimit(2)
+                    Text(presentation.status).font(JoeyTheme.font(11)).foregroundStyle(.secondary)
+                    JobProgressView(presentation:presentation,isRunning:isRunning)
+                        .allowsHitTesting(false).accessibilityHidden(true)
+                }
+                Spacer(minLength:0)
+                if presentation.completed {Image(systemName:"checkmark.circle.fill").foregroundStyle(JoeyTheme.verified)}
+                else if job.error != nil {Image(systemName:"exclamationmark.circle").foregroundStyle(.secondary)}
+                else if isRunning {Circle().fill(JoeyTheme.primary(scheme)).frame(width:7,height:7)}
+            }.padding(.vertical,16).padding(.horizontal,10)
+                .frame(maxWidth:.infinity,alignment:.leading)
+                .background(selected ? Color.primary.opacity(0.035) : Color.clear)
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain)
+            .accessibilityElement(children:.ignore)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction {select()}
+            .accessibilityLabel("\(job.request.title), \(presentation.status)")
+            .accessibilityValue(presentation.total > 0 ? "\(presentation.accepted) of \(presentation.total) clips passed QA" : "No clips planned")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+struct JobProgressView: View {
+    let presentation: JobPresentation
+    let isRunning: Bool
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        VStack(alignment:.leading,spacing:5) {
+            if let progress = presentation.clipProgress {
+                ProgressView(value:progress)
+                    .progressViewStyle(JoeyMeasuredProgressStyle(color:presentation.completed ? JoeyTheme.verified : isRunning ? JoeyTheme.primary(scheme) : .secondary))
+                    .accessibilityLabel("Clips passed automated QA")
+                    .accessibilityValue("\(presentation.accepted) of \(presentation.total)")
+                Text("QA · \(presentation.accepted)/\(presentation.total) clips").font(JoeyTheme.font(11)).foregroundStyle(.secondary).monospacedDigit()
+            } else if isRunning {
+                ProgressView().progressViewStyle(.linear).tint(JoeyTheme.primary(scheme))
+                    .accessibilityLabel("Processing; clip count not yet available")
             } else {
-                Label("Verified X and Instagram account/upload settings are required.",systemImage:"exclamationmark.circle").foregroundStyle(.orange)
-                Button("Import verified shared profile…") {model.importProfile()}
+                Text("No clips planned").font(JoeyTheme.font(11)).foregroundStyle(.secondary)
             }
-            HStack {
-                Button("Cancel") {isPresented = false}; Spacer()
-                Button("Start job") {
-                    guard let profile = model.configuration?.profile else {return}
-                    let request = JobRequest(owner:owner,sourceID:sourceID,title:title,originalURL:url.isEmpty ? nil:url,
-                        localPath:path.isEmpty ? nil:path,authorizationBasis:authorization,archiveReference:archive.isEmpty ? nil:archive,
-                        mode:mode,requestedCount:mode == .highlights ? count:nil,transcriptPath:transcript.isEmpty ? nil:transcript,profile:profile,fileToDrive:file)
-                    model.start(request); isPresented = false
-                }.buttonStyle(.borderedProminent).disabled(model.configuration?.profile == nil || sourceID.isEmpty || title.isEmpty || authorization.isEmpty || (path.isEmpty && url.isEmpty))
+        }
+    }
+}
+
+/// macOS's native linear indicator can ignore tint. Keep the standard progress
+/// accessibility semantics while drawing the measured fraction in our palette.
+private struct JoeyMeasuredProgressStyle: ProgressViewStyle {
+    let color: Color
+    func makeBody(configuration: ProgressViewStyleConfiguration) -> some View {
+        GeometryReader {geometry in
+            ZStack(alignment:.leading) {
+                Capsule().fill(Color.primary.opacity(0.08))
+                Capsule().fill(color).frame(width:geometry.size.width * min(1,max(0,configuration.fractionCompleted ?? 0)))
             }
-        }.padding(24).frame(width:680,height:720)
+        }.frame(height:5)
     }
 }

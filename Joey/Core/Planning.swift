@@ -9,6 +9,10 @@ public struct Interval: Codable, Equatable, Sendable {
 
 public enum Planning {
     public static let tolerance = 0.000001
+    public static func highlightCount(duration: Double) throws -> Int {
+        guard duration.isFinite, duration > 0, duration <= 7*24*3600 else {throw JoeyError.invalid("Invalid show duration")}
+        return max(1,Int(ceil(duration/900)))
+    }
     public static func retained(duration: Double, exclusions: [Interval]) throws -> [Interval] {
         guard duration.isFinite, duration > 0 else { throw JoeyError.invalid("Source duration must be finite and positive") }
         var cursor = 0.0
@@ -26,11 +30,20 @@ public enum Planning {
         return result
     }
     public static func fullShow(duration: Double, exclusions: [Interval] = [], limit: Double = 600,
-                                boundaries: [Double] = []) throws -> [[Interval]] {
+                                boundaries: [Double] = [], preferredDuration: Double = 600, minimumDuration: Double = 0) throws -> [[Interval]] {
         guard limit.isFinite, limit > 0 else { throw JoeyError.invalid("Invalid platform duration limit") }
         let ranges = try retained(duration: duration, exclusions: exclusions)
         let total = ranges.reduce(0) { $0 + $1.duration }
-        let target = min(600, limit)
+        guard minimumDuration.isFinite, minimumDuration >= 0, minimumDuration <= limit,
+              total >= minimumDuration,
+              minimumDuration == 0 || ceil(total / limit) <= floor((total + tolerance) / minimumDuration) else {
+            throw JoeyError.invalid("Retained content cannot satisfy the shared minimum duration of \(minimumDuration)s without omitting, repeating or padding content")
+        }
+        guard preferredDuration.isFinite, (480...600).contains(preferredDuration) else {
+            throw JoeyError.invalid("Preferred full-show duration must be between 480 and 600 seconds")
+        }
+        let platformTarget = min(600, limit)
+        let target = min(preferredDuration, platformTarget)
         var timelineBoundaries: [Double] = []
         var offset = 0.0
         for range in ranges {
@@ -42,8 +55,11 @@ public enum Planning {
         var clips: [[Interval]] = []
         while cursor < total {
             var end = min(cursor + target, total)
+            // Reserve a valid final clip rather than emitting a tiny remainder.
+            if end < total, total-end < minimumDuration {end = total-minimumDuration}
             if end < total, let natural = timelineBoundaries.filter({
-                $0 >= cursor + min(480, target * 0.8) && $0 <= end
+                $0 >= cursor + max(minimumDuration,min(480, platformTarget * 0.8)) && $0 <= end
+                    && total-$0 >= minimumDuration
             }).max() { end = natural }
             var position = 0.0
             var clip: [Interval] = []

@@ -26,6 +26,31 @@ not claim that a hook enforces the mode when no hook has been verified.
 
 ## Build continuity
 
+Launch Joey build, test and diagnostic executables through
+`python3 Tools/run-local.py EXECUTABLE [ARG ...]`, using direct arguments rather
+than login/interactive shells. This launcher supplies a minimal environment at
+the child-process boundary. Raw diagnostic commands can dump inherited secrets;
+do not run them with the ambient development environment. Never use real
+credentials for prevention tests; use dummy canaries. Native media helpers use
+the matching allowlist in Processes/ProcessSupervisor. Do not add credential
+variables to either allowlist to work around a missing dependency.
+
+Use ChatGPT sign-in for Codex. AI-service API keys and API-key billing are not
+Joey development or application prerequisites. Never create, request, replace,
+embed or use such keys, including for credential-owner probes. Use the same
+launcher for direct Joey executable launches and authorized installation tools;
+do not change the installed app without current installation authority. Keep
+authorized Google Drive/Sheets OAuth integrations separate and intact. Pending
+owner-confirmed revocation does not block safe development without API keys.
+
+The optional local assistant is separate from core clipping and transcription.
+Frank authorized explicit Start/Stop of the existing Ollama installation and
+regeneration of Ollama's local `id_ed25519` pair only when needed for startup.
+This is not AI-service API-key authority or cloud sign-in. Keep owned Ollama
+loopback-only, with cloud and external networking disabled, existing models
+read-only, no downloads, and no model-generated tool execution. Do not start it
+automatically or stop a service Joey did not start.
+
 Verify that the selected checkout belongs to
 `https://github.com/franklinburrus/Joey` before editing. Inspect its branch,
 current history and uncommitted changes. Preserve existing work and use the

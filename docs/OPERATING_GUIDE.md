@@ -44,3 +44,11 @@ joey-run run /absolute/path/request.json
 ## Current acceptance limits
 
 See STATUS and VERIFICATION for exact commands/results. Local renderer verification using real source recordings does not establish actual account capability or verified provider delivery. Real media must not be uploaded until the selected account/upload profile is supported. Public distribution, signing identities, notarization and Xcode Cloud setup remain separate from this local build.
+
+
+## Storage management
+
+Settings → Storage measures the working volume, temporary files, active scratch, protected runtime files and verified reclaimable bytes. Automatic Cleanup defaults to on; Low Disk Protection is always enabled. Clean Now uses the same ownership, lifecycle, hash and locking checks as automatic cleanup. Unknown historical scratch remains preserved. Accepted MP4s, originals, transcripts and delivery records are never removed. See [Storage Manager](STORAGE.md) for capacity estimates, 60-second blocked-state recovery, cleanup audit receipts and limitations.
+# GPT Buffer handoff extension
+
+The installed Ready for Buffer workflow prepares completed clips and imports external receipts. It does not submit drafts, schedule or publish. See [BUFFER_HANDOFF.md](BUFFER_HANDOFF.md) for preflight expiry, explicit account/presentation/mode review, portable packages, separate Frank execution authorization, bounded sub-batches and receipt recovery. Production filing and coverage rules below remain unchanged.

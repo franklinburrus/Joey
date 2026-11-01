@@ -2,6 +2,48 @@ import XCTest
 @testable import JoeyCore
 
 final class MediaTests: XCTestCase {
+    func testAudioFidelityUsesPlannedIntervalAndStillRejectsDamage() throws {
+        // A decoder/resampler can produce a few samples after an exact cut.
+        // These are not source coverage and cannot form a fidelity window.
+        let source = (0..<24_008).map { Float(sin(Double($0 / 2) * 0.2) * 0.3) }
+        var output = source
+        for i in 24_000..<output.count { output[i] = -source[i] }
+        XCTAssertNoThrow(try Media.validateAudioSamples(source,output,channels:2,duration:1))
+        // Fractional final windows inside the requested interval remain checked.
+        XCTAssertThrowsError(try Media.validateAudioSamples(source,output,channels:2,duration:1.0003333334))
+        var damaged = source
+        for i in 12_000..<24_000 { damaged[i] = 0 }
+        XCTAssertThrowsError(try Media.validateAudioSamples(source,damaged,channels:2,duration:1))
+        XCTAssertThrowsError(try Media.validateAudioSamples(source,Array(source.dropLast(2_000)),channels:2,duration:1))
+        XCTAssertThrowsError(try Media.validateAudioSamples(Array(repeating:0,count:24_000),Array(repeating:0.1,count:24_000),channels:2,duration:1))
+    }
+    func testSharedExportMeetsInstagramAudioLimitAndRejectsExcessBitrate() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:dir) }
+        let sourceURL = dir.appendingPathComponent("source.mp4")
+        _ = try await Processes.run("ffmpeg",["-v","error","-f","lavfi","-i","testsrc2=s=160x90:r=30:d=4","-f","lavfi","-i","anoisesrc=color=pink:amplitude=0.2:duration=4:seed=42","-ac","2","-c:v","libx264","-pix_fmt","yuv420p","-c:a","aac","-b:a","256k","-shortest",sourceURL.path])
+        let source = try await Media.inspect(sourceURL,request:Fixtures.request(dir:dir,path:sourceURL.path))
+        let clip = ClipRecord(id:1,title:"Audio contract",intervals:[Interval(0,4)],filename:"clip.mp4")
+        let output = dir.appendingPathComponent(clip.filename)
+        let profile = try Fixtures.profile(dir:dir)
+        let render = try await Media.render(source:source,clip:clip,profile:profile,artwork:nil,work:dir,output:output)
+        let result = try await Processes.run("ffprobe",["-v","error","-select_streams","a:0","-show_entries","stream=bit_rate","-of","json",output.path])
+        let object = try JSONSerialization.jsonObject(with:result.stdout) as! [String:Any]
+        let stream = (object["streams"] as! [[String:Any]])[0]
+        let rate = try XCTUnwrap(Int(stream["bit_rate"] as? String ?? ""))
+        XCTAssertLessThanOrEqual(rate,128_000,"Shared delivery must satisfy Instagram's actual audio bitrate ceiling")
+        let qa = try await Media.validate(output:output,source:source,clip:clip,profile:profile,render:render,work:dir)
+        XCTAssertTrue(qa.passed)
+        let excessive = dir.appendingPathComponent("excessive.mp4")
+        _ = try await Processes.run("ffmpeg",["-v","error","-i",output.path,"-i",sourceURL.path,"-map","0:v","-map","1:a","-c:v","copy","-c:a","aac","-b:a","256k","-movflags","+faststart","-t","4",excessive.path])
+        do {
+            _ = try await Media.validate(output:excessive,source:source,clip:clip,profile:profile,render:render,work:dir)
+            XCTFail("Output above Instagram's audio bitrate ceiling was accepted")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("technical"),"Expected technical-contract rejection, got: \(error)")
+        }
+    }
     func testNativeRenderPreservesFrameAndRejectsCorruption() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)

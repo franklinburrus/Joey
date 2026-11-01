@@ -15,6 +15,19 @@ import JoeyCore
                 return
             }
             switch command {
+            case "storage":
+                print(String(decoding:try Persistence.encoder.encode(StorageManager.inspect(root:root)),as:UTF8.self))
+            case "storage-clean":
+                print(String(decoding:try Persistence.encoder.encode(StorageManager.clean(root:root)),as:UTF8.self))
+            case "taxstone-inventory":
+                let library = try TaxstoneLibrary(root:root)
+                let state = try await library.inventory()
+                print(String(decoding:try Persistence.encoder.encode(state),as:UTF8.self))
+            case "taxstone-run":
+                let library = try TaxstoneLibrary(root:root)
+                let limit = args.firstIndex(of:"--limit").flatMap {$0+1 < args.count ? Int(args[$0+1]):nil}
+                let state = try await library.run(limit:limit,jobProgress:{job in print("\(job.id): \(job.stage) \(job.error ?? "")")})
+                print("Discovered: \(state.discoveredCount); completed: \(state.completedCount); remaining: \(state.remainingCount)")
             case "check-drive":
                 let config = try Configuration.load(root:root)
                 let delivery = try DriveDelivery(remote:config.rcloneRemote)

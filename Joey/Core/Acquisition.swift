@@ -4,7 +4,7 @@ public enum Acquisition {
     public static func validateOriginalURL(_ raw: String) throws -> URL {
         guard let u = URL(string:raw), u.scheme == "https", u.user == nil, u.password == nil,
               let host = u.host?.lowercased(), ["youtube.com","www.youtube.com","youtu.be","x.com","www.x.com","twitter.com"].contains(host) else {
-            throw JoeyError.invalid("Use an authorized original YouTube or X HTTPS URL")
+            throw JoeyError.invalid("Paste an original YouTube or X HTTPS link")
         }
         if host.contains("x.com") || host == "twitter.com" {
             guard u.path.contains("/broadcasts/") || u.path.contains("/spaces/") || u.path.contains("/status/") else {
@@ -44,7 +44,7 @@ public enum Acquisition {
         guard abs(probe.duration-expected) <= max(1,expected*0.001) else { throw JoeyError.failed("Incomplete original: measured \(probe.duration), expected \(expected)") }
         return files[0]
     }
-    public static func transcript(source: SourceRecord, request: JobRequest, configuration: Configuration, directory: URL) async throws -> Transcript {
+    public static func transcript(source: SourceRecord, request: JobRequest, configuration: Configuration, directory: URL) async throws -> Transcript? {
         let canonical = directory.appendingPathComponent("transcript.json")
         if FileManager.default.fileExists(atPath:canonical.path) {
             let old: Transcript = try Persistence.load(canonical)
@@ -54,6 +54,9 @@ public enum Acquisition {
         var input: URL
         if let provided = request.transcriptPath { input = URL(fileURLWithPath:provided) }
         else {
+            // A missing optional transcript is not permission to invoke ASR.
+            // Malformed/mismatched supplied or cached transcripts still fail.
+            if request.transcriptPolicy == .modelIndependent {return nil}
             guard let python = configuration.pythonPath, let script = configuration.transcriptionScript,
                   let model = configuration.modelPath else { throw JoeyError.dependency("Local transcript unavailable: configure existing Python ASR helper and installed model, or supply source-bound full transcript") }
             input = directory.appendingPathComponent("asr-source.json")

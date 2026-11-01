@@ -10,6 +10,9 @@ public enum JoeyError: Error, LocalizedError {
 public enum Owner: String, Codable, CaseIterable, Sendable { case dub, taxstone }
 public enum MediaKind: String, Codable, Sendable { case nativeVideo, audio }
 public enum JobMode: String, Codable, CaseIterable, Sendable { case fullShow, highlights }
+public enum TranscriptPolicy: String, Codable, Sendable { case assisted, modelIndependent }
+public enum PlanningBasis: String, Codable, Sendable { case transcriptAssisted, deterministicTime }
+public enum ProductionWorkflow: String, Codable, Sendable { case link, joeBudden, taxstoneLibrary }
 public enum JobState: String, Codable, Sendable {
     case planned = "PLANNED", processing = "PROCESSING", qaPassed = "QA_PASSED"
     case filed = "FILED", completed = "COMPLETED", failed = "FAILED", cancelled = "CANCELLED"
@@ -41,38 +44,88 @@ public struct SurfaceCapability: Codable, Equatable, Sendable {
     public var maxFPS: Double
     public var officialURLs: [String]
     public var accountEvidence: EvidenceFile
-    public func validate(now: Date) throws {
+    public init(platform: String, account: String, surface: String, checkedAt: Date, validUntil: Date,
+                maxDuration: Double, maxBytes: Int64, maxWidth: Int, maxHeight: Int, maxFPS: Double,
+                officialURLs: [String], accountEvidence: EvidenceFile) {
+        self.platform = platform;self.account = account;self.surface = surface
+        self.checkedAt = checkedAt;self.validUntil = validUntil;self.maxDuration = maxDuration
+        self.maxBytes = maxBytes;self.maxWidth = maxWidth;self.maxHeight = maxHeight;self.maxFPS = maxFPS
+        self.officialURLs = officialURLs;self.accountEvidence = accountEvidence
+    }
+    public func validate(now: Date, requireCurrentEvidence: Bool = true) throws {
         guard ["X", "Instagram"].contains(platform), !account.isEmpty, !surface.isEmpty,
-              checkedAt <= now, validUntil > now, validUntil > checkedAt,
+              (!requireCurrentEvidence || (checkedAt <= now && validUntil > now)), validUntil > checkedAt,
               maxDuration.isFinite, maxDuration > 0, maxBytes > 0,
               maxWidth > 0, maxHeight > 0, maxFPS >= 30, !officialURLs.isEmpty else {
             throw JoeyError.dependency("Missing or expired \(platform) account/upload-surface capability evidence")
         }
         for raw in officialURLs {
             guard let u = URL(string: raw), u.scheme == "https", let host = u.host,
-                  (platform == "X" ? ["help.x.com", "docs.x.com", "developer.x.com"].contains(host)
-                    : ["help.instagram.com", "developers.facebook.com", "www.facebook.com", "www.instagram.com"].contains(host)) else {
-                throw JoeyError.invalid("Capability requires official platform sources")
+                  (platform == "X" ? ["help.x.com", "docs.x.com", "developer.x.com", "support.buffer.com"].contains(host)
+                    : ["help.instagram.com", "developers.facebook.com", "www.facebook.com", "www.instagram.com", "support.buffer.com"].contains(host)) else {
+                throw JoeyError.invalid("Capability requires official platform or upload-surface sources")
             }
         }
-        try accountEvidence.validate()
+        if requireCurrentEvidence {try accountEvidence.validate()}
+    }
+
+    /// Renewable observations are not part of a media job's immutable contract.
+    /// Account, upload surface and every technical limit remain identity-bound.
+    var identityContract: SurfaceCapability {
+        var copy = self
+        copy.checkedAt = Date(timeIntervalSince1970:0);copy.validUntil = copy.checkedAt
+        copy.officialURLs = []
+        copy.accountEvidence = EvidenceFile(path:"",sha256:"",basis:"")
+        return copy
     }
 }
 
 public struct SharedProfile: Codable, Equatable, Sendable {
-    public var x: SurfaceCapability
-    public var instagram: SurfaceCapability
+    public var x: SurfaceCapability?
+    public var instagram: SurfaceCapability?
     public var width: Int
     public var height: Int
-    public var maxDuration: Double { min(x.maxDuration, instagram.maxDuration) }
-    public var maxBytes: Int64 { min(x.maxBytes, instagram.maxBytes) }
-    public func validate(now: Date = Date()) throws {
-        try x.validate(now: now); try instagram.validate(now: now)
+    // An explicit Drive-only Joe contract is not account capability evidence.
+    // nil keeps every existing shared request's serialized identity unchanged.
+    public var driveOnlyJoe: Bool?
+    public static var joeBuddenDrive: SharedProfile {
+        SharedProfile(x:nil,instagram:nil,width:1920,height:1080,driveOnlyJoe:true)
+    }
+    public var maxDuration: Double { driveOnlyJoe == true ? 607.3 : min(x?.maxDuration ?? 0, instagram?.maxDuration ?? 0) }
+    public var maxBytes: Int64 { driveOnlyJoe == true ? 2_000_000_000 : min(x?.maxBytes ?? 0, instagram?.maxBytes ?? 0) }
+    public func validate(now: Date = Date(), requireCurrentEvidence: Bool = true) throws {
+        if driveOnlyJoe == true {
+            guard x == nil, instagram == nil, width == 1920, height == 1080 else {
+                throw JoeyError.invalid("Joe Budden Drive exports require the explicit 1920×1080 local contract, without platform capability claims")
+            }
+            return
+        }
+        guard let x, let instagram else {throw JoeyError.dependency("Verified shared X/Instagram limits are missing")}
+        try x.validate(now: now,requireCurrentEvidence:requireCurrentEvidence)
+        try instagram.validate(now: now,requireCurrentEvidence:requireCurrentEvidence)
         guard x.platform == "X", instagram.platform == "Instagram",
               [(1080,1920),(720,1280)].contains(where: { $0.0 == width && $0.1 == height }),
               width <= min(x.maxWidth,instagram.maxWidth), height <= min(x.maxHeight,instagram.maxHeight) else {
             throw JoeyError.dependency("No compliant selected shared portrait profile")
         }
+    }
+    var identityContract: SharedProfile {
+        var copy = self;copy.x = x?.identityContract;copy.instagram = instagram?.identityContract
+        return copy
+    }
+    /// Refresh evidence only. A different account, surface or encoding contract
+    /// requires an explicit new decision, never a silent resume or rerender.
+    func renewingEvidence(from proposed: SharedProfile, requireCurrentEvidence: Bool = true) throws -> SharedProfile {
+        guard identityContract == proposed.identityContract else {
+            throw JoeyError.invalid("Capability renewal changes the saved account, upload surface or technical constraints; existing job preserved")
+        }
+        if proposed != self, proposed.driveOnlyJoe != true,
+           proposed.x!.checkedAt >= x!.checkedAt, proposed.instagram!.checkedAt >= instagram!.checkedAt {
+            do {try proposed.validate();return proposed}
+            catch {if requireCurrentEvidence {throw error}}
+        }
+        try validate(requireCurrentEvidence:requireCurrentEvidence)
+        return self
     }
     public static func select(x: SurfaceCapability, instagram: SurfaceCapability, now: Date = Date()) throws -> SharedProfile {
         for (w,h) in [(1080,1920),(720,1280)] {
@@ -126,26 +179,71 @@ public struct JobRequest: Codable, Equatable, Sendable {
     public var dateEvidence: String?
     public var originalURL: String?
     public var localPath: String?
-    public var authorizationBasis: String
+    public var authorizationBasis: String = ""
     public var archiveReference: String?
     public var archiveRootID: String?
     public var expectedDuration: Double?
+    public var expectedSourceSHA256: String?
+    public var taxstoneReuse: [TaxstoneReuseInput]?
     public var mode: JobMode = .fullShow
     public var requestedCount: Int?
     public var fixedIntervals: [Interval]?
     public var transcriptPath: String?
+    // Optional to preserve the serialized identity of existing requests.
+    // nil retains the original transcript-assisted behavior.
+    public var transcriptPolicy: TranscriptPolicy?
+    // nil preserves serialized identities and the existing ten-minute default.
+    public var preferredDuration: Double?
     public var adExclusions: [AdExclusion] = []
     public var artwork: Artwork?
     public var profile: SharedProfile
     public var fileToDrive: Bool = true
-    public func validate() throws {
+    public var productionWorkflow: ProductionWorkflow?
+    /// Historical completed-job readback needs the contract, not a new upload
+    /// authorization. Fresh evidence remains mandatory before new operations.
+    public func validate(requireCurrentCapability: Bool = true) throws {
         guard !sourceID.isEmpty, sourceID.count <= 180, !title.isEmpty,
-              !authorizationBasis.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              localPath != nil || originalURL != nil else { throw JoeyError.invalid("Source identity, authorization and local file or original URL are required") }
+              localPath != nil || originalURL != nil else { throw JoeyError.invalid("Source identity and an original source are required") }
+        if let productionWorkflow {
+            guard localPath == nil, let originalURL, fileToDrive, transcriptPolicy != .modelIndependent else {
+                throw JoeyError.invalid("Production workflows require a source link, full-original filing and transcript-assisted processing")
+            }
+            if productionWorkflow == .taxstoneLibrary {
+                guard owner == .taxstone, mode == .fullShow, let archiveReference,
+                      originalURL == archiveReference, originalURL.hasPrefix("https://drive.google.com/file/d/"),
+                      sourceID.hasPrefix("soundcloud:"), expectedSourceSHA256?.count == 64,
+                      profile.driveOnlyJoe != true else {
+                    throw JoeyError.invalid("Taxstone Library requires an identified, hash-bound archived original and shared profile")
+                }
+            } else {_ = try Acquisition.validateOriginalURL(originalURL)}
+            if productionWorkflow == .joeBudden {
+                guard owner == .dub, mode == .fullShow, profile.driveOnlyJoe == true,
+                      SourceIdentitySuggestion.from(originalURL)?.hasPrefix("youtube:") == true else {
+                    throw JoeyError.invalid("Joe Budden requires a YouTube source and the full-show Drive-only clipping workflow")
+                }
+            } else if profile.driveOnlyJoe == true {throw JoeyError.invalid("The Drive-only Joe profile cannot be used for DUB or Taxstone")}
+        } else if profile.driveOnlyJoe == true {throw JoeyError.invalid("Drive-only export requires the Joe Budden workflow")}
+        if taxstoneReuse != nil, productionWorkflow != .taxstoneLibrary {throw JoeyError.invalid("Legacy Taxstone reuse belongs only to the library workflow")}
         if episodeDate != nil, dateEvidence?.isEmpty != false { throw JoeyError.invalid("Episode date requires source evidence") }
         if let count = requestedCount, count <= 0 { throw JoeyError.invalid("Highlight count must be positive") }
         if mode == .fullShow, fixedIntervals != nil || requestedCount != nil { throw JoeyError.invalid("Fixed selections/count require explicit highlight mode") }
-        try profile.validate()
+        if let seconds = preferredDuration, !seconds.isFinite || !(480...600).contains(seconds) || mode != .fullShow {
+            throw JoeyError.invalid("Full-show preferred duration must be between 480 and 600 seconds")
+        }
+        if transcriptPolicy == .modelIndependent {
+            guard localPath != nil, mode == .fullShow, adExclusions.isEmpty else {
+                throw JoeyError.invalid("Model-independent processing requires a local full-show source with no requested exclusions")
+            }
+        }
+        try profile.validate(requireCurrentEvidence:requireCurrentCapability)
+    }
+    func identityData(ignoringProfile: Bool = false) throws -> Data {
+        var copy = self
+        copy.profile = ignoringProfile ? .joeBuddenDrive : profile.identityContract
+        return try Persistence.encoder.encode(copy)
+    }
+    func stableID() throws -> String {
+        owner.rawValue + "-" + String(Integrity.textHash(String(decoding:try identityData(),as:UTF8.self)).prefix(24))
     }
 }
 
@@ -170,6 +268,11 @@ public struct SourceRecord: Codable, Equatable, Sendable {
     public var classificationEvidence: String
 }
 
+public struct ResolvedClipFailure: Codable, Equatable, Sendable {
+    public var stage: String
+    public var error: String
+    public var resolvedAt: Date
+}
 public struct ClipRecord: Codable, Equatable, Identifiable, Sendable {
     public var id: Int
     public var title: String
@@ -183,6 +286,7 @@ public struct ClipRecord: Codable, Equatable, Identifiable, Sendable {
     public var drive: DriveReceipt?
     public var failureStage: String?
     public var error: String?
+    public var resolvedFailures: [ResolvedClipFailure]?
     public var expectedDuration: Double { intervals.reduce(0) { $0+$1.duration } }
 }
 public struct QAReport: Codable, Equatable, Sendable {
@@ -210,15 +314,26 @@ public struct JobRecord: Codable, Identifiable, Sendable {
     public var stage = "intake"
     public var source: SourceRecord?
     public var transcript: Transcript?
+    public var planningBasis: PlanningBasis?
     public var clips: [ClipRecord] = []
     public var exclusions: [AdExclusion] = []
     public var folderID: String?
     public var companions: [String: DriveReceipt] = [:]
     public var registerRows: [String] = []
+    public var storageRequiredBytes: Int64?
+    public var storageWarnings: [String]?
     public var error: String?
     public var updatedAt = Date()
+    public var unavailableTranscriptFeatures: [String] {
+        var missing: [String] = []
+        if transcript == nil {missing.append("Complete source-bound transcript")}
+        if transcript == nil || planningBasis == .deterministicTime {
+            missing += ["Transcript-assisted sentence/topic boundaries", "Descriptive content titles", "Advertisement identification/removal"]
+        }
+        return missing
+    }
     public var resumesAutomatically: Bool {
         state == .processing || state == .planned || state == .filed ||
-        (state == .qaPassed && request.fileToDrive)
+        (state == .qaPassed && request.fileToDrive && unavailableTranscriptFeatures.isEmpty)
     }
 }

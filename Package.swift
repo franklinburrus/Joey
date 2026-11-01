@@ -6,5 +6,9 @@ let package = Package(name: "Joey", platforms: [.macOS(.v14)], products: [
 ], targets: [
     .target(name: "JoeyCore", path: "Joey/Core", resources: [.copy("Resources/transcribe_source.py")]),
     .executableTarget(name: "JoeyRunner", dependencies: ["JoeyCore"], path: "Tools/JoeyRunner"),
-    .testTarget(name: "JoeyCoreTests", dependencies: ["JoeyCore"], path: "Tests/JoeyCoreTests")
+    .target(name: "JoeyInterface", dependencies: ["JoeyCore"], path: "Joey",
+        exclude: ["Core", "Assets.xcassets", "AssistantView.swift", "BufferView.swift", "ContentView.swift",
+                  "JobDetailView.swift", "JoeySettingsView.swift", "MyApp.swift", "ShowsView.swift", "TaxstoneLibraryView.swift"],
+        sources: ["JobModel.swift", "NewJobView.swift", "ProductionSetupView.swift", "JoeyTheme.swift"]),
+    .testTarget(name: "JoeyCoreTests", dependencies: ["JoeyCore", "JoeyInterface"], path: "Tests/JoeyCoreTests")
 ], swiftLanguageModes: [.v5])

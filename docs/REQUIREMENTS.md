@@ -40,6 +40,8 @@ Xcode Cloud and Codex cloud development are distinct services. Neither is Joey�
 
 Joey’s everyday operation must not depend on Codex, a ChatGPT conversation, GitHub availability or Xcode Cloud availability. Network operations such as source acquisition and Drive filing still require connectivity. Reuse working local tools and models. Keep the UI responsive during long operations.
 
+2026-10-31 explicit credential boundary: No AI-service API key is required or permitted as a prerequisite for Joey development or the finished application. Codex uses ChatGPT sign-in; do not configure API-key billing. Joey must build, test, install, launch and perform core local media processing without OPENAI_API_KEY or any other AI-service credential. Do not create, request, replace, embed or use an AI-service key. Launch project tools, tests and Joey through a minimal environment, and enforce the same boundary for media helpers. Preserve the model-independent processing path. Existing authorized Google Drive/Sheets OAuth connections are separate integrations and must not be removed. The exposed-key incident remains open until its owner supplies provider-side revocation confirmation; it does not block safe, key-free development. Do not probe the exposed credential with /v1/me or another API request.
+
 3. OBJECTIVE AND OUTPUTS
 
 Automatically acquire or import authorized DUB and Taxstone media, plan clips, render, perform QA, file verified outputs and produce complete delivery records.
@@ -96,6 +98,13 @@ Exclude confidently identified ad reads in full-show mode. Record exact exclusio
 Preserve introductions, source endings, silence and other non-ad program content unless removal is explicitly requested.
 
 Generate or reuse a complete timestamped, source-bound transcript locally. Use it for boundaries, titles, ad identification and coverage reconciliation. Do not retranscribe unchanged sources because a later stage failed. Include the full transcript in the episode package.
+
+
+2026-10-31 explicit local-core amendment — MODEL-INDEPENDENT CORE PROCESSING:
+
+Provide a bounded local-processing path that requires neither a transcript nor speech-recognition inference. With no valid supplied or cached transcript, retain the entire local source chronologically using deterministic time-based segmentation, source metadata and sequence-based filenames. Do not infer topics, generate descriptive content titles or remove suspected advertisements. Explicitly report the complete transcript, transcript-assisted boundaries, descriptive titles and advertisement identification/removal as unavailable. Do not invoke an ASR helper/model or download a model in this path. Preserve valid transcript reuse, source binding and the existing optional assisted workflow.
+
+This exception permits local planning, rendering, technical/coverage QA and local records without a transcript. It does not waive production transcript/editorial requirements, verified profile requirements, Drive filing or required register reconciliation. Missing production requirements prevent COMPLETED. Do not create a fake full-transcript file. Preserve existing accepted plans, clips, QA and receipts; a newly appearing transcript must not silently reclassify an accepted deterministic plan. Repeatability concerns identical planning decisions and interval mappings for identical inputs/configuration, not byte-identical encoding.
 
 8. NATIVE VIDEO PRESENTATION
 
@@ -279,3 +288,26 @@ Verify the build and meaningful unit/integration tests, then demonstrate:
 Use authorized existing media for real acceptance. If a required source, credential or capability is unavailable, finish independent work and report the exact remaining dependency. Synthetic tests cannot establish real-media acceptance or provider delivery.
 
 Report actual commands, direct exit status, test counts, changed files, measured results and verified links. Do not let later commands mask a failed test. State unresolved risks accurately. Continue through necessary repairs until authorized work is complete. Use Caveman Ultra for conversational reports throughout, while keeping implementation and persisted documents complete.
+
+19. OPTIONAL LOCAL TEXT ASSISTANT — EXPLICIT 2026-10-31 AMENDMENT
+
+Provide an optional, user-initiated local assistant for conversation, writing, summarization, planning and occasional coding questions. Reuse the existing Ollama 0.40.13 installation at ~/Applications/Ollama.app and the installed qwen3:4b Q4_K_M Apache-2.0 model in ~/.ollama/models. Do not download duplicate models, introduce AI-service APIs, subscriptions, credentials or cloud inference. This feature does not change the model-independent clipping contract, transcription options or production acceptance gates.
+
+Only process text the user types or explicitly pastes/selects into the assistant conversation. Do not scan files or the clipboard automatically, attach media jobs/transcripts, execute generated code or shell commands, access accounts, or publish. Assistant output is text only and cannot invoke tools or alter clipping plans. Keep conversation state in memory; clear it on explicit Clear or closing the assistant.
+
+Frank explicitly chose Start/Stop service controls in Joey. Do not start Ollama merely by launching Joey or opening the assistant. Start uses the existing executable, loopback-only listening, disabled cloud features, denied external networking, one model/one inference at a time and the existing model storage without downloads or pruning. Stop and closing the assistant stop only a service Joey started; never terminate a pre-existing external service. Keep failures confined to the assistant. Pause assistant use while Joey is processing media to limit contention on the M1/16 GB Mac.
+
+Frank explicitly authorized regeneration of Ollama's local id_ed25519 identity pair only when required for explicit startup. This is a local identity, not an API key, billing credential or cloud sign-in. Do not display or copy key contents into evidence. This narrow exception does not resolve or authorize changes to the separately exposed OPENAI_API_KEY incident. Do not rotate unrelated credentials or modify Google Drive/Sheets integrations.
+
+Use the verified installed model identity, an 8192-token context, bounded conversation/input/output sizes, finite timeouts, cancellation and no silent remote fallback, model substitution or automatic retry. Native implementation/build verification, real offline inference and GUI acceptance must be reported separately. A short synthetic response is not a performance benchmark or a guarantee of answer quality. Preserve accepted media, receipts and production status.
+
+
+20. EXPLICIT LINK-WORKFLOW AND JOE BUDDEN CORRECTIONS — 2026-10-31
+
+Frank's later workflow corrections supersede conflicting earlier intake and Joe Budden presentation rules for new jobs. Native intake is Paste Link (YouTube/X), without local-source selection or a separate authorization-entry form. Preserve existing source provenance and legacy local job recovery; removing a form does not manufacture redistribution rights. Call the selection Workflow. Complete-original filing is mandatory for every new production job, before clipping, regardless of whether the selected clip workflow covers the full show or highlights.
+
+DUB and Taxstone highlights use one selection per 15 minutes of source content, with a final partial block included; duration must satisfy their one shared X/Instagram export contract. Full-show clipping remains the default. Transcript, QA, source integrity, accepted-output reuse, exact Drive placement and required companion/register verification remain required.
+
+Joe Budden uses the official Joe Budden TV numbered full episode on YouTube as its source. Frank specifically clarified: download and file the complete original, then create chronological 8–10-minute source-content clips of the retained entire show, apply the DUB logo in the lower left and the approved complete outro, and file to Drive, nothing further. This narrow Joe Budden exception restores those two approved assets only for that workflow. It does not add branding to other native-video workflows. This is a Drive delivery contract, not a claim of X/Instagram upload compatibility; the approved 140-second Buffer contract continues to govern DUB/Taxstone shared exports. Keep Joe Budden records in DUB ownership and preserve Taxstone separation.
+
+Frank requested automated background processing like Taxstone. Reuse the native app and existing processing/delivery coordinator, with opt-in Start/Resume, Pause, a durable new-episode queue, duplicate reconciliation, visible failures and safe restart. Do not replay an old catalog merely by enabling it. The current bounded implementation scans the official channel's 30 recent uploads on launch, every 30 minutes while enabled, and Check Now; it runs while Joey and the Mac are available, without a permanent service or automatic launch. Discovery cadence and the initial latest-episode baseline are implementation choices, not evidence of historical library coverage. No social publication, scheduling, email, new service, or permission change is included.

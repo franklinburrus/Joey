@@ -103,8 +103,13 @@ public enum AudioPresentation {
         let color = owner == .dub ? NSColor(calibratedRed:230.0/255,green:174.0/255,blue:57.0/255,alpha:1).cgColor : NSColor.white.cgColor
         let count = max(1,Int(ceil(duration*30-1e-8)))
         do {
+            var nextCapacityCheck = Date()
             for frame in 0..<count {
                 try Task.checkCancellation()
+                if let root = StorageManager.processingRoot,Date() >= nextCapacityCheck {
+                    try StorageManager.checkCapacity(at:root,requiredBytes:128*1024*1024)
+                    nextCapacityCheck = Date().addingTimeInterval(5)
+                }
                 while !input.isReadyForMoreMediaData {
                     guard writer.status == .writing else { throw writer.error ?? JoeyError.failed("Native encoder stopped") }
                     try await Task.sleep(nanoseconds:5_000_000)

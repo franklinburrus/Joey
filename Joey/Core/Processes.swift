@@ -2,6 +2,17 @@ import Foundation
 
 public struct ProcessResult: Sendable { public var stdout: Data; public var stderr: String; public var status: Int32 }
 public enum Processes {
+    /// Helpers need local paths/locale, not the desktop or developer's API keys.
+    /// Explicit overrides pass through the same allowlist as inherited values.
+    static func childEnvironment(_ parent: [String:String], overrides: [String:String] = [:]) -> [String:String] {
+        let allowed = ["HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL"]
+        let inputs = parent.merging(overrides) { _, new in new }
+        var result = inputs.filter {allowed.contains($0.key)}
+        result["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + FileManager.default.homeDirectoryForCurrentUser.path + "/Library/Python/3.12/bin"
+        result["HF_HUB_OFFLINE"] = "1"
+        result["TOKENIZERS_PARALLELISM"] = "false"
+        return result
+    }
     public static func executable(_ name: String) throws -> String {
         if name.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: name) { return name }
         let candidates = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin",
@@ -16,6 +27,12 @@ public enum Processes {
                            output: URL? = nil, maxOutput: Int = 16*1024*1024,
                            environment: [String:String] = [:]) async throws -> ProcessResult {
         try Task.checkCancellation()
+        let storageRoot = StorageManager.processingRoot
+        let toolName = URL(fileURLWithPath:executable).lastPathComponent
+        let writesMedia = toolName == "ffmpeg" || toolName == "yt-dlp" || toolName.hasPrefix("python") ||
+            (toolName == "rclone" && arguments.first == "copyto" && arguments.count > 2 && arguments[2].hasPrefix("/"))
+        let storageLease = try storageRoot.map {try ProcessingLock(directory:$0,name:"storage-workers.lock",shared:true)}
+        defer {withExtendedLifetime(storageLease) {}}
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent("joey-process-"+UUID().uuidString)
         try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true, attributes: [.posixPermissions:0o700])
         defer { try? FileManager.default.removeItem(at: temp) }
@@ -26,15 +43,21 @@ public enum Processes {
         let out = try FileHandle(forWritingTo: stdoutURL), err = try FileHandle(forWritingTo: stderrURL)
         defer { try? out.close(); try? err.close() }
         let process = Process(); process.executableURL = try ProcessSupervisor.executable()
-        process.arguments = ["--supervise",String(getpid()),try self.executable(executable)]+arguments; process.currentDirectoryURL = directory
+        process.arguments = ["--supervise",String(getpid())]+(storageRoot.map {["--storage-root",$0.path]} ?? [])+[try self.executable(executable)]+arguments; process.currentDirectoryURL = directory
         process.standardOutput = out; process.standardError = err; process.standardInput = FileHandle.nullDevice
-        var env = ProcessInfo.processInfo.environment
-        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + FileManager.default.homeDirectoryForCurrentUser.path + "/Library/Python/3.12/bin"
-        env["HF_HUB_OFFLINE"] = "1"; env["TOKENIZERS_PARALLELISM"] = "false"
-        env.merge(environment) { _, new in new }; process.environment = env
+        process.environment = childEnvironment(ProcessInfo.processInfo.environment,overrides:environment)
         try process.run()
         do {
-            while process.isRunning { try await Task.sleep(nanoseconds: 50_000_000) }
+            var nextCapacityCheck = Date()
+            while process.isRunning {
+                try await Task.sleep(nanoseconds: 50_000_000)
+                if writesMedia,let storageRoot, Date() >= nextCapacityCheck {
+                    // Stop before consuming the OS reserve. Partial attempt stays
+                    // owned and recoverable; no new worker starts during cleanup.
+                    try StorageManager.checkCapacity(at:storageRoot,requiredBytes:128*1024*1024)
+                    nextCapacityCheck = Date().addingTimeInterval(5)
+                }
+            }
             try Task.checkCancellation()
         } catch {
             if process.isRunning { process.terminate() }
@@ -45,7 +68,7 @@ public enum Processes {
             }
             if process.isRunning { kill(process.processIdentifier, SIGKILL) }
             while process.isRunning { await Task.detached { try? await Task.sleep(nanoseconds:10_000_000) }.value }
-            throw CancellationError()
+            throw error
         }
         // isRunning becoming false establishes termination. waitUntilExit spins
         // a thread-local run loop and can deadlock after async thread migration.

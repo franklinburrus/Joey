@@ -9,6 +9,16 @@ public enum ProcessSupervisor {
     public static func handleInvocation() -> Bool {
         let args = CommandLine.arguments
         guard args.count >= 4, args[1] == "--supervise", let parent = Int32(args[2]) else {return false}
+        var toolIndex = 3
+        var storageLease: ProcessingLock?
+        if args[3] == "--storage-root" {
+            guard args.count >= 6,getppid() == parent,kill(parent,0) == 0 else {exit(125)}
+            do {storageLease = try ProcessingLock(directory:URL(fileURLWithPath:args[4]),name:"storage-workers.lock",shared:true)}
+            catch {exit(125)}
+            toolIndex = 5
+        }
+        defer {withExtendedLifetime(storageLease) {}}
+        guard getppid() == parent,kill(parent,0) == 0 else {exit(125)}
         signal(SIGTERM) {_ in ProcessSupervisor.stopping = 1}
         signal(SIGINT) {_ in ProcessSupervisor.stopping = 1}
         var attributes: posix_spawnattr_t?
@@ -16,14 +26,14 @@ public enum ProcessSupervisor {
         defer {posix_spawnattr_destroy(&attributes)}
         posix_spawnattr_setflags(&attributes,Int16(POSIX_SPAWN_SETPGROUP))
         posix_spawnattr_setpgroup(&attributes,0)
-        let strings = args.dropFirst(3).map {strdup($0)}
+        let strings = args.dropFirst(toolIndex).map {strdup($0)}
         defer {strings.forEach {free($0)}}
         var argv = strings+[nil]
-        let envStrings = ProcessInfo.processInfo.environment.map {strdup($0.key+"="+$0.value)}
+        let envStrings = Processes.childEnvironment(ProcessInfo.processInfo.environment).map {strdup($0.key+"="+$0.value)}
         defer {envStrings.forEach {free($0)}}
         var env = envStrings+[nil]
         var child: pid_t = 0
-        let status = posix_spawn(&child,args[3],nil,&attributes,&argv,&env)
+        let status = posix_spawn(&child,args[toolIndex],nil,&attributes,&argv,&env)
         guard status == 0 else {exit(status)}
         var result: Int32 = 0
         while waitpid(child,&result,WNOHANG) == 0 {

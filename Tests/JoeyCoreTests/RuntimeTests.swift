@@ -2,6 +2,55 @@ import XCTest
 @testable import JoeyCore
 
 final class RuntimeTests: XCTestCase {
+    func testTestProcessHasNoAIServiceCredentialEnvironment() {
+        let names = Set(ProcessInfo.processInfo.environment.keys)
+        for name in ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
+                     "GOOGLE_API_KEY", "AZURE_OPENAI_API_KEY", "HF_TOKEN",
+                     "HUGGING_FACE_HUB_TOKEN"] {
+            XCTAssertFalse(names.contains(name), "Test process inherited \(name)")
+        }
+    }
+    func testDirectSupervisorDropsUnrelatedSecrets() throws {
+        let canary = "JOEY_DUMMY_CREDENTIAL_DO_NOT_USE_20261031"
+        let process = Process(), output = Pipe(), errors = Pipe()
+        process.executableURL = try ProcessSupervisor.executable()
+        process.arguments = ["--supervise", String(getpid()), "/usr/bin/env"]
+        // Construct a dummy-only parent, independently of Processes.run.
+        process.environment = ["PATH":"/usr/bin:/bin", "LANG":"C",
+                               "OPENAI_API_KEY":canary, "UNRELATED_SECRET":canary]
+        process.standardOutput = output; process.standardError = errors
+        try process.run()
+        process.waitUntilExit()
+        let diagnostic = String(decoding:output.fileHandleForReading.readDataToEndOfFile()
+            + errors.fileHandleForReading.readDataToEndOfFile(),as:UTF8.self)
+        XCTAssertEqual(process.terminationStatus,0)
+        XCTAssertFalse(diagnostic.contains(canary))
+        XCTAssertFalse(diagnostic.contains("OPENAI_API_KEY"))
+        XCTAssertFalse(diagnostic.contains("UNRELATED_SECRET"))
+        XCTAssertTrue(diagnostic.contains("HF_HUB_OFFLINE=1"))
+    }
+    func testHelperEnvironmentDropsUnrelatedSecretsAndPreservesOfflinePolicy() async throws {
+        let canary = "JOEY_DUMMY_CREDENTIAL_DO_NOT_USE_20261031"
+        let injected = ["OPENAI_API_KEY":canary,"UNRELATED_SECRET":canary,"HF_HUB_OFFLINE":"0"]
+        let env = Processes.childEnvironment(["HOME":"/test-home","LANG":"C","OPENAI_API_KEY":canary],overrides:injected)
+        XCTAssertEqual(env["HOME"],"/test-home");XCTAssertEqual(env["LANG"],"C")
+        XCTAssertEqual(env["HF_HUB_OFFLINE"],"1")
+        XCTAssertNil(env["OPENAI_API_KEY"]);XCTAssertNil(env["UNRELATED_SECRET"])
+        let result = try await Processes.run("/usr/bin/env",[],environment:injected)
+        XCTAssertFalse(String(decoding:result.stdout,as:UTF8.self).contains(canary))
+        XCTAssertFalse(result.stderr.contains(canary))
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:dir)}
+        let script = dir.appendingPathComponent("diagnostic.sh")
+        try "/usr/bin/env >&2\nexit 7\n".write(to:script,atomically:true,encoding:.utf8)
+        do {_ = try await Processes.run("/bin/sh",[script.path],environment:injected);XCTFail("Expected diagnostic failure")}
+        catch {
+            XCTAssertTrue(error.localizedDescription.contains("exit 7"))
+            XCTAssertFalse(error.localizedDescription.contains(canary))
+            XCTAssertFalse(error.localizedDescription.contains("OPENAI_API_KEY"))
+        }
+    }
     func testSHA256AndEvidenceDetectChangedBytes() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

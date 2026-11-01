@@ -2,6 +2,24 @@ import XCTest
 @testable import JoeyCore
 
 final class PlanningTests: XCTestCase {
+    func testBufferCapabilitySourcesRemainBoundToVerifiedEvidence() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:dir) }
+        var profile = try Fixtures.profile(dir:dir)
+        profile.x!.surface = "Buffer X video"
+        profile.instagram!.surface = "Buffer Instagram Reel"
+        profile.x!.maxDuration = 140
+        profile.x!.officialURLs = ["https://support.buffer.com/articles/sharing-videos-through-buffer-LOe2p2rnAI"]
+        profile.instagram!.officialURLs = profile.x!.officialURLs
+        try profile.validate()
+        XCTAssertEqual(profile.maxDuration,140)
+        profile.x!.officialURLs = ["https://support.buffer.com.example.org/limits"]
+        XCTAssertThrowsError(try profile.validate())
+        profile.x!.officialURLs = profile.instagram!.officialURLs
+        try Data("Changed evidence".utf8).write(to:URL(fileURLWithPath:profile.x!.accountEvidence.path))
+        XCTAssertThrowsError(try profile.validate())
+    }
     func testHourProducesSixCompleteTenMinuteClips() throws {
         let clips = try Planning.fullShow(duration: 3600)
         XCTAssertEqual(clips, [[Interval(0,600)], [Interval(600,1200)], [Interval(1200,1800)],

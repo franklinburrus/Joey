@@ -7,6 +7,7 @@ public actor DriveDelivery {
     private let remote: String
     private var token: String?
     private let session: URLSession
+    private var nextSheetsRequest = ContinuousClock.now
     public init(remote: String, session: URLSession = .shared) throws {
         guard remote.range(of:"^[A-Za-z0-9_-]+$",options:.regularExpression) != nil else { throw JoeyError.invalid("Invalid existing rclone remote name") }
         self.remote = remote; self.session = session
@@ -45,7 +46,7 @@ public actor DriveDelivery {
             var req = URLRequest(url:url); req.httpMethod = method; req.timeoutInterval = 60
             req.setValue("Bearer "+(token ?? ""),forHTTPHeaderField:"Authorization")
             if let body { req.httpBody = try JSONSerialization.data(withJSONObject:body); req.setValue("application/json",forHTTPHeaderField:"Content-Type") }
-            let (data,response) = try await Self.response(for:req,session:session)
+            let (data,response) = try await response(for:req)
             guard let http = response as? HTTPURLResponse else { throw JoeyError.failed("Missing provider HTTP response") }
             if http.statusCode == 401 && attempt == 0 { token = nil; try await authenticate(); continue }
             guard (200..<300).contains(http.statusCode) else {
@@ -57,11 +58,24 @@ public actor DriveDelivery {
         }
         throw JoeyError.dependency("Provider authorization refresh failed")
     }
+    private func waitForSheetsRequestSlot() async throws {
+        // Sheets permits 60 reads and 60 writes per minute per user/project.
+        // Reserve slots before suspension so concurrent calls and retries
+        // cannot burst through that limit. Drive calls are unaffected.
+        let slot = max(ContinuousClock.now,nextSheetsRequest)
+        nextSheetsRequest = slot.advanced(by:.milliseconds(1100))
+        try await Task.sleep(until:slot,clock:.continuous)
+    }
     /// Retry transient reads only. Mutations retain their caller's explicit
     /// readback/reconciliation loop, so an uncertain append is never replayed here.
-    static func response(for request: URLRequest, session: URLSession) async throws -> (Data,URLResponse) {
+    func response(for request: URLRequest) async throws -> (Data,URLResponse) {
         let fetch = {
-            let result = try await session.data(for:request)
+            try Task.checkCancellation()
+            if request.url?.host == "sheets.googleapis.com" {
+                try await self.waitForSheetsRequestSlot()
+            }
+            try Task.checkCancellation()
+            let result = try await self.session.data(for:request)
             if let http = result.1 as? HTTPURLResponse,
                [429,500,502,503,504].contains(http.statusCode) {
                 throw JoeyError.dependency("Provider HTTP \(http.statusCode): transient request failure")
@@ -74,7 +88,7 @@ public actor DriveDelivery {
         return try await fetch()
     }
     func metadata(_ id: String) async throws -> [String:Any] {
-        try await request("files/"+id,query:["fields":"id,name,mimeType,parents,size,md5Checksum,sha256Checksum,webViewLink,trashed,permissions(type,role,allowFileDiscovery),appProperties,createdTime"])
+        try await request("files/"+id,query:["fields":"id,name,mimeType,parents,size,md5Checksum,sha256Checksum,webViewLink,trashed,permissions(type,role,allowFileDiscovery),appProperties,createdTime,videoMediaMetadata(width,height,durationMillis)"])
     }
     func children(_ parent: String) async throws -> [[String:Any]] {
         var all: [[String:Any]] = [], page: String?
@@ -203,6 +217,7 @@ public actor DriveDelivery {
                 if after.count == 1, let id = after[0]["id"] as? String {
                     return try await verify(id:id,local:local,parent:parent,name:filename,sha:sha,md5:md5,bytes:bytes)
                 }
+                if error is StorageBlocked {throw error}
                 if attempt == 2 { throw error }
                 try await Task.sleep(nanoseconds:500_000_000)
             }

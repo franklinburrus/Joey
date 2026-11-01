@@ -2,6 +2,29 @@ import XCTest
 @testable import JoeyCore
 
 final class WorkflowTests: XCTestCase {
+    func testSelectedDurationSurvivesRequestAndControlsBothPlanningPaths() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:dir)}
+        let original = try Fixtures.request(dir:dir,path:"unused")
+        let originalBytes = try Persistence.encoder.encode(original)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with:originalBytes) as? [String:Any])
+        object["preferredDuration"] = 480
+        object["transcriptPolicy"] = "modelIndependent"
+        let request = try Persistence.decoder.decode(JobRequest.self,from:JSONSerialization.data(withJSONObject:object))
+        let source = SourceRecord(id:request.sourceID,owner:.dub,title:"Fixture",path:"unused",bytes:1,sha256:"fixture",duration:1000,width:320,height:180,fps:30,hasAudio:true,kind:.nativeVideo,streams:[],authorizationBasis:"fixture",classificationEvidence:"fixture")
+        let transcript = Transcript(sourceID:source.id,sourceSHA256:source.sha256,duration:1000,engine:"fixture",segments:[TranscriptSegment(start:0,end:450,text:"An early boundary."), TranscriptSegment(start:450,end:1000,text:"Complete source.")])
+        let expected = [[Interval(0,480)],[Interval(480,960)],[Interval(960,1000)]]
+        XCTAssertEqual(try Editorial.planWithoutTranscript(request:request,source:source).map(\.intervals),expected)
+        XCTAssertEqual(try Editorial.plan(request:request,source:source,transcript:transcript,exclusions:[]).map(\.intervals),expected)
+        var limited = request; limited.profile.x!.maxDuration = 300
+        XCTAssertEqual(try Editorial.planWithoutTranscript(request:limited,source:source).map(\.expectedDuration),[300,300,300,100])
+        object["preferredDuration"] = 601
+        let invalid = try Persistence.decoder.decode(JobRequest.self,from:JSONSerialization.data(withJSONObject:object))
+        XCTAssertThrowsError(try invalid.validate())
+        // Adding an optional preference must not change old job identities.
+        XCTAssertEqual(try Persistence.encoder.encode(Persistence.decoder.decode(JobRequest.self,from:originalBytes)),originalBytes)
+    }
     func testLocalJobRecoversWithoutRerenderingAcceptedClip() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
@@ -52,7 +75,7 @@ final class WorkflowTests: XCTestCase {
         defer {try? FileManager.default.removeItem(at:dir)}
         var profile = try Fixtures.profile(dir:dir)
         XCTAssertEqual(profile.width,720)
-        profile.x.validUntil = Date().addingTimeInterval(-1)
+        profile.x!.validUntil = Date().addingTimeInterval(-1)
         XCTAssertThrowsError(try profile.validate())
         var request = try Fixtures.request(dir:dir,path:"unused")
         request.mode = .highlights; request.fixedIntervals = [Interval(0,700)]
@@ -94,6 +117,11 @@ final class WorkflowTests: XCTestCase {
         let render = try await Media.render(source:source,clip:clip,profile:request.profile,artwork:artwork,work:dir,output:output)
         let qa = try await Media.validate(output:output,source:source,clip:clip,profile:request.profile,render:render,work:dir)
         XCTAssertTrue(qa.passed)
+        let acceptedHash = try Integrity.sha256(output)
+        let reference = try await Media.audioReference(source:source,clip:clip,profile:request.profile,artwork:artwork,output:output,work:dir)
+        let adopted = try await Media.validate(output:output,source:source,clip:clip,profile:request.profile,render:reference,work:dir)
+        XCTAssertTrue(adopted.passed)
+        XCTAssertEqual(try Integrity.sha256(output),acceptedHash,"Reference reconstruction must not rerender accepted media")
         let corrupted = dir.appendingPathComponent("missing-wave.mp4")
         _ = try await Processes.run("ffmpeg",["-v","error","-i",output.path,"-vf","drawbox=x=60:y=932:w=600:h=124:color=black:t=fill","-c:v","libx264","-pix_fmt","yuv420p","-c:a","copy","-movflags","+faststart",corrupted.path])
         do {_ = try await Media.validate(output:corrupted,source:source,clip:clip,profile:request.profile,render:render,work:dir);XCTFail("Missing waveform accepted")}

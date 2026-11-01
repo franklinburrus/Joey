@@ -17,3 +17,7 @@ DerivedData/
 *.bin
 *.safetensors
 runtime/
+
+# Python test bytecode
+__pycache__/
+*.py[cod]

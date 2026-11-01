@@ -42,19 +42,17 @@ public enum Persistence {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Joey Native",isDirectory:true)
     }
     public static func checkDisk(at url: URL, requiredBytes: Int64) throws {
-        let attrs = try FileManager.default.attributesOfFileSystem(forPath: url.path)
-        let available = (attrs[.systemFreeSize] as? NSNumber)?.int64Value ?? 0
-        guard available >= requiredBytes + 512*1024*1024 else {
-            throw JoeyError.dependency("Insufficient disk space: need \(requiredBytes + 512*1024*1024) bytes; available \(available)")
-        }
+        try StorageManager.checkCapacity(at:url,requiredBytes:requiredBytes)
     }
 }
 public final class ProcessingLock {
     private var fd: Int32 = -1
-    public init(directory: URL) throws {
-        fd = open(directory.appendingPathComponent("processing.lock").path, O_CREAT | O_RDWR, 0o600)
+    public let directory: URL
+    public init(directory: URL, name: String = "processing.lock", shared: Bool = false) throws {
+        self.directory = directory
+        fd = open(directory.appendingPathComponent(name).path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw JoeyError.failed("Cannot open processing lock") }
-        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { close(fd); fd = -1; throw JoeyError.dependency("Another Joey process is processing this library") }
+        guard flock(fd, (shared ? LOCK_SH : LOCK_EX) | LOCK_NB) == 0 else { close(fd); fd = -1; throw JoeyError.dependency("Another Joey process is processing this library") }
     }
     deinit { if fd >= 0 { flock(fd, LOCK_UN); close(fd) } }
 }

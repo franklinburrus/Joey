@@ -8,9 +8,10 @@ import SwiftUI
 }
 
 struct MyApp: App {
+    @StateObject private var model = JobModel()
     var body: some Scene {
         WindowGroup {
-            ContentView()
-        }
+            ContentView(model:model)
+        }.defaultSize(width:1280,height:800)
     }
 }
