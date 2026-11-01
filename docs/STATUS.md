@@ -1,4 +1,4 @@
-## Nine review-defect repairs — VERIFIED; Git delivery pending (2026-11-01)
+## Nine review-defect repairs — COMPLETED; source commit pushed and verified (2026-11-01)
 
 All nine requested corrections are implemented and verified. Final staged review also reproduced and repaired the branded Joe picture-timing bypass: all native source-content frames now receive independent timing checks, excluding only the approved logo footprint. The approved outro remains separately verified. This repair includes the intended pre-existing uncommitted implementation, tests, native configuration/assets and documentation. Verified origin: `https://github.com/franklinburrus/Joey.git`; branch: `codex/native-consolidated`; pre-edit local and fetched remote HEAD: `517878ff9c13911bf8d033c517492ef51ccffca7`. No replacement repository, worktree, history reset, forced push or merge was used.
 
@@ -34,7 +34,7 @@ Evidence root: `~/Library/Caches/Joey-Native-Build/review-nine-20261101/`. It co
 
 All nine correction criteria are verified by automated/synthetic evidence. Native UI cancellation, genuine sleep/wake, live provider recovery, fresh production media acceptance, actual Buffer/platform ingestion and publication were **not** performed or inferred. The installed application and production data were not changed by this repair. Historical credential-owner revocation remains a separate recorded issue; no credential was used or replaced.
 
-Git delivery is the remaining action: the complete 96-file staged diff has been reviewed, including all intended pre-existing work. Commit it, push the current branch without force and verify matching remote HEAD. Record the verified source commit and delivery readback here after the push.
+Git delivery verified: source/implementation commit `3e5b1705bcd69cfac8f89632f492ca075781517f` includes all 96 reviewed intended files. `git push origin codex/native-consolidated` returned direct exit 0. Independent `git ls-remote origin refs/heads/codex/native-consolidated` returned the identical SHA, matching local HEAD. No force push or branch integration was needed. This documentation-only follow-up records that successful source-commit readback; its own final branch SHA is verified separately at task closeout. All intended source, tests, configuration/assets and prior documentation were included. Ignored Python bytecode and build caches remain excluded and preserved; no intended uncommitted work remains after the checkpoint follow-up is committed.
 
 ---
 
