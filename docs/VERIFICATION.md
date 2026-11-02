@@ -69,6 +69,8 @@ Launched the installed executable through the minimal environment. Native UI reo
 - Remaining risks/limits: historical DUB companion semantics prevent full record closeout; no live Joe deletion, new DUB delivery, platform ingestion or actual sleep/wake test was attempted. Existing incomplete jobs remain incomplete. These limits do not block this explicit partial implementation commit.
 - Commit eligibility: **PASS for the documented partial scope**. Authorized next action: scoped commit/push/PR/check/merge and final remote readback. Full routing/record task status remains **PARTIAL** until the existing DUB companion correction is authorized and verified.
 
+Git integration is tracked by [PR #9](https://github.com/franklinburrus/Joey/pull/9), initially pushed at `bfb82ed2bc23a5d46bae8facb57169b9beb3e10d`. GitHub readback reports main unprotected, no rulesets, no required checks, zero commit statuses/check runs/workflow runs and a clean mergeable PR at the inspected head. These are absence-of-CI findings, not cloud test passes. The follow-up changes only STATUS/VERIFICATION to identify the containing PR; the tested and installed application source is unchanged. Its scoped diff/secret/untracked-preservation recheck passes; no build/test rerun is needed for these record-only edits. Final merge SHA and exact remote/source-tree readback are retained in `integration.json`; the PR itself carries the authoritative merge state.
+
 ---
 
 ## Routing/migration closeout — PARTIAL (2026-11-02)
