@@ -20,15 +20,24 @@ The app displays stage, errors, clip titles, exact fractional intervals, measure
 
 Unchanged accepted outputs are hash-checked and reused. Complete timestamped transcripts are source-bound and reused after later failures. Disposable scratch from a successfully validated attempt is removed only after output/evidence persistence. No unrelated files, source originals or accepted outputs are automatically deleted.
 
-A completed job reopens from local evidence without contacting GitHub, Codex or cloud build services. This does not claim a new provider readback while offline. Filing failures retain accepted media as `QA_PASSED — NOT FILED`. Errors identify the affected stage/clip; independent clips continue. Ordinary transient operations are bounded to three attempts, with uncertain external writes reconciled before repetition.
+A completed job with current routing evidence reopens from local evidence without contacting GitHub, Codex or cloud build services. A legacy completion record without authoritative destination evidence cannot receive a current Completed badge; its accepted files and receipts remain preserved for reconciliation. This does not claim a new provider readback while offline. Filing failures retain accepted media as `QA_PASSED — NOT FILED`. Errors identify the affected stage/clip; independent clips continue. Ordinary transient operations are bounded to three attempts, with uncertain external writes reconciled before repetition.
 
 ## Filing and completion
 
-Native-video clips route to Joey Video Clips (`1fgABGYTtNC_h2u-v6fwTcPkVKjFd7GQx`); audio-template MP4s route to Joey Audio Clips (`1_s2K9Pw2Je93IwazQ6QgLjz_SimVYuPz`). Both roots already have anyone-with-link read access. Joey preserves that existing state and never changes sharing. Full-length originals stay in their existing archive. New originals use only established full-length roots and preserve source bytes.
+Destinations resolve automatically from content ownership, inspected source format, asset class and verified episode/source identity. No Drive folder selection is required. The eight authoritative destinations are:
 
-An episode folder contains numbered MP4s, one canonical Clip Index CSV, the full transcript, `clip_manifest.json` and `RECONCILE.md`. The CSV is the canonical episode index; no duplicate native index or platform-specific folders are created. Exact multi-interval mappings and exclusions remain in the manifest. DUB Master Link List cells are mapped by current headers, duplicate-checked by verified Drive ID and read back; unknown columns/formulas are preserved. Taxstone never writes DUB-only register rows.
+| Content | Clip root | New full-episode root |
+| --- | --- | --- |
+| DUB X audio | `1FRi-yy2D9yenjQRailTA2iAbPaqAEPXm` | `109_QzHpF0Bi-OG6-AxuTDw1uHG4zeop3` |
+| DUB X video | `1380CHJ3a3kl7fXNIKWqUM7_DeTZUwxsy` | `1GpuGWGIbSt3afwsi9L782soT9WJKOHS9` |
+| Taxstone | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` | `12g_etkCruq4tjG07t9hAqQffc4NqbSQK` |
+| Joe Budden | `1X5VNP6fo3VpZPu4ZW4p7Ggk2o_IAVGSI` | `1IIYLVDhCvwf5ZoMb0aM5vpSCe-eMCmyK` |
 
-Drive file ID/name/parent/size/MD5/link/access state are independently read back. Local SHA-256 links the accepted artifact to its receipt. Required companion readback and DUB register reconciliation precede local `COMPLETED`. Uploaded finalization records stay `FILED` with the durable local checkpoint named as completion authority, avoiding a premature external completion claim or circular self-hash. Platform ingestion and Instagram placement remain separate from packaging.
+All eight folders have existing anyone-with-link reader access. Joey preserves permissions and verifies the exact established ancestry under the DUB root. New source archives use the full-episode roots above; verified legacy originals stay where they are. An ambiguous identity or conflicting saved destination stops filing with the exact issue. Existing packages outside these direct clip roots are reported and preserved, never moved or duplicated automatically.
+
+An episode folder contains numbered MP4s, one canonical Clip Index CSV, the full transcript, `clip_manifest.json` and `RECONCILE.md`. The CSV is the canonical episode index; no duplicate native index or platform-specific folders are created. Exact multi-interval mappings and exclusions remain in the manifest. DUB Master Link List cells are mapped by current headers, duplicate-checked by verified Drive ID and read back; unknown columns/formulas are preserved. Taxstone and Joe Budden never write DUB-only register rows. Their canonical episode records remain in their respective episode folders; historical rows are preserved.
+
+Drive file ID/name/actual parent/expected ancestry/size/MD5/link/access state and duplicate absence are independently read back. Permission fingerprints include permission identities, roles and discovery settings. Companion files are downloaded and hash-checked. Local SHA-256 links the accepted artifact to its receipt. Required companion readback and DUB register reconciliation precede local `COMPLETED`. Uploaded finalization records stay `FILED` with the durable local checkpoint named as completion authority, avoiding a premature external completion claim or circular self-hash. Platform ingestion and Instagram placement remain separate from packaging.
 
 ## Standalone runner
 

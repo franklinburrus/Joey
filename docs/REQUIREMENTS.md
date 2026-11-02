@@ -146,17 +146,22 @@ Verify current duration, dimensions, frame-rate and file-size limits for the act
 
 Automatically select a compliant shared profile or report the exact incompatibility. Packaging compliance does not prove successful platform ingestion. Do not guarantee Instagram will present video as a traditional feed post rather than a Reel.
 
-11. AUTHORITATIVE JOEY OUTPUT DESTINATIONS
+11. AUTHORITATIVE DUB FILING DESTINATIONS — 2026-11-02 CORRECTION
 
-2026-11-01 filing amendment: the original Dub hierarchy, root `1owpGIsjztPdlIIVb7DaszgtlbgEwrJ0Q`, is authoritative. The following existing Joey folders remain unchanged under `Dub/Content/Media/Clips/X Video Clips` and `Dub/Content/Media/Clips/X Audio Clips`, respectively. Core `1a2p1KpTrnBO842DfPZmekVSayaIsH4NW` is retained only as inactive historical navigation and is not a production dependency. Use the existing automatic DriveDelivery path and exact destination IDs; no per-job manual folder selection or new hierarchy is required. Current filing guidance is consolidated in the existing `Dub_Media_End_to_End_Process.md` (Drive ID `1tSTbif1nx1vttyX-6-234e7zumm1sXxh`). This amendment changes no media-production format or platform requirement.
+Frank explicitly authorizes the following eight destinations. They supersede the former Joey Video Clips/Joey Audio Clips roots and all conflicting historical destination mappings. The authoritative tree is https://drive.google.com/drive/folders/1owpGIsjztPdlIIVb7DaszgtlbgEwrJ0Q. Never create or resurrect a separate Joey Content hierarchy.
 
-Native-video clips: Joey Video Clips
-https://drive.google.com/drive/folders/1fgABGYTtNC_h2u-v6fwTcPkVKjFd7GQx
+| Content | Clip root | New full-episode root |
+| --- | --- | --- |
+| DUB X audio | `1FRi-yy2D9yenjQRailTA2iAbPaqAEPXm` | `109_QzHpF0Bi-OG6-AxuTDw1uHG4zeop3` |
+| DUB X video | `1380CHJ3a3kl7fXNIKWqUM7_DeTZUwxsy` | `1GpuGWGIbSt3afwsi9L782soT9WJKOHS9` |
+| Taxstone | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` | `12g_etkCruq4tjG07t9hAqQffc4NqbSQK` |
+| Joe Budden | `1X5VNP6fo3VpZPu4ZW4p7Ggk2o_IAVGSI` | `1IIYLVDhCvwf5ZoMb0aM5vpSCe-eMCmyK` |
 
-Audio-template clips with soundwave: Joey Audio Clips
-https://drive.google.com/drive/folders/1_s2K9Pw2Je93IwazQ6QgLjz_SimVYuPz
+Use one deterministic resolver for source ownership (DUB, Taxstone or Joe Budden), inspected source format, asset classification (clip or full episode), and verified source identity. Never route by MP4 extension. Joe Budden retains its historical serialized DUB owner and explicit joeBudden workflow for existing request identity compatibility; that combination routes to Joe Budden's destinations and separate records. No manual Drive destination selection is required. A saved explicit archive selection conflicting with the authoritative route must fail with the exact conflict rather than silently override it.
 
-Route by source type, not output extension. Both workflows produce MP4s. These destinations apply to DUB and Taxstone work produced by Joey and replace all older Joey/platform clip destinations. Full-length files keep their existing locations.
+Google Drive IDs, folder names, exact parents, ancestry and existing permissions must be verified before filing. DUB clips are directly below Media/Clips/X Audio Clips or Media/Clips/X Video Clips; Taxstone episode packages are directly below Media/Clips/Taxstone; Joe Budden episode packages are directly below Media/Joe Budden/Joe Budden (the existing final folder name includes a trailing space). Full episodes are below Media/Full Episodes, with the existing Dub branch for DUB audio/video. These are existing branches, not instructions to create intermediate folders.
+
+New full-length sources requiring archival use the corresponding full-episode root. Existing byte-equivalent originals remain in their current verified archives, including historical Taxstone archives; never silently relocate or duplicate them. Incorrectly routed existing clip packages must be identified and reported without automatic relocation, deletion, or copying to a second root. Ambiguous source identity, ownership, destination, or folder identity stops the affected filing operation while preserving accepted work.
 
 12. EPISODE FILING STRUCTURE
 
@@ -166,12 +171,12 @@ https://drive.google.com/drive/folders/1N7HyLq-Fq8a2RIaXMe7Xs17Y8UqYuCcJ
 Detailed episode example:
 https://drive.google.com/drive/folders/1SkV-Ea1DAYyOuNwKLpNCY9UEmVoBrzvz
 
-Inside the correct Joey root use:
+Directly inside the resolved clip root, create or reuse one matching episode folder:
 
 YYYY-MM-DD — Source Title — Source ID/
   01_Title_SourceID_HH-MM-SS_to_HH-MM-SS.mp4
   02_Title_SourceID_HH-MM-SS_to_HH-MM-SS.mp4
-  Clip Index — Source Title — Source ID
+  Clip Index — Source Title — Source ID.csv
   Source Title — Source ID — Full Transcript.txt
   clip_manifest.json
   RECONCILE.md
@@ -188,12 +193,12 @@ Generate applicable registry CSVs when needed. A prepared CSV does not prove a r
 
 Use the existing authorized rclone connection bound to exact Drive IDs. Before uploading, look for an integrity-verified equivalent; reuse it rather than creating a duplicate.
 
-Independently read back Drive file ID, name, parent, size, supported checksum or exact downloaded bytes, and existing link/access state. Preserve permissions; do not automatically make files public.
+Independently read back Drive file ID, filename, actual parent ID, expected destination ancestry, size, supported checksum or exact downloaded bytes, link/access state, and absence of unintended duplicates. Compare permissions across writes, including identities, roles and discovery settings; preserve sharing without automatically making anything public. Download required companion files for byte verification. Completion requires every planned clip, all four canonical companion receipts, passing automated QA, validated source/coverage, and applicable register reconciliation. A CSV alone is not a register-write receipt.
 
 DUB jobs reconcile the existing Master Link List against its current schema:
 https://docs.google.com/spreadsheets/d/17uhDO06vmVEz96YrUnA6aHyV5fL_3AAs3ylOjrYRLwI/edit
 
-Identify Joey-generated entries through supported fields or linked job evidence. Do not create competing registers or unnecessarily change the schema. Taxstone records remain separate from DUB-only records. Required writes need matching readback and duplicate checks.
+Identify Joey-generated entries through supported fields or linked job evidence. Do not create competing registers or unnecessarily change the schema. Taxstone and Joe Budden records remain separate from DUB-only records. Joe uses its episode package records; do not add Joe rows to the DUB Master Link List or delete historical rows during this correction. Required DUB writes need matching readback and duplicate checks.
 
 Return an in-app recap with source identity, output count, titles, timestamps, durations, QA results, episode folder and direct links. Do not automatically email, schedule or publish media.
 
@@ -237,7 +242,10 @@ https://drive.google.com/drive/folders/1IIYLVDhCvwf5ZoMb0aM5vpSCe-eMCmyK
 DUB existing full X-broadcast archive:
 https://drive.google.com/drive/folders/1GpuGWGIbSt3afwsi9L782soT9WJKOHS9
 
-Taxstone existing full-length archive:
+Taxstone new full-length archive:
+https://drive.google.com/drive/folders/12g_etkCruq4tjG07t9hAqQffc4NqbSQK
+
+Taxstone legacy originals (read-only reuse; no relocation):
 https://drive.google.com/drive/folders/1wQMwzUconRC3UCvH2jpL1kD__ctBv29p
 
 Taxstone Lost Lil Uzi Vert presentation examples, not universal artwork masters:
@@ -312,7 +320,7 @@ Frank's later workflow corrections supersede conflicting earlier intake and Joe 
 
 DUB and Taxstone highlights use one selection per 15 minutes of source content, with a final partial block included; duration must satisfy their one shared X/Instagram export contract. Full-show clipping remains the default. Transcript, QA, source integrity, accepted-output reuse, exact Drive placement and required companion/register verification remain required.
 
-Joe Budden uses the official Joe Budden TV numbered full episode on YouTube as its source. Frank specifically clarified: download and file the complete original, then create chronological 8–10-minute source-content clips of the retained entire show, apply the DUB logo in the lower left and the approved complete outro, and file to Drive, nothing further. This narrow Joe Budden exception restores those two approved assets only for that workflow. It does not add branding to other native-video workflows. This is a Drive delivery contract, not a claim of X/Instagram upload compatibility; the approved 140-second Buffer contract continues to govern DUB/Taxstone shared exports. Keep Joe Budden records in DUB ownership and preserve Taxstone separation.
+Joe Budden uses the official Joe Budden TV numbered full episode on YouTube as its source. Frank specifically clarified: download and file the complete original, then create chronological 8–10-minute source-content clips of the retained entire show, apply the DUB logo in the lower left and the approved complete outro, and file to Drive, nothing further. This narrow Joe Budden exception restores those two approved assets only for that workflow. It does not add branding to other native-video workflows. This is a Drive delivery contract, not a claim of X/Instagram upload compatibility; the approved 140-second Buffer contract continues to govern DUB/Taxstone shared exports. Preserve the historical serialized DUB ownership for Joe job identity compatibility. The 2026-11-02 routing amendment requires Joe destinations and episode records to remain separate from DUB-only register writes; preserve Taxstone separation.
 
 Frank requested automated background processing like Taxstone. Reuse the native app and existing processing/delivery coordinator, with opt-in Start/Resume, Pause, a durable new-episode queue, duplicate reconciliation, visible failures and safe restart. Do not replay an old catalog merely by enabling it. The current bounded implementation scans the official channel's 30 recent uploads on launch, every 30 minutes while enabled, and Check Now; it runs while Joey and the Mac are available, without a permanent service or automatic launch. Discovery cadence and the initial latest-episode baseline are implementation choices, not evidence of historical library coverage. No social publication, scheduling, email, new service, or permission change is included.
 

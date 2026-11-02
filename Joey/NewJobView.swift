@@ -69,12 +69,7 @@ struct NewJobView: View {
                 DisclosureGroup("Advanced Settings",isExpanded:$advanced) {
                     VStack(alignment:.leading,spacing:16) {
                         TextField("Existing full-length archive link (optional)",text:$archive).textFieldStyle(.roundedBorder)
-                        if content == .dub {
-                            Picker("Full-original destination",selection:$archiveRoot) {
-                                Text("Resolve from source").tag("")
-                                Text("DUB full X broadcasts").tag("1GpuGWGIbSt3afwsi9L782soT9WJKOHS9")
-                            }
-                        }
+                        Text("Drive destinations resolve automatically from the source and content owner.").font(.caption)
                         HStack {
                             TextField("Existing source-bound transcript (optional)",text:$transcript).textFieldStyle(.roundedBorder)
                             Button("Choose Transcript…") {model.chooseFile {if let path = $0 {transcript = path}}}

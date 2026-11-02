@@ -55,7 +55,9 @@ private struct LegacyTechnicalReceipt: Codable {
 }
 
 public actor TaxstoneLibrary {
-    public static let archiveRoot = "1wQMwzUconRC3UCvH2jpL1kD__ctBv29p"
+    public static let archiveRoot = DriveDestination.taxstoneEpisodes.id
+    /// Existing originals remain discoverable here without relocation.
+    public static let legacyArchiveRoot = "1wQMwzUconRC3UCvH2jpL1kD__ctBv29p"
     private let root: URL
     private var state: TaxstoneLibraryState
     private var running = false
@@ -141,10 +143,16 @@ public actor TaxstoneLibrary {
         try save();await progress(state)
         let config = try Configuration.load(root:root)
         let provider = try DriveDelivery(remote:config.rcloneRemote)
-        let original = try await provider.children(Self.archiveRoot)
+        let currentOriginals = try await provider.children(Self.archiveRoot)
+        let legacyOriginals = try await provider.children(Self.legacyArchiveRoot)
+        var seenOriginals = Set<String>()
+        let original = (currentOriginals + legacyOriginals).filter {
+            guard let id = $0["id"] as? String,$0["mimeType"] as? String != "application/vnd.google-apps.folder" else {return false}
+            return seenOriginals.insert(id).inserted
+        }
         let evidence = try TaxstoneEvidence.load()
         let byDrive = Dictionary(grouping:evidence,by:\.driveID)
-        let outputListing = try await Processes.run("rclone",["lsjson",config.rcloneRemote+":","--drive-root-folder-id","1kxv3bbnPPRt914npHFUI51jrbCY0atyU","--recursive","--hash"],maxOutput:16*1024*1024)
+        let outputListing = try await Processes.run("rclone",["lsjson",config.rcloneRemote+":","--drive-root-folder-id",DriveDestination.taxstoneClips.id,"--recursive","--hash"],maxOutput:16*1024*1024)
         let remoteObjects = try JSONSerialization.jsonObject(with:outputListing.stdout) as? [[String:Any]] ?? []
         let mediaObjects = remoteObjects.filter {($0["Name"] as? String ?? "").lowercased().hasSuffix(".mp4")}
         let knownIDs = Set(evidence.flatMap { $0.legacyClips.map(\.driveID) })
@@ -276,7 +284,8 @@ public actor TaxstoneLibrary {
         guard !episodes.isEmpty,Set(episodes.map(\.id)).count == episodes.count else {throw JoeyError.failed("Empty or duplicate Taxstone archive inventory")}
         // Reconcile current Joey packages: never recreate a source whose remote
         // package exists without its local job checkpoint.
-        let folders = try await provider.children(DriveDelivery.audioRoot)
+        var folders = try await provider.children(DriveDestination.taxstoneClips.id)
+        for retired in DestinationResolver.retiredClipRoots {folders += try await provider.children(retired)}
         for folder in folders {
             let props = folder["appProperties"] as? [String:String] ?? [:]
             guard props["joeyOwner"] == "taxstone",let source = props["joeySourceID"],let i = episodes.firstIndex(where:{$0.id == source}) else {continue}
@@ -299,20 +308,8 @@ public actor TaxstoneLibrary {
         guard let source = job.source,let folder = job.folderID,job.unavailableTranscriptFeatures.isEmpty,
               !job.clips.isEmpty,job.companions.count >= 4 else {throw JoeyError.failed("Completed episode lacks delivery evidence")}
         try Planning.validateCoverage(duration:source.duration,exclusions:job.exclusions.map(\.interval),clips:job.clips.map(\.intervals))
-        let meta = try await provider.metadata(folder)
-        guard meta["parents"] as? [String] == [DriveDelivery.audioRoot],
-              (meta["appProperties"] as? [String:String])?["joeySourceID"] == source.id,
-              (meta["appProperties"] as? [String:String])?["joeyOwner"] == "taxstone" else {throw JoeyError.failed("Taxstone folder identity/placement changed")}
-        let children = try await provider.children(folder)
-        for receipt in job.clips.compactMap(\.drive)+Array(job.companions.values) {
-            let remote = try await provider.metadata(receipt.id)
-            guard remote["trashed"] as? Bool != true, remote["parents"] as? [String] == [folder],
-                  remote["name"] as? String == receipt.name,remote["md5Checksum"] as? String == receipt.md5,
-                  Int64(remote["size"] as? String ?? "") == receipt.bytes,
-                  children.filter({$0["name"] as? String == receipt.name}).count == 1,
-                  remote["permissions"] != nil else {throw JoeyError.failed("Taxstone Drive readback changed: "+receipt.id)}
-        }
-        guard job.clips.allSatisfy({$0.drive != nil && $0.qa?.passed == true}) else {throw JoeyError.failed("Missing clip receipt")}
+        _ = folder
+        try await provider.verifyPackage(job:job,directory:root.appendingPathComponent("jobs/"+job.id))
     }
     private func prepare(_ episode: TaxstoneLibraryEpisode, config: Configuration) async throws -> JobRequest {
         if let request = episode.request {return try config.renewingCapabilities(in:request)}
