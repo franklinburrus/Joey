@@ -131,7 +131,7 @@ private struct EmailQueuedLinkView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:10) {
             Text(work.source.url).font(.callout).textSelection(.enabled)
-            Text(work.status == .running ? "Processing" : requested ? "Waiting for the current job to finish" : "Saved — waiting for you")
+            Text(work.status == .running ? "Processing" : requested ? "Waiting for the current job to finish" : work.status == .cancelled ? "Cancelled — saved for retry" : "Saved — waiting for you")
                 .font(.subheadline.bold())
             if let reason = work.reason {Text(reason).font(.callout).textSelection(.enabled)}
             if work.request == nil {
@@ -156,6 +156,9 @@ private struct EmailQueuedLinkView: View {
                 Button(work.status == .retryable || work.status == .cancelled ? "Retry":"Process") {
                     model.process(work.id,workflow:workflow)
                 }.disabled(active)
+                Button("Cancel Queued Link") {model.cancelWork(work.id)}
+                    .disabled(!work.canCancelFromQueue)
+                    .help("Free this queue slot while retaining the saved link and any accepted work.")
                 if let jobID = work.jobID {Button("Open Job") {selectJob(jobID)}}
             }
         }

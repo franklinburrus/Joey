@@ -224,17 +224,39 @@ final class EmailModelTests: XCTestCase {
     @MainActor func testPausingJoeDoesNotWaitForUnrelatedEmailTurn() async throws {
         let model = try queuedModel()
         model.email.dispatching = true
+        model.automationRunning = true // Joe remains active around an interleaved email turn.
         model.task = Task {try? await Task.sleep(nanoseconds:30_000_000_000)}
         let processing = try XCTUnwrap(model.task)
         let queue = Task {await processing.value}
         model.automationTask = queue
         defer {processing.cancel();queue.cancel()}
         model.pauseJoe()
+        XCTAssertFalse(model.cancelling) // Discovery must not observe another workflow's cancellation.
         for _ in 0..<5 {await Task.yield()}
         XCTAssertFalse(model.cancelling)
         XCTAssertFalse(processing.isCancelled)
         XCTAssertFalse(queue.isCancelled)
     }
+    @MainActor func testCancelDuringInterleavedEmailDoesNotPauseJoeOrLibrary() async throws {
+        for libraryBusy in [false,true] {
+            let model = try queuedModel()
+            model.email.dispatching = true
+            model.automationRunning = true
+            model.joeAutomation.enabled = true
+            model.libraryBusy = libraryBusy
+            let processing = Task<Void,Never> {try? await Task.sleep(nanoseconds:30_000_000_000)}
+            let queue = Task {await processing.value}
+            model.task = processing;model.automationTask = queue
+            model.cancel()
+            XCTAssertTrue(processing.isCancelled)
+            XCTAssertTrue(model.joeAutomation.enabled)
+            XCTAssertFalse(queue.isCancelled)
+            await processing.value
+            queue.cancel()
+            for _ in 0..<5 {await Task.yield()}
+        }
+    }
+
     @MainActor func testWakeDoesNotOverlapChecksOrRetryAuthenticationAndExplicitSuccessRecovers() async throws {
         let model = try queuedModel(), store = try XCTUnwrap(model.email.store)
         var settings = store.state.settings

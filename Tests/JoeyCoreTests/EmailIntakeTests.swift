@@ -8,6 +8,96 @@ final class EmailIntakeTests: XCTestCase {
         addTeardownBlock {try? FileManager.default.removeItem(at:root)}
         return root
     }
+    func testCancelledFailedLinksReleaseCapacityDurablyWithoutDuplicateReactivation() throws {
+        let location = try root(), store = try EmailIntakeStore(root:location)
+        var settings = EmailIntakeSettings();settings.account = "parent@icloud.com";settings.allowedSenders = ["sender@example.test"]
+        try store.configure(settings)
+        try store.activate(EmailScan(uidValidity:7,uidNext:1,frontier:0,messages:[]))
+        for start in [1,51] {
+            let messages = (start..<(start+50)).map {
+                EmailMessage(uid:UInt64($0),status:"authorized",reason:"templateToken",links:["https://x.com/i/broadcasts/source\($0)"])
+            }
+            try store.ingest(EmailScan(uidValidity:7,uidNext:UInt64(start+50),frontier:UInt64(start+49),messages:messages))
+        }
+        let work = try XCTUnwrap(store.state.work.first)
+        try store.updateWork(work.id,status:.retryable,reason:"Source is unavailable")
+        XCTAssertNil(store.state.work.first?.jobID)
+        XCTAssertEqual(store.state.capacity,0)
+        try store.cancelWork(work.id)
+        let reopened = try EmailIntakeStore(root:location)
+        XCTAssertEqual(reopened.state.capacity,1)
+        XCTAssertEqual(reopened.state.work.first?.status,.cancelled)
+        XCTAssertNil(reopened.state.nextRequestedWork(now:.distantFuture))
+        try reopened.ingest(EmailScan(uidValidity:7,uidNext:103,frontier:102,messages:[
+            EmailMessage(uid:101,status:"authorized",reason:"templateToken",links:[work.source.url]),
+            EmailMessage(uid:102,status:"authorized",reason:"templateToken",links:["https://x.com/i/broadcasts/newSource"])
+        ]))
+        XCTAssertEqual(reopened.state.currentBaseline?.frontier,102)
+        XCTAssertEqual(reopened.state.work.count,101)
+        XCTAssertEqual(reopened.state.work.first?.status,.cancelled)
+        XCTAssertEqual(reopened.state.capacity,0)
+        XCTAssertThrowsError(try reopened.requestProcessing(work.id,workflow:work.workflow))
+        try reopened.cancelWork(reopened.state.work[1].id)
+        try reopened.requestProcessing(work.id,workflow:work.workflow)
+        XCTAssertEqual(reopened.state.nextRequestedWork()?.id,work.id)
+        XCTAssertEqual(reopened.state.pendingCount,100)
+    }
+
+    func testQueueCancellationRetainsFrozenRequestAndSurvivesReconciliation() throws {
+        let location = try root()
+        var state = EmailIntakeState()
+        let source = try EmailSource("https://youtu.be/abcdefghijk")
+        var work = EmailWork(id:"item",account:"parent@icloud.com",source:source,workflow:EmailWorkflow())
+        var request = try Fixtures.request(dir:location,path:"synthetic-missing-source")
+        request.sourceID = source.id
+        work.request = request;work.jobID = try request.stableID()
+        work.processingRequested = true;work.retryRequested = true
+        state.work = [work]
+        try Persistence.save(state,to:location.appendingPathComponent("email-intake.json"))
+        let store = try EmailIntakeStore(root:location)
+        try store.cancelWork(work.id)
+        var job = JobRecord(id:try request.stableID(),request:request);job.state = .failed
+        try store.reconcile([job])
+        let reopened = try EmailIntakeStore(root:location)
+        let saved = try XCTUnwrap(reopened.state.work.first)
+        XCTAssertEqual(saved.status,.cancelled)
+        XCTAssertNil(saved.processingRequested);XCTAssertNil(saved.retryRequested);XCTAssertNil(saved.retryAt)
+        XCTAssertEqual(saved.jobID,work.jobID)
+        XCTAssertEqual(try saved.request?.identityData(),try request.identityData())
+        XCTAssertEqual(reopened.state.capacity,100)
+        try reopened.requestProcessing(work.id,workflow:work.workflow)
+        XCTAssertEqual(reopened.state.nextRequestedWork()?.jobID,work.jobID)
+    }
+
+    func testQueueCancellationRejectsRunningCompletedAndUnknownItems() throws {
+        let location = try root()
+        var state = EmailIntakeState()
+        for status in [EmailWorkStatus.running,.completed] {
+            var work = EmailWork(id:status.rawValue,account:"parent@icloud.com",
+                source:try EmailSource("https://x.com/i/broadcasts/\(status.rawValue)"),workflow:EmailWorkflow())
+            work.status = status;state.work.append(work)
+        }
+        try Persistence.save(state,to:location.appendingPathComponent("email-intake.json"))
+        let store = try EmailIntakeStore(root:location)
+        let before = try Data(contentsOf:store.url)
+        for id in ["running","completed","unknown"] {XCTAssertThrowsError(try store.cancelWork(id))}
+        XCTAssertEqual(try Data(contentsOf:store.url),before)
+    }
+
+    func testFailedQueueCancellationSaveDoesNotReleaseCapacity() throws {
+        let location = try root()
+        var state = EmailIntakeState()
+        state.work = [EmailWork(id:"item",account:"parent@icloud.com",source:try EmailSource("https://youtu.be/abcdefghijk"),workflow:EmailWorkflow())]
+        let url = location.appendingPathComponent("email-intake.json")
+        try Persistence.save(state,to:url)
+        let store = try EmailIntakeStore(root:location)
+        try FileManager.default.removeItem(at:url)
+        try FileManager.default.createDirectory(at:url,withIntermediateDirectories:false)
+        XCTAssertThrowsError(try store.cancelWork("item"))
+        XCTAssertEqual(store.state.capacity,99)
+        XCTAssertEqual(store.state.work.first?.status,.queued)
+    }
+
     func testCanonicalLinksRejectPortsAndAmbiguousIdentity() throws {
         XCTAssertEqual(try EmailSource("https://youtu.be/abcdefghijk?t=9").url,"https://www.youtube.com/watch?v=abcdefghijk")
         XCTAssertEqual(try EmailSource("https://youtube.com/live/abcdefghijk?feature=share").id,"youtube:abcdefghijk")
