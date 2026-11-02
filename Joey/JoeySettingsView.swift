@@ -3,12 +3,14 @@ import SwiftUI
 struct JoeySettingsView: View {
     @ObservedObject var model: JobModel
     @Binding var appearance: String
+    var selectJob: (String) -> Void
     @Environment(\.colorScheme) private var scheme
     @State private var production = false
     var body: some View {
         ScrollView {
             VStack(alignment:.leading,spacing:24) {
                 Text("Settings").font(.largeTitle.bold())
+                EmailSettingsView(model:model.email,selectJob:selectJob)
                 JoeyPanel {
                     Text("Storage").font(.headline)
                     if let storage = model.storage {

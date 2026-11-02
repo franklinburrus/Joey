@@ -1,6 +1,6 @@
 import Foundation
 
-public enum LinkContent: String, CaseIterable, Sendable {case dub, taxstone, joeBudden}
+public enum LinkContent: String, Codable, CaseIterable, Sendable {case dub, taxstone, joeBudden}
 
 public enum ProductionIntake {
     public static func request(source: DiscoveredSource, content: LinkContent, mode: JobMode,
@@ -33,6 +33,8 @@ public struct JoeAutomationState: Codable, Sendable {
     public var afterEpisode: Int?
     public var lastCheckedAt: Date?
     public var queue: [DiscoveredSource] = []
+    /// A bounded library turn resumes here even after a failed episode or feed sort.
+    public var nextInterleavedEpisodeID: String?
     public var lastError: String?
     public init() {}
 

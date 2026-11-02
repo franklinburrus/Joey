@@ -11,6 +11,41 @@ final class NativeModelRegressionTests: XCTestCase {
         return JobModel(root:root,startsAutomatically:false)
     }
 
+    @MainActor func testInterleavedJoeTurnsAdvancePastFailuresAcrossReconciliationAndRestart() async throws {
+        let model = try model()
+        model.libraryBusy = true;model.joeAutomation.enabled = true;model.joeAutomation.afterEpisode = 0
+        let episodes = (1...2).map {(number: Int) -> DiscoveredSource in
+            DiscoveredSource(id:"youtube:abcdefghij\(number)",title:"Episode \(number)",url:"https://www.youtube.com/watch?v=abcdefghij\(number)",
+                             duration:600,channelID:SourceDiscovery.joeChannelID,episodeNumber:number)
+        }
+        var ids: [String] = []
+        for episode in episodes {
+            let request = try ProductionIntake.request(source:episode,content:.joeBudden,mode:.fullShow,sharedProfile:nil)
+            var job = JobRecord(id:try request.stableID(),request:request)
+            job.state = .failed;job.updatedAt = .distantPast
+            // No branding is configured in this isolated root: the real
+            // coordinator fails locally before provider lookup or media work.
+            try Persistence.save(job,to:model.root.appendingPathComponent("jobs/\(job.id)/job.json"))
+            ids.append(job.id)
+        }
+        model.joeAutomation.queue = episodes
+        await model.refresh()
+        await model.runJoeQueue(interleaved:true)
+        XCTAssertEqual(model.selected,ids[0])
+        XCTAssertEqual(model.jobs.first {$0.id == ids[1]}?.updatedAt,.distantPast)
+        XCTAssertEqual(model.joeAutomation.queue.count,2)
+        // A feed refresh re-sorts the queue; restart must not lose the turn.
+        model.joeAutomation.reconcile(episodes,completed:[])
+        let saved: JoeAutomationState = try Persistence.load(model.root.appendingPathComponent("joe-automation.json"))
+        model.joeAutomation = saved
+        model.joeAutomation.reconcile(episodes,completed:[])
+        await model.runJoeQueue(interleaved:true)
+        XCTAssertEqual(model.selected,ids[1])
+        XCTAssertEqual(model.joeAutomation.queue.count,2)
+        await model.runJoeQueue(interleaved:true)
+        XCTAssertEqual(model.selected,ids[0])
+    }
+
     @MainActor func testCancelInterleavedTaskStopsWorkerAndRetainsQueuesAndCheckpoint() async throws {
         let model = try model(), marker = model.root.appendingPathComponent("worker.pid")
         let checkpoint = model.root.appendingPathComponent("checkpoint.json")

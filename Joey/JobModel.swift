@@ -5,6 +5,8 @@ import SwiftUI
 import AppKit
 import Combine
 
+enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
+
 @MainActor final class JobModel: ObservableObject {
     @Published var jobs: [JobRecord] = []
     @Published var selected: String?
@@ -27,20 +29,24 @@ import Combine
     private var library: TaxstoneLibrary?
     var libraryTask: Task<Void,Never>?
     var automationRunning = false
-    private var automationTask: Task<Void,Never>?
+    var automationTask: Task<Void,Never>?
+    private var joeResumeRequested = false
     private var monitorTask: Task<Void,Never>?
     private var automationStateReadable = true
     private var recovering = true
     private var coordinator: Coordinator?
     var task: Task<Void,Never>?
     let root: URL
+    let email: EmailIntakeModel
     init(root: URL = Persistence.defaultRoot, startsAutomatically: Bool = true) {
         self.root = root
+        self.email = EmailIntakeModel(root:root)
         do {coordinator = try Coordinator(root:root); configuration = try Configuration.load(root:root)}
         catch {self.error = error.localizedDescription}
         guard startsAutomatically else {return}
         Task {
             await refresh()
+            do {try email.store?.reconcile(jobs);email.publish()} catch {email.failedPersistence(error)}
             // Recover interrupted valid jobs once at launch. Explicitly
             // cancelled jobs remain cancelled until the user resumes them.
             let stateURL = root.appendingPathComponent("joe-automation.json")
@@ -51,12 +57,14 @@ import Combine
             do {library = try TaxstoneLibrary(root:root); taxstoneLibrary = await library!.snapshot()}
             catch {self.error = "Taxstone library state unreadable: "+error.localizedDescription}
             let queuedIDs = Set(joeAutomation.queue.map(\.id)).union(taxstoneLibrary.episodes.map(\.id))
-            let pending = jobs.filter { $0.resumesAutomatically && !queuedIDs.contains($0.request.sourceID) }
+            let emailJobs = Set(email.state.work.compactMap(\.jobID))
+            let pending = jobs.filter { $0.resumesAutomatically && !queuedIDs.contains($0.request.sourceID) && !emailJobs.contains($0.id) }
             for job in pending {
                 start(job.request)
                 await task?.value
             }
             recovering = false
+            email.attach(to:self)
             if joeAutomation.enabled && !joeAutomation.queue.isEmpty {await runJoeQueue()}
             if taxstoneLibrary.enabled {startTaxstoneLibrary()}
             scanJoe()
@@ -117,7 +125,7 @@ import Combine
     }
     func pauseJoe() {
         joeAutomation.enabled = false
-        let queue = automationTask, processing = automationRunning ? task:nil
+        let queue = automationRunning ? automationTask:nil, processing = automationRunning ? task:nil
         queue?.cancel();processing?.cancel()
         do {try saveJoe()} catch {self.error = error.localizedDescription}
         joeStatus = "Pausing automatic processing; queue and accepted work retained."
@@ -130,21 +138,35 @@ import Combine
             if ownsCancellation {cancelling = false}
         }
     }
-    private func resumeJoeQueue() {
-        guard !cancelling, !recovering, joeAutomation.enabled, automationStateReadable, automationTask == nil,
+    func resumeJoeQueue(includeJoe: Bool = true) {
+        if includeJoe && joeAutomation.enabled && automationStateReadable {joeResumeRequested = true}
+        guard !cancelling, !recovering, automationTask == nil,
               !busy, !libraryBusy, !preparingSource else {return}
+        let emailReady = email.available && email.state.nextRequestedWork() != nil
+        guard joeResumeRequested || emailReady else {return}
+        let runJoe = joeResumeRequested;joeResumeRequested = false
         automationTask = Task {
-            await runJoeQueue()
+            await runEmailItem()
+            if runJoe {await runJoeQueue()}
             automationTask = nil
+            if joeResumeRequested {resumeJoeQueue(includeJoe:false)}
         }
     }
-    private func runJoeQueue(interleaved: Bool = false) async {
+    func runJoeQueue(interleaved: Bool = false) async {
         guard !cancelling, !automationRunning, !busy, (!libraryBusy || interleaved), !preparingSource else {return}
         automationRunning = true;defer {automationRunning = false}
         // One attempt per queued episode per pass; failures remain for the next
         // periodic check or explicit Resume. Independent episodes can continue.
-        for episode in joeAutomation.queue {
+        let queued = joeAutomation.queue
+        let next = queued.first {$0.id == joeAutomation.nextInterleavedEpisodeID} ?? queued.first
+        let episodes = interleaved ? next.map {[$0]} ?? [] : queued
+        for episode in episodes {
             guard joeAutomation.enabled, !Task.isCancelled, !busy else {break}
+            if interleaved, let index = queued.firstIndex(where:{$0.id == episode.id}) {
+                // Advance on attempts, not only completion. Keep the cursor in
+                // the existing checkpoint so refresh/restart cannot starve peers.
+                joeAutomation.nextInterleavedEpisodeID = queued[(index+1) % queued.count].id
+            }
             do {
                 let prior = jobs.first {$0.request.sourceID == episode.id && $0.request.productionWorkflow == .joeBudden}
                 if prior?.state != .completed {
@@ -178,14 +200,16 @@ import Combine
                 self.error = "Automatic processing stopped: queue save failed. " + error.localizedDescription
                 break
             }
+            await runEmailItem(interleaved:interleaved)
         }
     }
     func refresh() async {
         do {jobs = try await coordinator?.jobs() ?? []}
         catch {self.error = error.localizedDescription}
     }
-    func start(_ request: JobRequest, automatic: Bool = false) {
-        guard !cancelling, !busy, (!libraryBusy || automatic), (!automationRunning || automatic), let coordinator else {return}
+    @discardableResult func start(_ request: JobRequest, automatic: Bool = false) -> JobAcceptance {
+        guard !cancelling, !busy, (!libraryBusy || automatic), (!automationRunning || automatic) else {return .deferred}
+        guard let coordinator else {return .unavailable}
         busy = true; error = nil
         task = Task {
             defer {busy = false; task = nil;if !automatic {resumeJoeQueue()}}
@@ -196,6 +220,74 @@ import Combine
                 receive(result)
             } catch {self.error = error.localizedDescription}
             await refresh()
+        }
+        return .accepted
+    }
+    /// One explicitly requested email item per turn. Library/Joe loops offer the same
+    /// turn between episodes, so no automation owns an unbounded media queue.
+    func runEmailItem(interleaved: Bool = false, now: Date = Date()) async {
+        guard !cancelling, !busy, !preparingSource, (!libraryBusy || interleaved),
+              email.available, !email.dispatching, let store = email.store else {return}
+        do {try store.reconcile(jobs);email.publish()} catch {email.failedPersistence(error);return}
+        guard let work = email.state.nextRequestedWork(now:now) else {return}
+        email.dispatching = true;preparingSource = true
+        defer {email.dispatching = false;preparingSource = false}
+        // Consume the explicit intent before any external discovery. A crash
+        // during lookup must return to a held item, not authorize another run.
+        do {try store.updateWork(work.id,status:.running);email.publish()}
+        catch {email.failedPersistence(error);return}
+        do {
+            var request = work.request
+            if request == nil {
+                // Reuse a matching prior manual/automatic contract before
+                // looking up mutable provider titles or constructing a new ID.
+                let matches = jobs.filter {
+                    $0.request.sourceID == work.source.id &&
+                    $0.request.owner == (work.workflow.content == .taxstone ? .taxstone:.dub) &&
+                    ($0.request.productionWorkflow == .link || $0.request.productionWorkflow == .joeBudden) &&
+                    $0.request.mode == (work.workflow.content == .joeBudden ? .fullShow:work.workflow.mode) &&
+                    $0.request.fixedIntervals == nil && $0.request.requestedCount == nil && $0.request.adExclusions.isEmpty &&
+                    $0.request.preferredDuration == nil && $0.request.transcriptPolicy == nil &&
+                    ($0.request.productionWorkflow == .joeBudden || ($0.request.archiveRootID ?? "") == work.workflow.archiveRoot) &&
+                    (work.workflow.content != .joeBudden || $0.request.productionWorkflow == .joeBudden)
+                }
+                guard matches.count <= 1 else {throw JoeyError.dependency("Multiple existing source contracts match; select the existing job instead of creating another")}
+                if let prior = matches.first {request = prior.request}
+                else {
+                    let source = try await email.lookup(work.source.url)
+                    guard source.id == work.source.id else {throw JoeyError.invalid("Email source identity changed during discovery")}
+                    request = try ProductionIntake.request(source:source,content:work.workflow.content,mode:work.workflow.mode,
+                        sharedProfile:work.workflow.content == .taxstone ? configuration?.taxstoneProfile:configuration?.profile,
+                        archiveRoot:work.workflow.archiveRoot.isEmpty ? nil:work.workflow.archiveRoot)
+                }
+                try Task.checkCancellation()
+                guard email.available, !cancelling else {throw CancellationError()}
+                try store.freeze(work.id,request:request!);email.publish()
+            }
+            guard email.available, !cancelling, let request else {throw CancellationError()}
+            try Task.checkCancellation()
+            let acceptance = start(request,automatic:true)
+            guard acceptance == .accepted, let processing = task else {
+                try store.updateWork(work.id,status:acceptance == .deferred ? .queued:.retryable,reason:"Processing owner is unavailable")
+                if acceptance == .deferred {try store.requestProcessing(work.id,workflow:work.workflow)}
+                email.publish();return
+            }
+            // Pausing intake never cancels an accepted media task. The existing
+            // Cancel action still owns explicit media cancellation.
+            await processing.value
+            try store.reconcile(jobs)
+            let current = store.state.work.first {$0.id == work.id}
+            if current?.status != .completed && current?.status != .cancelled {
+                try store.updateWork(work.id,status:.retryable,reason:jobs.first {$0.id == current?.jobID}?.error ?? error ?? "Job remains incomplete; accepted work retained")
+            }
+            email.publish()
+        } catch is CancellationError {
+            // No cursor or frozen request is discarded on discovery cancellation.
+            do {try store.updateWork(work.id,status:.cancelled,reason:"Stopped; saved link and request retained");email.publish()}
+            catch {email.failedPersistence(error)}
+        } catch {
+            do {try store.updateWork(work.id,status:.retryable,reason:error.localizedDescription);email.publish()}
+            catch {email.failedPersistence(error)}
         }
     }
     func receive(_ job: JobRecord) {
@@ -220,7 +312,7 @@ import Combine
         }
     }
     func refreshTaxstoneLibrary() {
-        guard !cancelling, !busy, !libraryBusy, let library else {return}
+        guard !cancelling, !busy, !libraryBusy, !preparingSource, let library else {return}
         libraryBusy = true
         libraryTask = Task {
             defer {libraryBusy = false;libraryTask = nil;resumeJoeQueue()}
@@ -235,7 +327,10 @@ import Combine
         libraryTask = Task {
             defer {libraryBusy = false;libraryTask = nil;resumeJoeQueue()}
             do {
-                taxstoneLibrary = try await library.run(progress:{state in await self.receiveLibrary(state)},jobProgress:{job in await self.receive(job)},betweenEpisodes:{await self.runJoeQueue(interleaved:true)})
+                taxstoneLibrary = try await library.run(progress:{state in await self.receiveLibrary(state)},jobProgress:{job in await self.receive(job)},betweenEpisodes:{
+                    await self.runEmailItem(interleaved:true)
+                    await self.runJoeQueue(interleaved:true)
+                })
             } catch {
                 taxstoneLibrary = await library.snapshot()
                 if !(error is CancellationError) {taxstoneLibrary.error = error.localizedDescription}

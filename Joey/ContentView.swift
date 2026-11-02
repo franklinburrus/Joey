@@ -55,7 +55,9 @@ struct ContentView: View {
             VStack(spacing:0) {
                 HStack {Text("Settings").font(.headline);Spacer();Button("Done") {settings = false}}.padding()
                 Divider()
-                JoeySettingsView(model:model,appearance:$appearance)
+                JoeySettingsView(model:model,appearance:$appearance) {id in
+                    selectedID = id;destination = .jobs;settings = false
+                }
             }.frame(width:680,height:650)
         }
         .sheet(isPresented:$assistant) {AssistantView(mediaBusy:model.busy || model.libraryBusy)}

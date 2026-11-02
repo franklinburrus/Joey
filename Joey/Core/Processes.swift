@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 public struct ProcessResult: Sendable { public var stdout: Data; public var stderr: String; public var status: Int32 }
 public enum Processes {
@@ -25,8 +26,12 @@ public enum Processes {
     }
     public static func run(_ executable: String, _ arguments: [String], directory: URL? = nil,
                            output: URL? = nil, maxOutput: Int = 16*1024*1024,
-                           environment: [String:String] = [:]) async throws -> ProcessResult {
+                           environment: [String:String] = [:], input: Data? = nil,
+                           timeout: TimeInterval? = nil) async throws -> ProcessResult {
         try Task.checkCancellation()
+        guard (input?.count ?? 0) <= 16384, timeout == nil || (timeout!.isFinite && timeout! > 0) else {
+            throw JoeyError.invalid("Invalid bounded process input or deadline")
+        }
         let storageRoot = StorageManager.processingRoot
         let toolName = URL(fileURLWithPath:executable).lastPathComponent
         let writesMedia = toolName == "ffmpeg" || toolName == "yt-dlp" || toolName.hasPrefix("python") ||
@@ -45,11 +50,41 @@ public enum Processes {
         let process = Process(); process.executableURL = try ProcessSupervisor.executable()
         process.arguments = ["--supervise",String(getpid())]+(storageRoot.map {["--storage-root",$0.path]} ?? [])+[try self.executable(executable)]+arguments; process.currentDirectoryURL = directory
         process.standardOutput = out; process.standardError = err; process.standardInput = FileHandle.nullDevice
+        let inputPipe = input.map {_ in Pipe()}
+        var inputOpen = inputPipe != nil
+        var written = 0
+        if let pipe = inputPipe {
+            // The parent pumps a small anonymous pipe without blocking any
+            // executor. The supervisor inherits fd 0; no secret touches disk.
+            process.standardInput = pipe.fileHandleForReading
+            let fd = pipe.fileHandleForWriting.fileDescriptor
+            guard fcntl(fd,F_SETFL,O_NONBLOCK) == 0, fcntl(fd,F_SETNOSIGPIPE,1) == 0 else {
+                throw JoeyError.failed("Unable to create private process input")
+            }
+        }
+        defer {
+            try? inputPipe?.fileHandleForReading.close()
+            if inputOpen {try? inputPipe?.fileHandleForWriting.close()}
+        }
         process.environment = childEnvironment(ProcessInfo.processInfo.environment,overrides:environment)
         try process.run()
+        try inputPipe?.fileHandleForReading.close()
+        let deadline = timeout.map {ProcessInfo.processInfo.systemUptime + $0}
         do {
             var nextCapacityCheck = Date()
             while process.isRunning {
+                if let deadline, ProcessInfo.processInfo.systemUptime >= deadline {throw JoeyError.failed("Local helper timed out")}
+                if inputOpen, let input, let pipe = inputPipe {
+                    if written < input.count {
+                        let count = input.withUnsafeBytes {bytes in
+                            Darwin.write(pipe.fileHandleForWriting.fileDescriptor,bytes.baseAddress!.advanced(by:written),input.count-written)
+                        }
+                        if count > 0 {written += count}
+                        else if count < 0 && errno == EPIPE {written = input.count}
+                        else if count < 0 && errno != EAGAIN && errno != EINTR {throw JoeyError.failed("Private process input failed")}
+                    }
+                    if written == input.count {try pipe.fileHandleForWriting.close();inputOpen = false}
+                }
                 try await Task.sleep(nanoseconds: 50_000_000)
                 if writesMedia,let storageRoot, Date() >= nextCapacityCheck {
                     // Stop before consuming the OS reserve. Partial attempt stays
