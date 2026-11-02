@@ -16,6 +16,7 @@ Frank's latest request supersedes Joe's archive retirement below. Keep complete 
 - [x] Restore the verified Joe full-episode destination, extend existing archive naming, archive Joe originals before clipping, and remove obsolete source deletion without altering clip plans or request identities. Reconcile REQUIREMENTS and the operating/storage guides.
 - [x] Run the affected Swift tests, native Xcode build and proportional final regression checks. Preserve live media and avoid production rerendering.
 - [x] Read all 16 existing originals by exact ID, prepare collision-free names, rename metadata only, and independently verify IDs, hashes, sizes, parents, links and permissions. Record implementation, Drive outcome and installation status separately.
+- [x] After Frank's explicit follow-up authorization, push the source branch, install the tested signed bundle with rollback and verify process relaunch, bundle hashes, protected runtime/media preservation and unchanged automation settings. Record the computer tool's unavailable visual observation without converting it into a new gate.
 
 ## Authoritative filing correction — 2026-11-02 (historical)
 

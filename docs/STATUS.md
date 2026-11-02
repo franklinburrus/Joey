@@ -1,4 +1,4 @@
-## Joe Budden full-episode retention and naming — SOURCE AND DRIVE VERIFIED; installation pending (2026-11-02)
+## Joe Budden full-episode retention and naming — VERIFIED, INSTALLED AND PUSHED (2026-11-02)
 
 Frank now explicitly requests keeping complete Joe Budden episodes, adding permanent archival to Joey's existing workflow, and filing them in `1KJ0-sjGWNxwIuis_faA5z_FbPUcbjEDD` using `945 — Maximum Punishment` naming. This supersedes the earlier Joe archive-retirement and temporary-source-deletion decision. The existing native Swift workflow, source provenance, clips, QA, job identities, other creators, credentials and sharing must remain intact.
 
@@ -18,7 +18,11 @@ Drive completed: all 16 existing full episodes were renamed in place to the requ
 
 Evidence: `/Users/frank/Library/Caches/Joey-Native-Build/joe-full-episodes-20261102/`, including original names, raw before/final metadata, per-file rename receipts, rclone before/final hash inventories, native build/full-suite logs and tested bundle hashes. Episode 977's existing archive link remains valid; no job, clip or companion rewrite was needed.
 
-The installed application has not been replaced. A concrete signed build is prepared at `joe-full-episodes-20261102/DerivedData/Build/Products/Debug/Joey.app`; current installation authority was requested under AGENTS.md's explicit installation boundary. Next action: if Frank authorizes installation, reuse the protected staged-install/rollback procedure, preserve runtime state and verify the installed bundle and reopening; otherwise retain the existing installation and the completed source/Drive scope. No Git push, merge or public release is inferred.
+Frank subsequently explicitly authorized commit, push and installation. Source commit `a3a8ba9b63a93370374c32a80205bf34e28933f9` was pushed to `origin/codex/joe-full-episodes` and independently verified through `git ls-remote`. At `2026-11-02T21:25:18Z`, the tested ten-file bundle was installed at `/Users/frank/Applications/Joey Native.app` using the established staged replacement and rollback procedure. The application was closed before replacement. Candidate, staged and installed signatures passed; every installed bundle hash matches `tested-bundle.json`. Rollback remains at `/Users/frank/Applications/Joey Rollbacks/2026-11-02-before-joe-full-episodes/Joey Native.app`.
+
+Installation and direct minimal-environment relaunch preserved all 446 protected file identities, 278 accepted local outputs and 20 job identities; zero new jobs or media operations occurred. Post-launch checkpoint/content comparison found only Joe monitoring's expected `lastCheckedAt` update; its queue, settings and disabled state are unchanged. Both show automations remain paused. The launched process remains the installed executable, and fresh strict signature/bundle readback passes. The computer tool reported the Mac locked, so no visual reopening/UI acceptance is claimed; process launch and runtime preservation are verified independently. Visual observation is not a new installation gate for this authorized update.
+
+The requested source, existing Drive naming, branch push and installation are complete. Source and integration evidence remains in `joe-full-episodes-20261102/`, including `installation/installation.json`, `installation/before.json` and `installation/relaunch-readback.json`. The containing follow-up commit records installation closeout; final remote readback is kept in `integration.json`. No merge to main, pull request, new production render or public release was requested or inferred. All 22 unrelated untracked files remain excluded.
 
 ---
 
