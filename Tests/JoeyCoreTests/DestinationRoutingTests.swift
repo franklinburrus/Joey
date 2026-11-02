@@ -19,7 +19,8 @@ final class DestinationRoutingTests: XCTestCase {
             (.dub,.nativeVideo,true,.clip,"1X5VNP6fo3VpZPu4ZW4p7Ggk2o_IAVGSI"),
             (.dub,.audio,false,.fullEpisode,"109_QzHpF0Bi-OG6-AxuTDw1uHG4zeop3"),
             (.dub,.nativeVideo,false,.fullEpisode,"1GpuGWGIbSt3afwsi9L782soT9WJKOHS9"),
-            (.taxstone,.nativeVideo,false,.fullEpisode,"1wQMwzUconRC3UCvH2jpL1kD__ctBv29p")]
+            (.taxstone,.nativeVideo,false,.fullEpisode,"1wQMwzUconRC3UCvH2jpL1kD__ctBv29p"),
+            (.dub,.nativeVideo,true,.fullEpisode,"1KJ0-sjGWNxwIuis_faA5z_FbPUcbjEDD")]
         for (owner,kind,joe,asset,expected) in combinations {
             let (source,request) = try fixture(owner:owner,kind:kind,joe:joe)
             let route = try DestinationResolver.resolve(source:source,request:request,asset:asset)
@@ -60,9 +61,9 @@ final class DestinationRoutingTests: XCTestCase {
         dub.owner = .taxstone
         XCTAssertFalse(DestinationResolver.requiresDUBRegister(dub))
     }
-    func testCreatorAncestryAndJoeArchiveRetirementPreserveSavedIdentity() throws {
+    func testJoeArchiveRestorationPreservesSavedIdentityAndRejectsUnknownSelections() throws {
         let content = "18Ix3mVu8gCFSa-EGGpzQsh03SajrZvKm"
-        XCTAssertEqual(DriveDestination.active.count,7)
+        XCTAssertEqual(DriveDestination.active.count,8)
         for destination in DriveDestination.active {
             XCTAssertEqual(destination.ancestorIDs.count,3)
             XCTAssertEqual(destination.ancestorIDs[1],content)
@@ -71,9 +72,16 @@ final class DestinationRoutingTests: XCTestCase {
         XCTAssertEqual(DriveDestination.taxstoneEpisodes.name,"Taxstone Full Episodes")
         XCTAssertEqual(DriveDestination.joeBuddenClips.name,"Joe Budden Clips")
         let (source,request) = try fixture(joe:true)
-        XCTAssertThrowsError(try DestinationResolver.resolve(source:source,request:request,asset:.fullEpisode))
+        XCTAssertEqual(try DestinationResolver.resolve(source:source,request:request,asset:.fullEpisode).rootID,"1KJ0-sjGWNxwIuis_faA5z_FbPUcbjEDD")
+        XCTAssertEqual(DriveDestination.joeBuddenEpisodes.name,"Joe Budden Full Episodes")
+        XCTAssertEqual(DriveDestination.joeBuddenEpisodes.ancestorIDs.first,"1-HjL5kpENfWQm5jwshAhU3QM-THI6u53")
         var legacy = request;legacy.archiveRootID = "1IIYLVDhCvwf5ZoMb0aM5vpSCe-eMCmyK"
+        XCTAssertEqual(try DestinationResolver.resolve(source:source,request:legacy,asset:.fullEpisode).rootID,"1KJ0-sjGWNxwIuis_faA5z_FbPUcbjEDD")
         XCTAssertEqual(try legacy.identityData(),try request.identityData())
+        var current = request;current.archiveRootID = "1KJ0-sjGWNxwIuis_faA5z_FbPUcbjEDD"
+        XCTAssertEqual(try current.identityData(),try request.identityData())
+        var conflict = request;conflict.archiveRootID = "unapproved-destination"
+        XCTAssertThrowsError(try DestinationResolver.resolve(source:source,request:conflict,asset:.fullEpisode))
         XCTAssertEqual(try JSONDecoder().decode(DriveDestination.self,from:Data("\"joeBuddenEpisodes\"".utf8)),.joeBuddenEpisodes)
     }
 }

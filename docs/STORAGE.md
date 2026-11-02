@@ -1,6 +1,6 @@
 # Joey Storage Manager
 
-Storage Manager operates inside the existing native application and coordinator. It preserves DUB/Taxstone originals, historical or imported/reused sources, accepted clip MP4s (including filed copies), transcripts, indexes, manifests, Drive receipts, job checkpoints, models, settings, credentials, installation evidence and rollbacks. Frank's 2026-11-02 exception makes newly acquired Joe full-episode source media temporary after verified completion, under the separate ownership checks below. It does not manage cloud storage or unrelated Mac folders.
+Storage Manager operates inside the existing native application and coordinator. It preserves all DUB, Taxstone and Joe Budden originals, historical or imported/reused sources, accepted clip MP4s (including filed copies), transcripts, indexes, manifests, Drive receipts, job checkpoints, models, settings, credentials, installation evidence and rollbacks. Frank's latest 2026-11-02 instruction restores permanent Joe full-episode retention and supersedes the earlier temporary-source deletion policy. Storage Manager does not manage cloud storage or unrelated Mac folders.
 
 ## Settings and measurements
 
@@ -16,11 +16,11 @@ The existing processing lock excludes other coordinators and manual cleanup. Sup
 
 Paths are derived from validated identities, checked for canonical containment, and opened through no-follow directory descriptors. Symlinks, hard links, unknown files, changed identities or hashes, referenced recovery dependencies and malformed records prevent disposal. Deletion uses individual verified unlinks, never recursive directory removal. Partial cleanup can reconcile already absent expendable files. Bookkeeping failure preserves uncertain scratch and must not invalidate already accepted media or block its filing.
 
-## Temporary Joe full-episode sources
+## Retained Joe full-episode sources
 
-Joe no longer creates a permanent full-episode Drive archive. A fresh Joe acquisition inside its own job directory receives `source-retention.json`, binding the job/source identity, exact original filename, directory/file inode and device, byte size and SHA-256. Registration occurs before the inspected-source checkpoint is committed. Completed historical jobs are not enrolled retroactively. Sources imported from elsewhere, reused from another job or downloaded from an existing archive are not disposable under this policy.
+Joey archives complete Joe originals in Joe Budden Full Episodes (`1KJ0-sjGWNxwIuis_faA5z_FbPUcbjEDD`) before transcription/clipping, preserving original bytes and extension and using names such as `945 — Maximum Punishment.mp4`. Existing byte-equivalent verified archives remain reusable without reuploading or moving them.
 
-Removal requires durable COMPLETED plus all existing QA, transcript, clip/companion and delivery evidence, including current accepted-output hashes. The processing lock and exclusive worker lease exclude concurrent coordinators and surviving supervised helpers. Another unfinished job referencing the source stops cleanup. Canonical no-follow directory descriptors, regular-file/single-link identity and a fresh hash check protect against changed paths or replacements. Only the registered source file is unlinked; the episode directory and its clips/records remain. A durable removal intent precedes deletion; completion readback records the removal date. Reopening can finish interrupted bookkeeping without reprocessing media, contacting a provider or deleting a replacement. Cleanup errors retain completed delivery and report that the temporary source remains. This lifecycle rule is independent of the optional render-scratch cleanup toggle.
+Originals are protected after completion, on reopening and during automatic or manual scratch cleanup. The obsolete Joe source-registration and deletion lifecycle is removed. Historical `source-retention.json` receipts remain untouched as evidence; neither a registration nor an interrupted removal intent authorizes deletion under the current policy. Local originals consume protected storage, so low-disk admission can block further acquisition/rendering rather than delete retained sources.
 
 ## Capacity protection
 

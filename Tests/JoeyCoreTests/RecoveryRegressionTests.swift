@@ -1,4 +1,5 @@
 import XCTest
+import Darwin
 @testable import JoeyCore
 
 final class RecoveryRegressionTests: XCTestCase {
@@ -70,104 +71,69 @@ final class RecoveryRegressionTests: XCTestCase {
         request.productionWorkflow = .joeBudden;request.profile = .joeBuddenDrive;request.fileToDrive = true
         return request
     }
-    private func registerSource(_ job: JobRecord, manager: StorageManager) throws {
-        var acquiring = job;acquiring.state = .processing
-        try manager.registerTemporaryJoeSource(job:acquiring)
+    private func writeLegacyRetentionReceipt(_ job: JobRecord, directory: URL, removalStarted: Bool) throws -> Data {
+        var ds = stat(),fs = stat()
+        guard lstat(directory.path,&ds) == 0,lstat(job.source!.path,&fs) == 0 else {throw JoeyError.failed("Fixture source missing")}
+        let receipt: [String:Any] = [
+            "version":1,"jobID":job.id,"sourceID":job.source!.id,
+            "directoryInode":UInt64(ds.st_ino),"directoryDevice":ds.st_dev,
+            "file":["name":"original.mp4","bytes":job.source!.bytes,"inode":UInt64(fs.st_ino),
+                    "device":fs.st_dev,"sha256":job.source!.sha256],
+            "removalStarted":removalStarted]
+        let data = try JSONSerialization.data(withJSONObject:receipt,options:[.sortedKeys])
+        try data.write(to:directory.appendingPathComponent("source-retention.json"))
+        return data
     }
-    func testJoeArchiveRetirementReopensLegacyJobAndReleasesOnlyRegisteredSource() async throws {
+    func testJoeArchivesOriginalBeforeTranscriptionWithoutRequiringClipBranding() async throws {
         let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
-        var legacy = try joeRequest(root:root);legacy.archiveRootID = "1IIYLVDhCvwf5ZoMb0aM5vpSCe-eMCmyK"
-        let (saved,directory) = try completed(legacy,root:root)
-        do {
-            let lock = try ProcessingLock(directory:root)
-            try registerSource(saved,manager:StorageManager(root:root,lock:lock))
+        let request = try joeRequest(root:root)
+        var (saved,directory) = try completed(request,root:root)
+        saved.state = .processing;saved.source!.archiveReference = nil
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let provider = RecoveryDelivery()
+        let persisted: JobRecord = try Persistence.load(directory.appendingPathComponent("job.json"))
+        let result = try await Coordinator.$deliveryOverride.withValue(provider) {
+            try await Coordinator(root:root).run(request) {job in
+                if job.stage == "transcription",job.error == nil {
+                    XCTAssertEqual(job.source?.archiveReference,"https://drive.google.com/file/d/synthetic_archive_123456789/view")
+                    throw JoeyError.failed("Intentional test stop before transcription or rendering")
+                }
+            }
         }
-        var current = legacy;current.archiveRootID = nil
-        let coordinator = try Coordinator(root:root)
-        let opened = try await coordinator.run(current)
-        XCTAssertEqual(opened.id,saved.id);XCTAssertEqual(opened.state,.completed)
-        XCTAssertFalse(FileManager.default.fileExists(atPath:saved.source!.path))
-        XCTAssertEqual(try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename)),saved.clips[0].sha256)
-        XCTAssertTrue(FileManager.default.fileExists(atPath:directory.appendingPathComponent("transcript.json").path))
-        let receipt: TemporaryJoeSource = try Persistence.load(directory.appendingPathComponent("source-retention.json"))
-        XCTAssertNotNil(receipt.removedAt)
-        let reopened = try await coordinator.run(current)
-        XCTAssertEqual(reopened.id,saved.id);XCTAssertEqual(reopened.state,.completed)
-        let jobs = try await coordinator.jobs();XCTAssertEqual(jobs.count,1)
-    }
-    func testJoeSourceIsPreservedUntilCompleteEvidenceAndWithoutOwnershipReceipt() throws {
-        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
-        let (saved,_) = try completed(joeRequest(root:root),root:root)
-        let lock = try ProcessingLock(directory:root),manager = try StorageManager(root:root,lock:lock)
-        XCTAssertFalse(try manager.releaseTemporaryJoeSource(job:saved),"Historical sources are not enrolled on reopen")
-        XCTAssertThrowsError(try manager.registerTemporaryJoeSource(job:saved),"Completed historical sources cannot be enrolled retroactively")
-        try registerSource(saved,manager:manager)
-        for state in [JobState.processing,.qaPassed,.filed,.failed,.cancelled] {
-            var incomplete = saved;incomplete.state = state
-            XCTAssertFalse(try manager.releaseTemporaryJoeSource(job:incomplete))
-        }
-        var missing = saved;missing.companions = [:]
-        XCTAssertFalse(try manager.releaseTemporaryJoeSource(job:missing))
+        XCTAssertEqual(result.source?.archiveReference,"https://drive.google.com/file/d/synthetic_archive_123456789/view")
+        XCTAssertEqual(result.error,"Intentional test stop before transcription or rendering")
+        XCTAssertEqual(result.clips,persisted.clips)
         XCTAssertEqual(try Integrity.sha256(URL(fileURLWithPath:saved.source!.path)),saved.source!.sha256)
-        var taxstone = saved;taxstone.request.productionWorkflow = .taxstoneLibrary;taxstone.request.owner = .taxstone
-        XCTAssertFalse(try manager.releaseTemporaryJoeSource(job:taxstone))
-        taxstone.state = .processing
-        XCTAssertThrowsError(try manager.registerTemporaryJoeSource(job:taxstone))
     }
-    func testJoeSourceCleanupPreservesSharedChangedAndLinkedSources() throws {
-        for fault in ["shared","replaced","symlink","external","accepted-output"] {
+    func testJoeArchiveRestorationReopensLegacyJobAndPreservesRegisteredSource() async throws {
+        for removalStarted in [false,true] {
+            let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+            var legacy = try joeRequest(root:root);legacy.archiveRootID = "1IIYLVDhCvwf5ZoMb0aM5vpSCe-eMCmyK"
+            let (saved,directory) = try completed(legacy,root:root)
+            let receipt = try writeLegacyRetentionReceipt(saved,directory:directory,removalStarted:removalStarted)
+            var current = legacy;current.archiveRootID = nil
+            let coordinator = try Coordinator(root:root)
+            for _ in 0..<2 {
+                let opened = try await coordinator.run(current)
+                XCTAssertEqual(opened.id,saved.id);XCTAssertEqual(opened.state,.completed)
+                XCTAssertEqual(try Integrity.sha256(URL(fileURLWithPath:saved.source!.path)),saved.source!.sha256)
+                XCTAssertEqual(try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename)),saved.clips[0].sha256)
+                XCTAssertTrue(FileManager.default.fileExists(atPath:directory.appendingPathComponent("transcript.json").path))
+                XCTAssertEqual(try Data(contentsOf:directory.appendingPathComponent("source-retention.json")),receipt)
+            }
+            let jobs = try await coordinator.jobs();XCTAssertEqual(jobs.count,1)
+        }
+    }
+    func testScratchCleanupPreservesJoeOriginalsAndHistoricalRetentionReceipts() throws {
+        for removalStarted in [false,true] {
             let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
             let (saved,directory) = try completed(joeRequest(root:root),root:root)
-            let original = URL(fileURLWithPath:saved.source!.path)
-            let lock = try ProcessingLock(directory:root),manager = try StorageManager(root:root,lock:lock)
-            try registerSource(saved,manager:manager)
-            if fault == "shared" {
-                var other = saved;other.id = "unfinished-other-job";other.state = .processing
-                try Persistence.save(other,to:root.appendingPathComponent("jobs/"+other.id+"/job.json"))
-            } else if fault == "external" {
-                var imported = saved;imported.state = .processing;imported.source!.path = root.appendingPathComponent("original.mp4").path
-                XCTAssertThrowsError(try manager.registerTemporaryJoeSource(job:imported));continue
-            } else if fault == "accepted-output" {
-                try Data("damaged accepted output".utf8).write(to:directory.appendingPathComponent(saved.clips[0].filename))
-            } else {
-                try FileManager.default.removeItem(at:original)
-                if fault == "replaced" {try Data("replacement".utf8).write(to:original)}
-                else {try FileManager.default.createSymbolicLink(at:original,withDestinationURL:directory.appendingPathComponent(saved.clips[0].filename))}
-            }
-            XCTAssertThrowsError(try manager.releaseTemporaryJoeSource(job:saved),fault)
-            XCTAssertTrue(FileManager.default.fileExists(atPath:original.path),fault)
-        }
-    }
-    func testJoeSourceRemovalIntentRecoversWithoutDeletingAReplacement() throws {
-        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
-        let (saved,directory) = try completed(joeRequest(root:root),root:root)
-        let lock = try ProcessingLock(directory:root),manager = try StorageManager(root:root,lock:lock)
-        try registerSource(saved,manager:manager)
-        let receiptURL = directory.appendingPathComponent("source-retention.json")
-        var receipt: TemporaryJoeSource = try Persistence.load(receiptURL)
-        receipt.removalStarted = true;try Persistence.save(receipt,to:receiptURL)
-        let original = URL(fileURLWithPath:saved.source!.path)
-        try FileManager.default.removeItem(at:original) // Isolated crash-after-unlink simulation.
-        XCTAssertTrue(try manager.releaseTemporaryJoeSource(job:saved))
-        try Data("later replacement must survive".utf8).write(to:original)
-        XCTAssertTrue(try manager.releaseTemporaryJoeSource(job:saved))
-        XCTAssertEqual(try Data(contentsOf:original),Data("later replacement must survive".utf8))
-    }
-    func testJoeSourceCleanupWaitsForSurvivingWorkerLease() throws {
-        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
-        let (saved,directory) = try completed(joeRequest(root:root),root:root)
-        let lock = try ProcessingLock(directory:root),manager = try StorageManager(root:root,lock:lock)
-        try registerSource(saved,manager:manager)
-        do {
-            let worker = try ProcessingLock(directory:root,name:"storage-workers.lock",shared:true)
-            defer {withExtendedLifetime(worker) {}}
-            XCTAssertThrowsError(try manager.releaseTemporaryJoeSource(job:saved))
+            let receipt = try writeLegacyRetentionReceipt(saved,directory:directory,removalStarted:removalStarted)
+            let result = try StorageManager.clean(root:root)
+            XCTAssertEqual(result.removedFiles,0)
             XCTAssertEqual(try Integrity.sha256(URL(fileURLWithPath:saved.source!.path)),saved.source!.sha256)
-            let receipt: TemporaryJoeSource = try Persistence.load(directory.appendingPathComponent("source-retention.json"))
-            XCTAssertFalse(receipt.removalStarted)
+            XCTAssertEqual(try Data(contentsOf:directory.appendingPathComponent("source-retention.json")),receipt)
         }
-        XCTAssertTrue(try manager.releaseTemporaryJoeSource(job:saved))
-        XCTAssertFalse(FileManager.default.fileExists(atPath:saved.source!.path))
     }
     func testFilingCompletionRequiresParentsRegistersAndFinalReadback() async throws {
         for fault in ["none","parent","register","final-readback"] {

@@ -101,6 +101,37 @@ final class DriveFilingTests: XCTestCase {
         catch {XCTAssertTrue(error.localizedDescription.contains("incorrectly routed"))}
         XCTAssertEqual(provider.writes,0)
     }
+    func testJoeFullEpisodeNamesUseNumberTitleAndOriginalExtensionWithoutDuplicateUploads() async throws {
+        let titles = [
+            ("The Joe Budden Podcast Episode 945 | Maximum Punishment","945 — Maximum Punishment.mp4"),
+            ("The Joe Budden Podcast Episode 977 | Who Gon Tell’em","977 — Who Gon Tell’em.mp4"),
+            ("The Joe Budden Podcast Episode 976 ｜ A Great Plus 1","976 — A Great Plus 1.webm"),
+            ("Joe Budden Podcast Ep. 945: \"Maximum Punishment\"","945 — Maximum Punishment.mp4")]
+        for (title,want) in titles {
+            let (dir,initial,_,_,provider,delivery) = try setup()
+            var (source,request) = try DestinationRoutingTests().fixture(kind:.nativeVideo,joe:true)
+            source.title = title;request.title = title
+            let local = dir.appendingPathComponent("original."+(want as NSString).pathExtension)
+            try FileManager.default.moveItem(at:URL(fileURLWithPath:initial.path),to:local)
+            source.path = local.path;source.sha256 = initial.sha256;source.bytes = initial.bytes
+            provider.destination = try DestinationResolver.resolve(source:source,request:request,asset:.fullEpisode)
+            let first = try await delivery.archive(source:source,request:request)
+            let second = try await delivery.archive(source:source,request:request)
+            XCTAssertEqual(first,second);XCTAssertEqual(provider.writes,1)
+            XCTAssertEqual(Array(provider.names.values),[want])
+            XCTAssertEqual(provider.writtenParents,["1KJ0-sjGWNxwIuis_faA5z_FbPUcbjEDD"])
+            XCTAssertEqual(try Integrity.sha256(local),initial.sha256)
+            XCTAssertEqual(provider.permissionMutations,0)
+        }
+    }
+    func testJoeArchiveWithMissingEpisodeNameFailsBeforeUpload() async throws {
+        let (_,initial,_,_,provider,delivery) = try setup()
+        var (source,request) = try DestinationRoutingTests().fixture(kind:.nativeVideo,joe:true)
+        source.title = "The Joe Budden Podcast Episode 945";request.title = source.title
+        source.path = initial.path;source.sha256 = initial.sha256;source.bytes = initial.bytes
+        do {_ = try await delivery.archive(source:source,request:request);XCTFail("Missing episode name accepted")}
+        catch {XCTAssertEqual(provider.writes,0)}
+    }
     func testJoeRegisterReconciliationDoesNotCallSheets() async throws {
         let (_,_,_,_,provider,delivery) = try setup()
         let (_,request) = try DestinationRoutingTests().fixture(joe:true)

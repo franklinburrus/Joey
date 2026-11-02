@@ -14,10 +14,26 @@ public enum SourceDiscovery {
     public static let joeChannelID = "UC23_r1bpkTWaBltbXsQxysA"
     public static let joeChannelURL = "https://www.youtube.com/channel/" + joeChannelID + "/videos"
     public static func episodeNumber(_ title: String) -> Int? {
-        let expression = try! NSRegularExpression(pattern: "^(?:The )?Joe Budden Podcast (?:Episode|Ep\\.?)\\s+(\\d+)\\s*(?:\\||:|$)", options:.caseInsensitive)
+        let expression = joeEpisodeExpression
         guard let match = expression.firstMatch(in:title,range:NSRange(title.startIndex...,in:title)),
               let range = Range(match.range(at:1),in:title) else {return nil}
         return Int(title[range])
+    }
+    private static let joeEpisodeExpression = try! NSRegularExpression(
+        pattern:"^(?:The )?Joe Budden Podcast (?:Episode|Ep\\.?)\\s+(\\d+)\\s*(?:[|｜:]|$)",options:.caseInsensitive)
+    static func joeEpisodeName(_ title: String) throws -> String {
+        guard let match = joeEpisodeExpression.firstMatch(in:title,range:NSRange(title.startIndex...,in:title)),
+              let numberRange = Range(match.range(at:1),in:title),
+              let prefixRange = Range(match.range,in:title),let number = Int(title[numberRange]),number > 0 else {
+            throw JoeyError.invalid("Joe full-episode naming requires a numbered Joe Budden Podcast source title")
+        }
+        var name = title[prefixRange.upperBound...].trimmingCharacters(in:.whitespacesAndNewlines)
+        for (opening,closing) in [("\"","\""),("“","”")] where name.hasPrefix(opening) && name.hasSuffix(closing) && name.count >= 2 {
+            name = String(name.dropFirst().dropLast()).trimmingCharacters(in:.whitespacesAndNewlines)
+            break
+        }
+        guard !name.isEmpty else {throw JoeyError.invalid("Joe full-episode naming requires an episode title after its number")}
+        return "\(number) — \(Persistence.safeName(name))"
     }
     static func command(_ arguments: [String]) async throws -> Data {
         try await withThrowingTaskGroup(of:Data.self) { group in

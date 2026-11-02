@@ -231,9 +231,16 @@ public actor DriveDelivery {
                 destination:nil,expectedPermissions:Self.permissionFingerprint(info))
             return receipt.url
         }
+        let local = URL(fileURLWithPath:source.path)
+        let name: String
+        if route.owner == .joeBudden {
+            name = try SourceDiscovery.joeEpisodeName(source.title)+"."+local.pathExtension
+        } else {
+            name = (source.episodeDate ?? "Date Unknown")+" — "+Persistence.safeName(source.title)+" — "+Persistence.safeName(source.id)+"."+local.pathExtension
+        }
         let root = route.rootID
         _ = try await verifyRoot(route.destination)
-        let local = URL(fileURLWithPath:source.path), md5 = try Integrity.md5(local)
+        let md5 = try Integrity.md5(local)
         let equivalent = try await children(root).filter {$0["md5Checksum"] as? String == md5 && Int64($0["size"] as? String ?? "") == source.bytes}
         guard equivalent.count <= 1 else {throw JoeyError.dependency("Duplicate byte-equivalent originals in \(root); no new archive upload")}
         if let file = equivalent.first, let id = file["id"] as? String {
@@ -242,7 +249,6 @@ public actor DriveDelivery {
             return try await verify(id:id,local:local,parent:root,name:name,sha:source.sha256,md5:md5,bytes:source.bytes,
                 destination:route,expectedPermissions:Self.permissionFingerprint(info)).url
         }
-        let name = (source.episodeDate ?? "Date Unknown")+" — "+Persistence.safeName(source.title)+" — "+Persistence.safeName(source.id)+"."+local.pathExtension
         return try await upload(local,name:name,parent:root,destination:route).url
     }
     public func downloadOriginal(reference: String, directory: URL) async throws -> URL {

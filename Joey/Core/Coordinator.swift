@@ -93,18 +93,6 @@ public actor Coordinator {
         func save() async throws {
             job.updatedAt = Date(); try Persistence.save(job,to:checkpoint); try await progress(job)
         }
-        func releaseTemporarySource() async throws {
-            do {
-                if try storage.releaseTemporaryJoeSource(job:job), job.stage == "complete; temporary source cleanup deferred" {
-                    job.stage = "complete";job.error = nil;try await save()
-                }
-            }
-            catch {
-                job.stage = "complete; temporary source cleanup deferred"
-                job.error = "Verified delivery preserved. Temporary source retained: "+error.localizedDescription
-                try await save()
-            }
-        }
         func renewCapabilityEvidence(requireCurrent: Bool) throws {
             request.profile = try request.profile.renewingEvidence(from:supplied.profile,requireCurrentEvidence:false)
             request = try config.renewingCapabilities(in:request,requireCurrentEvidence:requireCurrent)
@@ -127,11 +115,9 @@ public actor Coordinator {
                 let previous = job.request
                 try renewCapabilityEvidence(requireCurrent:false)
                 if job.request != previous {try await save()}
-                try await releaseTemporarySource()
                 try await progress(job); return job
             }
             try renewCapabilityEvidence(requireCurrent:true)
-            let branding = request.productionWorkflow == .joeBudden ? try JoeBranding.load(root:root) : nil
             let delivery: any CoordinatorDelivery = try Self.deliveryOverride ?? DriveDelivery(remote:config.rcloneRemote)
             job.error = nil; job.storageRequiredBytes = nil;job.state = .processing; job.stage = "source"; try await save()
             try authorizeNewOperation()
@@ -154,7 +140,6 @@ public actor Coordinator {
                 candidate.source?.originalURL == request.originalURL && candidate.source != nil
             }
             let sourceURL: URL
-            var acquiredTemporaryJoeSource = false
             if let prior = job.source {sourceURL = URL(fileURLWithPath:prior.path)}
             else if request.localPath == nil, let prior = reusable?.source,
                     (try? Integrity.sha256(URL(fileURLWithPath:prior.path))) == prior.sha256 {
@@ -169,13 +154,11 @@ public actor Coordinator {
                 sourceURL = try await delivery.downloadOriginal(reference:archive,directory:dir)
             } else {
                 sourceURL = try await Acquisition.acquire(request,directory:dir)
-                acquiredTemporaryJoeSource = request.productionWorkflow == .joeBudden && request.localPath == nil && request.archiveReference == nil
             }
             if let source = job.source {
                 guard source.path == sourceURL.path, try Integrity.sha256(sourceURL) == source.sha256 else {throw JoeyError.failed("Original source changed; preserved job cannot silently switch inputs")}
             } else {
                 job.source = try await Media.inspect(sourceURL,request:request)
-                if acquiredTemporaryJoeSource {try storage.registerTemporaryJoeSource(job:job)}
                 try await save()
             }
             guard var source = job.source else {throw JoeyError.failed("Missing inspected source")}
@@ -186,7 +169,7 @@ public actor Coordinator {
             if let expected = request.expectedSourceSHA256, source.sha256 != expected {
                 throw JoeyError.failed("Archived original differs from inventory source SHA-256")
             }
-            if request.productionWorkflow != nil, request.productionWorkflow != .joeBudden {
+            if request.productionWorkflow != nil {
                 job.stage = "original archive verification";try await save()
                 try authorizeNewOperation()
                 source.archiveReference = try await delivery.archive(source:source,request:request)
@@ -222,6 +205,7 @@ public actor Coordinator {
                 }
                 try await save()
             }
+            var branding: JoeBranding?
             var artwork = request.artwork
             if source.kind == .audio, artwork == nil {
                 guard request.transcriptPolicy != .modelIndependent else {throw JoeyError.dependency("Model-independent local audio requires supplied approved artwork")}
@@ -243,6 +227,7 @@ public actor Coordinator {
                 do {
                     job.stage = "render clip \(clip.id)"; try await save()
                     try authorizeNewOperation()
+                    if request.productionWorkflow == .joeBudden,branding == nil {branding = try JoeBranding.load(root:root)}
                     let render: RenderReceipt
                     if FileManager.default.fileExists(atPath:partial.path), FileManager.default.fileExists(atPath:work.appendingPathComponent("render.json").path),
                        let existing: RenderReceipt = try? Persistence.load(work.appendingPathComponent("render.json")),
@@ -357,7 +342,6 @@ public actor Coordinator {
             try await delivery.verifyPackage(job:job,directory:dir)
             job.state = .completed; job.stage = "complete"; job.error = nil; try await save()
             completedReadbackPassed = true
-            try await releaseTemporarySource()
             return job
         } catch {
             // A rejected renewal must not downgrade a verified completed job or

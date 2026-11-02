@@ -1,3 +1,40 @@
+## Joe Budden full-episode retention and naming (2026-11-02)
+
+Frank restored permanent Joe episode retention and supplied the exact full-episode destination `1KJ0-sjGWNxwIuis_faA5z_FbPUcbjEDD` and naming example `945 — Maximum Punishment`. This supersedes the earlier same-day Joe archive-retirement rule; historical evidence below is retained as history. Baseline local/live main: `e9278d0cc497a3e2bb9fe87b1dacbaba7409083b`; branch `codex/joe-full-episodes`. Origin remains `https://github.com/franklinburrus/Joey.git`; all 22 unrelated untracked files are preserved.
+
+The existing destination resolver now activates Joe Budden Full Episodes directly under the Joe Budden creator folder, preserving all other routes. The sole known retired saved Joe selection migrates to this explicit destination without changing immutable request identity; unknown conflicts still fail. New Joe processing archives original bytes before transcription/clipping and names files from the verified numbered source title while preserving its container extension. Existing verified archives are reused without moving or duplicating them. Source titles, clip plans, QA and separate Joe records remain unchanged. The coordinator no longer registers or removes temporary Joe originals; the obsolete deletion implementation was removed. Completed reopening and scratch cleanup preserve historical deletion receipts and original files, including interrupted-removal-intent fixtures. Branding validation is deferred until an actual render requires it so full-original archival and accepted-file recovery do not depend on render-only assets.
+
+### Executed verification
+
+All project executable invocations used `python3 Tools/run-local.py` and direct arguments. Build/test invocations selected the existing Xcode toolchain with `/usr/bin/env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`; no global developer selection, credential change, dependency installation or model startup occurred.
+
+| Check | Result |
+| --- | --- |
+| Initial launcher-only `swift test` | Failed before tests because CommandLineTools could not load `SwiftUIMacros.StateMacro`. Selecting the installed Xcode toolchain resolved the environment issue; application code was not changed to accommodate it. |
+| Red routing/naming/retention regressions | Seven tests executed and failed on the retired route, seven-root catalog and actual deletion of the isolated original. The separate order regression failed because branding lookup prevented archival/transcription. These establish that the changed behavior was absent before implementation. |
+| Focused `swift test --filter 'DestinationRoutingTests\|DriveFilingTests\|RecoveryRegressionTests\|ProductionIntakeTests\|StorageTests'` | 52 passed, zero failed/skipped; direct exit 0. |
+| Full `swift test` | 265 executed: 261 passed, four intentional skips, zero failures; direct exit 0; 245.708 seconds. |
+| `xcodebuild -project Joey.xcodeproj -scheme Joey -configuration Debug -destination platform=macOS -derivedDataPath .../DerivedData build` | `BUILD SUCCEEDED`, direct exit 0. |
+| `codesign --verify --deep --strict --verbose=2 .../DerivedData/Build/Products/Debug/Joey.app` | Valid on disk and satisfies its designated requirement; direct exit 0. All ten bundle files are hashed in `tested-bundle.json`. |
+| Independent read-only code review | No Critical/Important issues. Corrected one stale assertion explanation about archive retention; no runtime behavior changed after review. |
+| `git diff --check` | Passed. |
+
+The four skipped tests are the explicit live routing/old-package audit, two opt-in installed Ollama smoke checks and the authorized real-media renderer. Those unrelated gated acceptances were not reclassified as production evidence. Existing warnings concern the preserved two untracked runner duplicates and a SwiftUI state access in an existing intake test; no test failed. Synthetic archive/retention tests do not claim a new production render or upload. The one-off ordering test compares round-tripped checkpoints to avoid treating the existing ISO-8601 timestamp precision as a media change.
+
+### Existing Drive originals: complete name-only correction
+
+The supplied folder already contained 16 complete episodes, including existing Joey Episode 977 archive ID `1AHG-OWWOjfYoND2Remz2dCHu18MADSbO`. No new media acquisition or upload was necessary. Before mutation, the direct folder/creator/Content/root chain, all exact file IDs, old names, sizes, MD5 hashes, current links and permissions were checked; new names were unique and collision-free. The first connector rename attempt returned `403 appNotAuthorizedToFile` without modifying a file. The established rclone OAuth connection, already used by Joey, supplied the authorized Drive access for the successful correction. Tokens stayed in process memory and existing configuration and were never written to evidence or Git.
+
+The successful path sent exactly 16 conditional Drive v2 `files.patch` requests, each containing only `title`, addressed to the original file ID with its current provider `If-Match` ETag. Each write was followed by a separate Drive v3 metadata read; a final exact-ID pass and independent rclone hash listing confirmed all results. Name-only updates do not change the binary media. Authorization-relevant permission IDs/types/roles/discovery/inheritance were preserved; volatile profile-photo URLs were excluded from permission identity. Early preparation attempts stopped before writes when full permission presentation metadata varied or v3 omitted ETags. The final path reused the already established v2 ETag pattern rather than relaxing concurrency checks.
+
+All 16 final files preserve their IDs, immediate parents, links, sizes, hashes and permissions; the inventory still contains exactly 44,644,561,243 bytes. Names include `945 — Maximum Punishment.mp4`, `976 — A Great Plus 1.webm` and `977 — Who Gon Tell’em.mp4`. Extensions and source bytes are unchanged. There were zero media transfers, file moves/deletions, sharing changes, content replacements, new jobs, rerenders or companion/register writes. Original names and metadata are retained for reversible restoration.
+
+Evidence directory: `/Users/frank/Library/Caches/Joey-Native-Build/joe-full-episodes-20261102/`. Files: `rename-plan.json`, `raw-before.json`, `raw-rename-results.json`, `raw-final.json`, `drive-before.json`, `drive-final.json`, `drive-verification.json`, `swift-tests.log`, `native-build.log` and `tested-bundle.json`. The unchanged Episode 977 archive URL remains valid in existing job/companion records; no name is embedded in that source archive reference.
+
+Source implementation and the requested existing Drive naming are verified. The installed application remains unchanged pending the current installation authority required by AGENTS.md; no push, merge or public release is inferred. STATUS contains the exact next action and the prepared candidate path.
+
+---
+
 ## Historical DUB companion reconciliation — final routing-project closeout (2026-11-02)
 
 Scope: Frank authorized in-place correction of existing historical DUB companions and consistent local receipts. This resolves the prior outstanding record-upload authority. No media, production, migration, register mutation, sharing change, application change or requirements change was authorized or performed. Baseline main/origin/main is `b30f3ddfc8038738a71b601354a62f4c8427ee43`; branch `codex/historical-dub-records`. Origin and Xcode project were verified. AGENTS, Ultracave, current requirements, roadmap, STATUS and prior VERIFICATION were reviewed. The existing 22 unrelated untracked files were preserved.
