@@ -152,13 +152,21 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             if joeResumeRequested {resumeJoeQueue(includeJoe:false)}
         }
     }
-    private func runJoeQueue(interleaved: Bool = false) async {
+    func runJoeQueue(interleaved: Bool = false) async {
         guard !cancelling, !automationRunning, !busy, (!libraryBusy || interleaved), !preparingSource else {return}
         automationRunning = true;defer {automationRunning = false}
         // One attempt per queued episode per pass; failures remain for the next
         // periodic check or explicit Resume. Independent episodes can continue.
-        for episode in Array(joeAutomation.queue.prefix(interleaved ? 1:joeAutomation.queue.count)) {
+        let queued = joeAutomation.queue
+        let next = queued.first {$0.id == joeAutomation.nextInterleavedEpisodeID} ?? queued.first
+        let episodes = interleaved ? next.map {[$0]} ?? [] : queued
+        for episode in episodes {
             guard joeAutomation.enabled, !Task.isCancelled, !busy else {break}
+            if interleaved, let index = queued.firstIndex(where:{$0.id == episode.id}) {
+                // Advance on attempts, not only completion. Keep the cursor in
+                // the existing checkpoint so refresh/restart cannot starve peers.
+                joeAutomation.nextInterleavedEpisodeID = queued[(index+1) % queued.count].id
+            }
             do {
                 let prior = jobs.first {$0.request.sourceID == episode.id && $0.request.productionWorkflow == .joeBudden}
                 if prior?.state != .completed {

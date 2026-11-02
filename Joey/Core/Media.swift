@@ -166,7 +166,10 @@ public enum Media {
         // Both streams use the requested source interval as their origin.
         // Silence represents time where the source has no audio packets; it
         // must not move later samples forward or move a concat boundary.
-        "atrim=start=\(interval.start):end=\(interval.end),asetpts=PTS-\(interval.start)/TB,aresample=48000:async=1:first_pts=0,atrim=duration=\(interval.duration)"
+        // The default resampler threshold ignores small timestamp gaps. Hard
+        // compensation at 100 microseconds preserves millisecond packet gaps
+        // without stretching subsequent source audio to absorb the difference.
+        "atrim=start=\(interval.start):end=\(interval.end),asetpts=PTS-\(interval.start)/TB,aresample=48000:async=1:min_comp=0.0001:min_hard_comp=0.0001:first_pts=0,atrim=duration=\(interval.duration)"
     }
     static func hasSourceAudio(_ source: SourceRecord, in interval: Interval) -> Bool {
         guard let audio = source.streams.first(where: {$0.codec_type == "audio"}) else {return false}
@@ -242,7 +245,9 @@ public enum Media {
             + ";[\(logo):v]scale=180:180,format=rgba[logo];[content][logo]overlay=x=34:y=866:eof_action=repeat[branded]"
             + ";[\(outro):v]setpts=PTS-STARTPTS,\(fitFilter(profile)),trim=duration=\(branding.outroDuration)[ov]"
             + ";[\(outro):a]\(joeAudioSegment(duration:branding.outroDuration))[oa]"
-            + ";[branded][ca][ov][oa]concat=n=2:v=1:a=1[v][a]"
+            // A/V concat pads audio to the rounded video-frame boundary. Keep
+            // the exact source/outro audio boundary independent of that rounding.
+            + ";[branded][ov]concat=n=2:v=1:a=0[v];[ca][oa]concat=n=2:v=0:a=1[a]"
     }
     public static func render(source: SourceRecord, clip: ClipRecord, profile: SharedProfile, artwork: Artwork?, work: URL, output: URL, branding: JoeBranding? = nil) async throws -> RenderReceipt {
         try Task.checkCancellation()

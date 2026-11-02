@@ -16,6 +16,70 @@ final class EmailModelTests: XCTestCase {
         model.email.publish()
         return model
     }
+    @MainActor func testAllPendingReceiptsRemainDismissibleAfterRecentHistoryFills() throws {
+        let model = try queuedModel(), store = try XCTUnwrap(model.email.store)
+        for start in [2,52] {
+            let messages = (start..<(start+50)).map {
+                EmailMessage(uid:UInt64($0),status:"pendingAuthorization",reason:"intakeTokenMissingOrInvalid",links:["https://youtu.be/abcdefghijk"])
+            }
+            try store.ingest(EmailScan(uidValidity:7,uidNext:UInt64(start+50),frontier:UInt64(start+49),messages:messages))
+        }
+        // The authorized link occupies one slot, leaving 99 pending receipts.
+        model.email.publish()
+        XCTAssertEqual(model.email.state.capacity,0)
+        XCTAssertEqual(model.email.displayedReceipts.filter {$0.status == "pendingAuthorization"}.count,99)
+        let newest = Array(model.email.state.receipts.reversed().filter {$0.status == "pendingAuthorization"}.prefix(50))
+        for receipt in newest {model.email.dismiss(receipt.id)}
+        XCTAssertEqual(model.email.displayedReceipts.filter {$0.status == "pendingAuthorization"}.count,49)
+        XCTAssertLessThanOrEqual(model.email.displayedReceipts.filter {$0.status != "pendingAuthorization"}.count,50)
+        for receipt in model.email.displayedReceipts where receipt.status == "pendingAuthorization" {
+            model.email.dismiss(receipt.id)
+        }
+        let reopened = try EmailIntakeStore(root:model.root)
+        XCTAssertEqual(reopened.state.capacity,99)
+        XCTAssertFalse(reopened.state.receipts.contains {$0.status == "pendingAuthorization"})
+        XCTAssertEqual(reopened.state.work.count,1)
+        XCTAssertNil(reopened.state.nextRequestedWork())
+    }
+
+    @MainActor func testAdoptedExpiredRequestReachesCoordinatorRenewalWithoutRediscovery() async throws {
+        let model = try queuedModel(), store = try XCTUnwrap(model.email.store)
+        let work = try XCTUnwrap(store.state.work.first)
+        var request = try ProductionIntake.request(
+            source:DiscoveredSource(id:work.source.id,title:"Synthetic adopted source",url:work.source.url,duration:10),
+            content:.dub,mode:.fullShow,sharedProfile:model.configuration?.profile)
+        let current = request.profile
+        request.profile.x!.checkedAt = Date().addingTimeInterval(-7200)
+        request.profile.instagram!.checkedAt = Date().addingTimeInterval(-7200)
+        request.profile.x!.validUntil = Date().addingTimeInterval(-3600)
+        request.profile.instagram!.validUntil = Date().addingTimeInterval(-3600)
+        XCTAssertThrowsError(try request.validate())
+        try request.validate(requireCurrentCapability:false)
+        var prior = JobRecord(id:try request.stableID(),request:request)
+        prior.state = .failed
+        prior.source = SourceRecord(id:request.sourceID,owner:request.owner,title:request.title,
+            path:model.root.appendingPathComponent("missing-synthetic-source.mp4").path,bytes:1,
+            sha256:String(repeating:"a",count:64),duration:10,width:720,height:1280,fps:30,hasAudio:false,
+            kind:.nativeVideo,streams:[],authorizationBasis:"Synthetic regression only",classificationEvidence:"Synthetic fixture")
+        let checkpoint = model.root.appendingPathComponent("jobs/\(prior.id)/job.json")
+        try Persistence.save(prior,to:checkpoint)
+        model.jobs = [prior]
+        var config = try Configuration.load(root:model.root)
+        config.profile = current
+        try Persistence.save(config,to:model.root.appendingPathComponent("settings.json"))
+        model.email.lookup = {_ in XCTFail("Adopted request must not be rediscovered");throw CancellationError()}
+        model.email.process(work.id,workflow:work.workflow)
+        await model.runEmailItem()
+        XCTAssertEqual(model.email.state.work.first?.jobID,prior.id)
+        XCTAssertEqual(try model.email.state.work.first?.request?.identityData(),try request.identityData())
+        let saved: JobRecord = try Persistence.load(checkpoint)
+        XCTAssertEqual(try XCTUnwrap(saved.request.profile.x?.validUntil).timeIntervalSince1970,try XCTUnwrap(current.x?.validUntil).timeIntervalSince1970,accuracy:1)
+        XCTAssertEqual(try XCTUnwrap(saved.request.profile.instagram?.validUntil).timeIntervalSince1970,try XCTUnwrap(current.instagram?.validUntil).timeIntervalSince1970,accuracy:1)
+        XCTAssertEqual(saved.stage,"source") // renewed, then failed on missing local fixture
+        XCTAssertEqual(model.email.state.work.first?.status,.retryable)
+        XCTAssertEqual(model.jobs.count,1)
+    }
+
     @MainActor func testBusyOwnersReturnDeferredAndLeaveDurableEmailQueued() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer {try? FileManager.default.removeItem(at:root)}

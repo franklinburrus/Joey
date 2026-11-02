@@ -171,6 +171,25 @@ class MailIntakeTests(unittest.TestCase):
         self.assertEqual(result["frontier"], 7)
         self.assertEqual(box.calls, [])
 
+    def test_recursive_address_header_rejects_one_message_and_advances(self):
+        token = "t" * 43
+        recursive = message(to="(" * 1500 + ")" * 1500 + " <" + ALIAS + ">")
+        self.assertLess(len(recursive.split(b"\r\n\r\n")[0]), mail.MAX_HEADERS)
+        valid = message(body=LINK + "\nJoey-Token: " + token)
+        box = FakeMailbox({8: recursive, 9: valid}, next_uid=10)
+        result = mail.safe_scan(box, {"uidValidity": 7, "frontier": 7,
+                                    "allowedSenders": [SENDER], "capacity": 100, "token": token})
+        self.assertNotIn("error", result)
+        self.assertEqual(result["frontier"], 9)
+        self.assertEqual(result["messages"], [
+            {"uid": 8, "status": "rejected", "reason": "malformedMessage", "links": []},
+            {"uid": 9, "status": "authorized", "reason": "templateToken", "links": [LINK]},
+        ])
+        bodies = [args[0] for cmd, args in box.calls if cmd == "fetch" and "HEADER" not in args[1]]
+        self.assertEqual(bodies, ["9"])
+        self.assertEqual(mail.safe_scan(box, {"uidValidity": 7, "frontier": result["frontier"],
+                                             "allowedSenders": [SENDER], "capacity": 100})["messages"], [])
+
     def test_failed_fetch_cannot_return_advanced_frontier(self):
         box = FakeMailbox({8: message()})
         original = box.uid

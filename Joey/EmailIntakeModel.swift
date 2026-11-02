@@ -68,6 +68,14 @@ import Network
         guard available, state.enabled, !state.requiresAuthentication, !state.requiresResynchronization else {return}
         checkNow();owner?.resumeJoeQueue(includeJoe:false)
     }
+    var displayedReceipts: [EmailReceipt] {
+        let newest = state.receipts.reversed()
+        // Pending authorization consumes capacity until dismissed, so it must
+        // remain accessible independently of the bounded display history.
+        return newest.filter {$0.status == "pendingAuthorization"}
+            + newest.filter {$0.status != "pendingAuthorization"}.prefix(50)
+    }
+
     func publish() {if let store {state = store.state}}
     func failedPersistence(_ failure: Error) {
         available = false;error = "Email intake stopped; saved state preserved. " + failure.localizedDescription

@@ -79,10 +79,10 @@ struct EmailSettingsView: View {
                         Button("Disconnect") {password = "";template = "";model.disconnect()}
                     }.padding(.top,12)
                 }
-                DisclosureGroup("Recent Email Receipts and Jobs") {
+                DisclosureGroup("Pending Authorization and Recent Receipts") {
                     VStack(alignment:.leading,spacing:16) {
                         if model.state.receipts.isEmpty {Text("No new email receipts saved.")}
-                        ForEach(Array(model.state.receipts.reversed().prefix(50))) {receipt in
+                        ForEach(model.displayedReceipts) {receipt in
                             VStack(alignment:.leading,spacing:6) {
                                 Text(receipt.receivedAt.formatted()).font(.callout)
                                 Text(receipt.status == "queued" ? "Links saved to queue":receipt.status).font(.subheadline.bold())

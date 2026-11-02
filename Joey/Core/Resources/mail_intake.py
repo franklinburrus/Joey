@@ -206,7 +206,7 @@ def scan(client, request):
             try:
                 msg = BytesParser(policy=email.policy.default).parsebytes(headers, headersonly=True)
                 item = validate_headers(msg, request.get("allowedSenders", []))
-            except (ValueError, AttributeError):
+            except (ValueError, AttributeError, RecursionError):
                 item = rejected("malformedMessage")
             if item and item["reason"] == "recipientMismatch":
                 result["frontier"] = uid; processed += 1

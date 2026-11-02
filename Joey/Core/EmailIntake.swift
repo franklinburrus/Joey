@@ -274,7 +274,9 @@ public final class EmailIntakeStore {
         try commit(next)
     }
     public func freeze(_ id: String, request: JobRequest) throws {
-        try request.validate()
+        // Preserve the immutable contract; the coordinator renews and enforces
+        // current capability evidence before starting any new operation.
+        try request.validate(requireCurrentCapability:false)
         var next = state
         guard let index = next.work.firstIndex(where:{$0.id == id}), next.work[index].source.id == request.sourceID else {throw JoeyError.invalid("Email source identity changed")}
         if let prior = next.work[index].request {

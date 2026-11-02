@@ -3,7 +3,7 @@ import XCTest
 
 final class TimingRegressionTests: XCTestCase {
     private func fixture(videoDelay: Double = 0, audioDelay: Double = 1, origin: Double = 0,
-                         audioDuration: Double? = nil, audioGap: Bool = false) async throws -> (URL, SourceRecord, SharedProfile) {
+                         audioDuration: Double? = nil, audioGap: Bool = false, audioTimestampGap: Double = 0) async throws -> (URL, SourceRecord, SharedProfile) {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("joey-timing-"+UUID().uuidString)
         try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
         let path = dir.appendingPathComponent("source.nut")
@@ -11,7 +11,7 @@ final class TimingRegressionTests: XCTestCase {
         // independent of Joey's render filters and QA reference construction.
         _ = try await Processes.run("ffmpeg",["-v","error","-f","lavfi","-i","testsrc2=s=160x90:r=30:d=\(4-videoDelay)",
             "-f","lavfi","-i","aevalsrc=if(lt(mod(t\\,2)\\,0.5)\\,0.25*sin(2*PI*440*t)*pow(sin(2*PI*mod(t\\,2))\\,2)\\,0):s=48000:d=\(audioDuration ?? (4-audioDelay))",
-            "-filter_complex","[0:v]setpts=PTS+\(origin+videoDelay)/TB[v];[1:a]"+(audioGap ? "aselect='not(between(t,1,3))'," : "")+"asetpts=PTS+\(origin+audioDelay)/TB[a]",
+            "-filter_complex","[0:v]setpts=PTS+\(origin+videoDelay)/TB[v];[1:a]"+(audioGap ? "aselect='not(between(t,1,3))'," : "")+"asetpts=PTS+\(origin+audioDelay)/TB"+(audioTimestampGap > 0 ? "+gte(N\\,1024)*\(audioTimestampGap)/TB" : "")+"[a]",
             "-map","[v]","-map","[a]","-c:v","ffv1","-c:a","pcm_s16le","-fps_mode","passthrough",path.path])
         let source = try await Media.inspect(path,request:Fixtures.request(dir:dir,path:path.path))
         XCTAssertEqual(source.duration,4,accuracy:0.0001,"Inspected duration must be the actual timeline span, including the last packet")
@@ -38,6 +38,35 @@ final class TimingRegressionTests: XCTestCase {
             "-vf","crop=160:90:(iw-160)/2:(ih-90)/2,format=gray","-f","rawvideo","-"])
         XCTAssertEqual(result.stdout.count,160*90)
         return result.stdout.reduce(0.0) {$0+Double($1)}/Double(max(1,result.stdout.count))
+    }
+
+    func testMillisecondAudioPacketGapRetainsSourceTimeline() async throws {
+        let (dir,source,profile) = try await fixture(audioDelay:0,audioDuration:3.999,audioTimestampGap:0.001)
+        defer {try? FileManager.default.removeItem(at:dir)}
+        let (output,clip,receipt) = try await render(source,dir,profile,intervals:[Interval(0,4)])
+        // A one-millisecond gap is real source time, not permission to shift all
+        // following audio. The independent PTS oracle must still agree at zero lag.
+        let qa = try await Media.validate(output:output,source:source,clip:clip,profile:profile,render:receipt,work:dir)
+        XCTAssertTrue(qa.passed)
+    }
+
+    func testJoeFractionalCutDoesNotShiftOutroAudioToVideoFrameBoundary() async throws {
+        let assets = Persistence.defaultRoot
+        guard FileManager.default.fileExists(atPath:assets.appendingPathComponent("assets/joe-approved-outro.mov").path) else {
+            throw XCTSkip("Approved local Joe assets are not installed on this test host")
+        }
+        let branding = try JoeBranding.load(root:assets)
+        let (dir,source,_) = try await fixture(audioDelay:0)
+        defer {try? FileManager.default.removeItem(at:dir)}
+        let clip = ClipRecord(id:1,title:"Fractional Joe boundary",intervals:[Interval(0,3.46)],filename:"joe-fractional.mp4")
+        let output = dir.appendingPathComponent(clip.filename)
+        let profile = SharedProfile.joeBuddenDrive
+        let receipt = try await Media.render(source:source,clip:clip,profile:profile,artwork:nil,work:dir,output:output,branding:branding)
+        // At 30 fps, the video boundary rounds to 3.466667 seconds. The audio
+        // must start the full outro at exactly 3.46 seconds without inserted silence.
+        let qa = try await Media.validate(output:output,source:source,clip:clip,profile:profile,render:receipt,work:dir)
+        XCTAssertTrue(qa.passed)
+        XCTAssertNotNil(qa.checks["approved_outro"])
     }
 
     func testDelayedAudioRetainsSourceSilenceBeforeFirstSamples() async throws {
