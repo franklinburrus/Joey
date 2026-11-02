@@ -1,3 +1,125 @@
+## Routing/migration closeout — PARTIAL (2026-11-02)
+
+This is verification of existing delivery and Frank's reported completed file moves, plus narrowly authorized record repair. It is not a new production run. The earlier new-DUB source/register-write acceptance gate is outside this task. No media download, render, upload, move, copy, deletion, new job, publication or scheduling occurred. No Drive media/companion bytes or permissions changed. The sole external mutation was six independently verified duration-cell corrections in the existing Master Link List.
+
+Evidence directory: `/Users/frank/Library/Caches/Joey-Native-Build/routing-closeout-20261102/`. Raw provider snapshots, local runtime data and repair proposals remain outside Git.
+
+### Repository and installed routing
+
+Origin: `https://github.com/franklinburrus/Joey.git`. Baseline local/remote main: `9a75a0f9c3e75af70d94a85d68595263cc81ff76`; development branch: `codex/routing-closeout`. Prior documentation was already merged in PRs #6/#7. This change adds only STATUS/VERIFICATION evidence; requirements, application code, native project, dependencies and installed bundle are unchanged. All 22 unrelated untracked duplicate files are preserved.
+
+The installed ten-file bundle matches the start snapshot; executable SHA-256 is `c4fae13e649913970d0172023e972d224a8413dff1ffa1142c848440173ab99f`. Strict deep signature verification and Xcode project/Joey scheme discovery passed. The existing matching-build native reopen evidence in `dub-drift-audit-20261102/integration.json` remains applicable: accepted Taxstone shows Completed/23 clips; historical DUB shows Delivery incomplete/35 QA passes. Neither Resume nor Process was selected. No reinstall or repeated production acceptance was needed.
+
+`DestinationResolver.swift` selects by verified owner, inspected source kind, asset role and source identity. DUB audio-led MP4s route as audio; Taxstone/Joe keep their own destinations and records. Joe's serialized DUB owner is disambiguated by `productionWorkflow == .joeBudden`. New originals use separate archive roots; verified historical originals are preserved.
+
+### Eight live destination roles and instruction conflict
+
+All eight configured roots are active folders with matching identities and recorded parents. Complete paginated direct-child inventories were read. Counts below are immediate children, including folders, not recursive clip counts.
+
+| Role | Configured Drive ID | Direct children |
+| --- | --- | ---: |
+| DUB audio clips | `1FRi-yy2D9yenjQRailTA2iAbPaqAEPXm` | 5 |
+| DUB native-video clips | `1380CHJ3a3kl7fXNIKWqUM7_DeTZUwxsy` | 1 |
+| Taxstone clips | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` | 3 |
+| Joe Budden clips | `1X5VNP6fo3VpZPu4ZW4p7Ggk2o_IAVGSI` | 25 |
+| DUB audio originals | `109_QzHpF0Bi-OG6-AxuTDw1uHG4zeop3` | 2 |
+| DUB video originals | `1GpuGWGIbSt3afwsi9L782soT9WJKOHS9` | 70 |
+| Taxstone originals | `12g_etkCruq4tjG07t9hAqQffc4NqbSQK` | 1 |
+| Joe Budden originals | `1IIYLVDhCvwf5ZoMb0aM5vpSCe-eMCmyK` | 0 |
+
+The latest prompt names different DUB clip IDs. Raw Drive readback confirms `1fgABGYTtNC_h2u-v6fwTcPkVKjFd7GQx` (Joey Video Clips) is **trashed**, with zero active children; `1_s2K9Pw2Je93IwazQ6QgLjz_SimVYuPz` (Joey Audio Clips) is active, with zero children. They are children of the configured X Video/Audio folders. REQUIREMENTS section 11 explicitly supersedes those former roots. No configuration change can be inferred safely from this conflict, and no folder was restored. Clarification was requested; no answer had been received at this checkpoint.
+
+The Drive connector omitted requested trash/checksum fields, so complete metadata was obtained through GET-only requests using the existing rclone OAuth connection. `provider_read.py` prohibits media transfer and has no mutation implementation. Both initial and final root metadata are identical; no permission failure was observed.
+
+### Existing packages and Frank's reported migration
+
+Two independent provider passes agree: **16 packages / 262 clips / 64 companions = 326 delivered files**, plus 16 source-original metadata checks. Every expected file exists once with matching ID, filename, immediate episode parent, bytes, MD5, SHA-256, link and saved access roles. Recorded permission fingerprints also match where present. There are zero unexpected episode children, duplicate expected IDs, duplicate filenames within an episode, or duplicate clip-byte identities across the audited packages. All source-original sizes/SHA-256 match their checkpoints. These counts cover Joey's known filed packages, not every historical file in the wider Drive tree.
+
+Frank reports that the moves are complete. The current readback does not establish the required final placement: all 15 historically flagged episode folders retain the same direct parents as the prior readback. This does not infer what other files Frank moved. Current REQUIREMENTS require direct episode folders under the applicable clip roots.
+
+| Package | Episode folder ID | Current direct parent | Clips |
+| --- | --- | --- | ---: |
+| DUB `dub-bc24818564d22380585be027` | `1_NJU2jWQEz3uSAvDYGXXJM9tfIr9s5iD` | `1N7HyLq-Fq8a2RIaXMe7Xs17Y8UqYuCcJ` (Dub under X Video) | 35 |
+| Joe Episode 977 | `1DBHs-sQ8jpyALLiisOw1HUi09_aFoBDb` | `1N7HyLq-Fq8a2RIaXMe7Xs17Y8UqYuCcJ` | 17 |
+| Taxstone `1ae8e260e0033a777f213141` | `1t6VEL_G2ozPSTaNANXldU6gy7de6Cmqr` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | 2 |
+| Taxstone `46898c5fc70c3c152215e5b0` | `1M-CakIReL8oZmihXq0escl_EtMVdDOAf` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | 19 |
+| Taxstone `5134623dc985abd5af160e4e` | `1fjWePls7ieTTTKpqFnGrYSRnmIM6OE-4` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | 11 |
+| Taxstone `710814e0e6fb7a8fec073443` | `1-lNT9IKT0Jwc3TStt-7rAd91xGkXqdSk` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | 21 |
+| Taxstone `77ade3f57f0576eea23d8ff7` | `1m2kcq1GyRf4yRg3vBFqjWbewRlwkzRzs` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | 22 |
+| Taxstone `8eadff92a6c6c263dde016d2` | `13STZ5d14uH-riK1bp9XvTvkgWCwZlZFN` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | 11 |
+| Taxstone `a7e6ff4bfa4d7ebc82ba274f` | `1bkZtSggMnaqrigvULctZ3pSnndH8YO9F` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | 6 |
+| Taxstone `c04fb3967b852f659a08de9e` | `1bDnduFUj79RSkTrumUQV8yluLMNNeZ1E` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | 22 |
+| Taxstone `c99f0d8fb23a15ae5763fc8e` | `19bc8NiQAKFrEtAqK8ETiZRmgKJNvSg1R` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | 22 |
+| Taxstone `d4487616a9e796b6ba501cb3` | `1KvUL1C6fscdsnVHgBDiU1gA8Xzc-WrRs` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | 21 |
+| Taxstone `daae42819794661120fea59e` | `1S7CkmADbbJooOZE6R2vRBq_2Y4XXF5cG` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | 2 |
+| Taxstone `eb9eb0e64110f6617f5457f8` | `11FyrmbdvN_h5TLXCvfnT8DNFdcYnFRmu` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | 17 |
+| Taxstone `f670e51da9d2cd0a1e5021fa` | `14gXkMAK9o5DY04VXixIlY8081aAL-DMY` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | 11 |
+| Accepted Taxstone `ab50e1cf3e21aec596cc88be` | `1eXKK3Pit7VnWKtlUF6zTHyBFoaejY0t1` | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` (correct root) | 23 |
+
+The intermediate Taxstone parent is Taxstone X Clips beneath the Taxstone root. The 15 exceptions total 239 clips and 60 companions; the accepted Taxstone package contributes 23 clips/four companions. No file, parent, sharing permission or link was changed. Existing links resolve to the same provider IDs/access metadata; no new anonymous media download or social-platform ingestion test was performed.
+
+### Existing records and the six-cell repair
+
+All 16 source identities, manifest clip IDs/links and complete source-bound transcripts reconcile. Fifteen packages' manifest bytes match their saved provider receipts and current clip metadata. The historical DUB remote manifest is a separate content failure:
+
+- File `16gkG0VVotxLf1GUU2T6zW4xhM8oWdXoG`, 340,302 bytes, SHA-256 `232ff7d0ec01fc9edf1f6322a967d4981374961f72a45cd3a7584c412f7089c4`, matches its old receipt but contains stale size/hash values for all 35 clips and six stale measured durations (76 scalar discrepancies, plus nested QA/Drive receipts).
+- Its source identity, exact intervals, clip identities, filenames, Drive IDs/links and register references remain correct. Current local checkpoint and local manifest clip data match current provider media. The local manifest was not replaced.
+- The canonical index `1dGk5Z8oh9Eeu1kMyAmmWzKcmmqQ9LprB` has the same six stale durations. All other index identities/links reconcile.
+- The existing RECONCILE narrative describes generic padded shared output, while current DUB QA explicitly describes its historical landscape correction. Its existing counts still match.
+- `proposed-clip-index.csv` changes only the six validated duration tokens. `companion-correction-proposal.json` records 146 exact clip-field replacements and required receipt/readback sequencing. These are drafts in the evidence cache, not uploaded or installed records. Companion content replacement requires upload semantics; the explicit no-reupload boundary remains unresolved. No synthetic receipt or premature COMPLETED state was created.
+
+The live Master Library schema has sheet ID `672400447`, 4,468 grid rows, 25 grid columns and 20 populated headers; 4,467 data rows. All 35 expected DUB records uniquely occupy rows 4417–4451. Their clip IDs, Drive IDs, links, filenames and source/episode keys match. Taxstone and Joe records were not inserted into this DUB register.
+
+Fresh local SHA-256 plus FFprobe measurements established the corrections below. Immediately before writing, the exact live row identity, string value, formatting and validation were read. One atomic batch used six `updateCells` requests, each with field mask `userEnteredValue` only.
+
+| Master Library cell | Clip | Before (seconds) | Corrected/read back (seconds) |
+| --- | ---: | ---: | ---: |
+| F4423 | 7 | 129.766667 | 129.740000 |
+| F4425 | 9 | 133.766667 | 133.740000 |
+| F4440 | 24 | 116.700000 | 116.680000 |
+| F4441 | 25 | 122.366667 | 122.340000 |
+| F4448 | 32 | 133.866667 | 133.840000 |
+| F4451 | 35 | 110.952000 | 110.966016 |
+
+Independent connector CellData readback matched exactly, including unchanged formats, validation and neighboring cells. Independent OAuth GET of the full bounded `'Master Library'!A1:Y4468` FORMULA snapshot matched the before snapshot with only these six substitutions; schema, all other values/formulas and 35 unique identities are unchanged. Zero rows inserted, zero blind retries, zero provider/authorization failures. This corrects historical metadata; it does not exercise a new application-level production/register-write acceptance.
+
+### Commands, results and preservation
+
+All diagnostics ran through `python3 Tools/run-local.py`; Xcode/Swift additionally used `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
+
+| Command / evidence | Actual result |
+| --- | --- |
+| `/usr/bin/swift test --jobs 2 --filter 'DestinationRoutingTests\|DeliveryTests\|DriveFilingTests\|EpisodeFolderOwnershipTests'` | Exit 0; 31 passed, zero failures; 4.047 seconds. Isolated providers, no production mutation. |
+| `/usr/bin/xcodebuild -list -project Joey.xcodeproj` | Exit 0; existing Joey project/target/scheme present. |
+| `/usr/bin/codesign --verify --deep --strict '/Users/frank/Applications/Joey Native.app'` | Exit 0; unchanged installed bundle. |
+| `audit_existing.py` | Exit 0; 16 packages, 326 receipts, 16 originals, 35 register identities verified; placement/content limitations recorded separately. |
+| `finish_readback.py` | Final exit 0; only six sheet cells changed, all 35 identities unique, root metadata unchanged, correction drafts verified. First draft-only stage failed on an incorrect CSV header label; corrected to the observed `Measured duration (seconds)`. No additional write resulted. |
+| `final_drive_read.py` | Exit 0; second independent read of all 326 files, 16 episode folders and 16 originals matches initial state; zero duplicate expected IDs or clip-byte hashes. |
+| `preservation.py` | Exit 0; all 278 accepted outputs match checkpoint/QA SHA-256; all 1,545 runtime JSON files, 20 jobs, ten bundle files and 22 unrelated untracked files unchanged. |
+| Prior full Swift/Python/native build and native reopen evidence | Reused for unchanged implementation/bundle; not newly run. Prior full Swift: 255 passed/four skipped/zero failures, then 41 affected tests after final cancellation adjustment; Python: 22 passed. |
+
+The focused tests cover all eight route roles, ownership/source ambiguity, folder/source-hash reuse, incorrect parents, safe recovery and duplicate prevention. Existing verified production recovery/reopen evidence is reused; no successful job was interrupted to repeat it. No application code change requires another build. Technical export and actual social ingestion remain distinct.
+
+### PRE-COMMIT DRIFT AUDIT
+
+| Audit area | Finding |
+| --- | --- |
+| Current task / baseline | Existing routing and migration verification; `codex/routing-closeout` from `9a75a0f9c3e75af70d94a85d68595263cc81ff76`. |
+| Files reviewed | AGENTS, Ultracave, REQUIREMENTS, IMPLEMENTATION_PLAN, STATUS, VERIFICATION, OPERATING_GUIDE; DestinationResolver, production intake, delivery/completion/reopen paths; relevant tests; complete task diff; live provider/local evidence. |
+| Requirements alignment | Sections 11–15 routing, exact placement, canonical records, provider readback and preservation retain their invariants. No requirement weakened to excuse historical placement or stale companions. |
+| Roadmap alignment | Task 3 verified delivery and existing routing correction closeout. No new production, feature, architecture or dependency work. The separate DUB production milestone remains unchanged and outside this task. |
+| Scope control | Only STATUS/VERIFICATION enter Git. Six proven historical duration corrections are authorized by Phase 4. All 22 pre-existing untracked files, production media, transcripts, models, credentials, evidence cache and runtime records remain excluded. |
+| Ambiguity and uncertainty | Prompt's retired roots conflict with current requirements; video root is trashed. Fifteen current placements do not satisfy the specified direct-parent invariant. Companion-content edits conflict with no-reupload instruction. These are explicit closeout blockers, not invented approval gates. |
+| Architecture and quality | Native Swift/SwiftUI architecture and installed implementation unchanged. No refactor, dependency, credential or permission change. Accepted work and recovery checkpoints preserved. |
+| Verification and evidence | 31 focused tests, project/signature checks, two live Drive passes, independent Sheets readback and preservation checks passed within the stated bounds. Stale companion contents and unresolved placement are not described as passed. |
+| Corrections | Six duration cells repaired once; corrected the local diagnostic's header assumption; documentation now distinguishes receipt-byte integrity from manifest-content correctness. |
+| Commit eligibility | **PASS for the explicitly documented partial verification/repair scope**, after full diff and staging review. This does not mark routing/migration CLOSED. |
+| Remaining risks / next action | Integrate the authorized evidence-only change. Resolve which DUB mapping governs, reconcile the 15 exact placement exceptions without prohibited automatic moves, and permit or defer the concrete companion-record corrections. No new broadcast is required. |
+
+The final status remains PARTIAL until those routing/migration requirements reconcile. Historical entries below are preserved as evidence of earlier tasks, including their separate acceptance limits.
+
+---
+
 ## DUB register repair — mandatory pre-commit drift audit (2026-11-02)
 
 This continuation implements the latest explicit instruction to repair concrete defects discovered by the drift audit. It is a bounded technical repair of roadmap Task 3, not completion of the source-blocked production mission. No real provider mutation, new media job, publication, scheduling or email was performed. The earlier preflight entry below remains historical evidence of the stage before this repair.
