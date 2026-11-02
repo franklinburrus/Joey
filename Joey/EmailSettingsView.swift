@@ -144,8 +144,7 @@ private struct EmailQueuedLinkView: View {
                     Text("Full Show").tag(JobMode.fullShow)
                     Text("Highlights").tag(JobMode.highlights)
                 }.disabled(active || workflow.content == .joeBudden)
-                TextField("Existing full-source archive folder ID (optional)",text:$workflow.archiveRoot)
-                    .disabled(active)
+                Text("Drive destinations resolve automatically from the source and content owner.").font(.caption)
                 Text("Uses existing production profiles, automatic QA and Drive filing. Official Joe Budden episodes keep their Joe workflow.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {

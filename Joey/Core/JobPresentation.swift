@@ -30,7 +30,7 @@ struct JobPresentation {
         case "intake", "source", "original archive verification": return "source"
         case "transcription": return "transcript"
         case "planning", "artwork": return "planning"
-        case "local package", "companion records", "register reconciliation", "complete": return "records"
+        case "local package", "companion records", "register reconciliation", "final Drive package verification", "complete": return "records"
         case "Drive folder": return "delivery"
         default:
             if job.stage.hasPrefix("render clip ") {return "planning"}
@@ -71,7 +71,7 @@ struct JobPresentation {
         case "original archive verification": return "Verifying the full-length archive"
         case "Drive folder": return "Finding the episode folder"
         case "companion records": return "Filing the index and transcript"
-        case "register reconciliation": return "Verifying delivery records"
+        case "register reconciliation", "final Drive package verification": return "Verifying delivery records"
         case "complete": return completed ? "Delivery verified" : filed < total ? "Drive filing required" : "Verifying delivery records"
         default:
             if job.stage.hasPrefix("render clip ") { return job.stage.replacingOccurrences(of:"render clip ",with:"Creating clip ")+" of \(total)" }
@@ -84,7 +84,7 @@ struct JobPresentation {
     var clipProgress: Double? { total > 0 ? Double(accepted)/Double(total) : nil }
     var recordStatus: String {
         if completed { return "Verified" }
-        if job.request.owner == .dub { return "\(job.registerRows.count)/\(total) register rows verified" }
+        if DestinationResolver.requiresDUBRegister(job.request) { return "\(job.registerRows.count)/\(total) register rows verified" }
         return "\(job.companions.count)/4 companion records verified"
     }
     var recovery: String {

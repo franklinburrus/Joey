@@ -8,6 +8,19 @@
 **Spec:** REQUIREMENTS.md, sole current requirements document.
 
 
+## Authoritative filing correction — 2026-11-02
+
+Frank's eight-root mapping in REQUIREMENTS section 11 supersedes the historical two-root implementation. Extend the existing Swift coordinator and Drive adapter, without replacing the native application or changing media production requirements.
+
+1. Centralize destination and verified ancestry in `DestinationResolver.swift`. Preserve request serialization; use the explicit Joe workflow as its ownership discriminator.
+2. Pass the resolved route through folder creation/reuse, archive selection, uploads, interrupted reconciliation, final package verification, library readback and Buffer preflight. Remove manual destination controls. Preserve verified legacy originals and report misplaced packages without relocation.
+3. Independently check IDs, actual parents, ancestry, hashes, sizes, permissions and duplicates. Download companions. Keep DUB Master Link List writes/readback under its existing schema; Joe and Taxstone use separate episode records. Require complete evidence before COMPLETED.
+4. Exercise all eight mappings, ambiguous identity, wrong parent/ancestry, recovery, deduplication, source preservation, permissions, companions and completion transitions with meaningful Swift tests. Build the existing Xcode project. Use read-only real provider/accepted-media evidence where live production writes would duplicate or relocate existing packages.
+5. Record exact commands, counts, live inventory and remaining operational dependencies in STATUS and VERIFICATION. Installation, relocation and publication are separate actions; no success claim may substitute simulated provider tests for production delivery.
+
+Frank authorized integration, protected installation and eligible production acceptance on 2026-11-02. Review, regression repair, full local verification and fresh historical audit are complete; see STATUS/VERIFICATION for actual results. Next: exact-file commit, normal push/PR/checks/merge, build verified merged source, protected installation and launch/restart/data checks, then eligible production acceptance. Historical relocation remains separately authorized and unexecuted; its deterministic migration/rollback plan is in VERIFICATION. Preserve current requirements and the 22 unrelated untracked files throughout.
+
+
 ## Progress at verified handoff — 2026-10-31
 
 - Tasks 1–2: core/media implementation, model-independent processing and documented local acceptance/recovery are implemented; preserve existing accepted sources, transcripts, nine diagnostic clips and receipts. Reuse the evidence indexed in STATUS.md rather than repeating those runs.

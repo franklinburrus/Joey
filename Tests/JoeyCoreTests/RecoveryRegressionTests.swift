@@ -49,8 +49,11 @@ final class RecoveryRegressionTests: XCTestCase {
         job.clips = [ClipRecord(id:1,title:"Synthetic",intervals:[Interval(0,100)],filename:output.lastPathComponent,
             measuredDuration:100,bytes:bytes,sha256:hash,qa:QAReport(checkedAt:Date(),checks:[:],outputSHA256:hash,passed:true,
                 limitations:["Synthetic checkpoint fixture; no media or provider acceptance"]),drive:receipt)]
-        for name in ["clip_manifest.json","RECONCILE.md","Clip Index — Fixture.csv","Fixture — Full Transcript.txt"] {
-            var companion = receipt;companion.name = name
+        let destination = try DestinationResolver.resolve(source:job.source!,request:request,asset:.clip)
+        job.clips[0].drive!.destination = destination
+        job.clips[0].drive!.permissionFingerprint = String(repeating:"a",count:64)
+        for name in Records.companionNames(source:job.source!) {
+            var companion = job.clips[0].drive!;companion.name = name;companion.id = "synthetic_"+name
             job.companions[name] = companion
         }
         job.registerRows = request.owner == .dub ? ["fixture-row"] : []
@@ -59,6 +62,29 @@ final class RecoveryRegressionTests: XCTestCase {
         try Persistence.save(job,to:directory.appendingPathComponent("job.json"))
         return (job,directory)
     }
+    func testFilingCompletionRequiresParentsRegistersAndFinalReadback() async throws {
+        for fault in ["none","parent","register","final-readback"] {
+            let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+            var request = try Fixtures.request(dir:root,path:"unused");request.fileToDrive = true
+            var (saved,directory) = try completed(request,root:root)
+            saved.state = .qaPassed;saved.clips[0].drive = nil;saved.companions = [:];saved.registerRows = []
+            try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+            let persisted: JobRecord = try Persistence.load(directory.appendingPathComponent("job.json"))
+            let provider = RecoveryDelivery(filingFault:fault)
+            let coordinator = try Coordinator(root:root)
+            let first = try await Coordinator.$deliveryOverride.withValue(provider) {try await coordinator.run(request)}
+            XCTAssertEqual(first.state,.qaPassed,"Lost upload response must retain accepted QA")
+            let final = try await Coordinator.$deliveryOverride.withValue(provider) {try await coordinator.run(request)}
+            XCTAssertEqual(final.state,fault == "none" ? .completed : .qaPassed,final.error ?? fault)
+            XCTAssertEqual(final.hasRequiredCompletionEvidence,fault == "none" || fault == "final-readback")
+            XCTAssertEqual(JobPresentation(job:final).completed,fault == "none")
+            XCTAssertEqual(final.clips[0].qa,persisted.clips[0].qa,"Filing failure must not rerender or replace accepted QA")
+            XCTAssertEqual(try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename)),saved.clips[0].sha256)
+            let creations = await provider.clipCreations
+            XCTAssertEqual(creations,1,"Interrupted filing must not create a second media file")
+        }
+    }
+
     func testTaxstonePreplanningCheckpointsRetainOriginalJobIdentity() throws {
         let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
         var request = try Fixtures.request(dir:root,path:"unused")
@@ -382,7 +408,8 @@ private actor RecoveryDelivery: CoordinatorDelivery {
     var committed: [String:DriveReceipt] = [:]
     let suspendAfterCommit: Bool
     let original: URL?
-    init(suspendAfterCommit: Bool = false, original: URL? = nil) {self.suspendAfterCommit = suspendAfterCommit;self.original = original}
+    let filingFault: String
+    init(suspendAfterCommit: Bool = false, original: URL? = nil, filingFault: String = "none") {self.suspendAfterCommit = suspendAfterCommit;self.original = original;self.filingFault = filingFault}
     func metadata(_ id: String) async throws -> [String:Any] {throw JoeyError.failed("Unexpected metadata lookup in synthetic recovery")}
     func downloadOriginal(reference: String, directory: URL) async throws -> URL {
         downloads += 1
@@ -392,16 +419,20 @@ private actor RecoveryDelivery: CoordinatorDelivery {
     func archive(source: SourceRecord, request: JobRequest) async throws -> String {
         calls += 1;return "https://drive.google.com/file/d/synthetic_archive_123456789/view"
     }
-    func episodeFolder(source: SourceRecord, jobID: String, intentURL: URL) async throws -> String {
+    func episodeFolder(source: SourceRecord, request: JobRequest, jobID: String, existingFolderID: String?, intentURL: URL) async throws -> String {
         calls += 1;return "synthetic_folder_123456789"
     }
     func resolveArtwork(source: SourceRecord, configuration: Configuration, root: URL) async throws -> Artwork {
         throw JoeyError.failed("Native synthetic checkpoint must not resolve artwork")
     }
-    func reconcileRegister(job: JobRecord, tab: String) async throws -> [String] {
-        calls += 1;return job.request.owner == .dub ? ["fixture-row"] : []
+    func verifyPackage(job: JobRecord, directory: URL) async throws {
+        guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Synthetic package incomplete")}
+        if filingFault == "final-readback" {throw JoeyError.failed("Synthetic final parent readback failure")}
     }
-    func upload(_ local: URL, name: String?, parent: String, replaceCompanion: Bool) async throws -> DriveReceipt {
+    func reconcileRegister(job: JobRecord, tab: String) async throws -> [String] {
+        calls += 1;return DestinationResolver.requiresDUBRegister(job.request) && filingFault != "register" ? ["fixture-row"] : []
+    }
+    func upload(_ local: URL, name: String?, parent: String, destination: FilingDestination, replaceCompanion: Bool) async throws -> DriveReceipt {
         calls += 1
         let filename = name ?? local.lastPathComponent
         let bytes = Int64(try Data(contentsOf:local).count), hash = try Integrity.sha256(local)
@@ -409,12 +440,13 @@ private actor RecoveryDelivery: CoordinatorDelivery {
             clipAttempts += 1
             if let existing = committed[filename] {
                 guard existing.sha256 == hash,existing.bytes == bytes,existing.parent == parent else {throw JoeyError.failed("Synthetic reconciliation identity changed")}
+                if filingFault == "parent" {var wrong = existing;wrong.parent = "incorrect-actual-parent";return wrong}
                 return existing
             }
             clipCreations += 1
         }
         let receipt = DriveReceipt(id:"synthetic_"+Integrity.textHash(filename),name:filename,parent:parent,bytes:bytes,
-            md5:try Integrity.md5(local),sha256:hash,url:"https://example.invalid/synthetic",permissions:["user:owner"],verifiedAt:Date())
+            md5:try Integrity.md5(local),sha256:hash,url:"https://example.invalid/synthetic",permissions:["user:owner"],verifiedAt:Date(),destination:destination,permissionFingerprint:String(repeating:"a",count:64))
         committed[filename] = receipt
         if local.pathExtension == "mp4",suspendAfterCommit {try await Task.sleep(nanoseconds:60_000_000_000)}
         if local.pathExtension == "mp4" {throw JoeyError.failed("Synthetic uncertain upload response")}

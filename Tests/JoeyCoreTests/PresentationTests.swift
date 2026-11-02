@@ -82,17 +82,24 @@ final class PresentationTests: XCTestCase {
         request.owner = .taxstone;request.fileToDrive = true
         var job = JobRecord(id:"fixture",request:request)
         job.state = .completed;job.stage = "complete";job.folderID = "fixture-folder"
-        job.transcript = Transcript(sourceID:request.sourceID,sourceSHA256:"fixture-source",duration:10,
+        job.transcript = Transcript(sourceID:request.sourceID,sourceSHA256:String(repeating:"a",count:64),duration:10,
             engine:"Synthetic UI regression",segments:[TranscriptSegment(start:0,end:10,text:"Synthetic complete transcript.")])
+        job.source = SourceRecord(id:request.sourceID,owner:.taxstone,title:request.title,path:"fixture",bytes:100,
+            sha256:String(repeating:"a",count:64),duration:10,width:0,height:0,fps:0,hasAudio:true,kind:.audio,
+            streams:[],authorizationBasis:"Synthetic",classificationEvidence:"Synthetic")
+        let destination = try DestinationResolver.resolve(source:job.source!,request:request,asset:.clip)
         job.clips = (1...2).map {number in
-            let hash = "fixture-hash-\(number)", name = "\(number).mp4"
-            let receipt = DriveReceipt(id:"fixture-file-\(number)",name:name,parent:job.folderID!,bytes:100,
-                sha256:hash,url:"https://example.invalid/fixture-\(number)",permissions:[],verifiedAt:Date())
+            let hash = Integrity.textHash("fixture-hash-\(number)"), name = "\(number).mp4"
+            let receipt = DriveReceipt(id:"fixture-file-\(number)",name:name,parent:job.folderID!,bytes:100,md5:String(repeating:"a",count:32),
+                sha256:hash,url:"https://example.invalid/fixture-\(number)",permissions:["user:owner"],verifiedAt:Date(),destination:destination,permissionFingerprint:String(repeating:"a",count:64))
             return ClipRecord(id:number,title:"Fixture \(number)",intervals:[Interval(Double(number-1)*5,Double(number)*5)],
                 filename:name,bytes:100,sha256:hash,
                 qa:QAReport(checkedAt:Date(),checks:[:],outputSHA256:hash,passed:true,limitations:["Synthetic only"]),drive:receipt)
         }
-        job.companions["clip_manifest.json"] = job.clips[0].drive
+        for name in Records.companionNames(source:job.source!) {
+            var receipt = job.clips[0].drive!;receipt.id = "companion_"+name;receipt.name = name
+            job.companions[name] = receipt
+        }
         return job
     }
 
@@ -111,6 +118,20 @@ final class PresentationTests: XCTestCase {
             XCTAssertFalse(view.stages.first {$0.id == "records"}!.verified)
             XCTAssertEqual(try Persistence.encoder.encode(job),original,"Presentation must preserve checkpoints")
         }
+    }
+
+    func testCompletionRejectsWrongRouteMissingCompanionsAndDuplicateIDs() throws {
+        let accepted = try deliveredJob()
+        var variants: [JobRecord] = []
+        var job = accepted;job.clips[0].drive!.destination = nil;variants.append(job)
+        job = accepted;job.clips[0].drive!.permissionFingerprint = nil;variants.append(job)
+        job = accepted;job.companions.removeValue(forKey:"RECONCILE.md");variants.append(job)
+        job = accepted;job.companions["RECONCILE.md"]!.parent = "wrong-parent";variants.append(job)
+        job = accepted;job.companions["RECONCILE.md"]!.id = job.clips[0].drive!.id;variants.append(job)
+        job = accepted;job.transcript!.sourceSHA256 = "wrong-source";variants.append(job)
+        for invalid in variants {XCTAssertFalse(invalid.hasRequiredCompletionEvidence)}
+        let legacy = variants[0]
+        XCTAssertEqual(JobPresentation(job:legacy).filed,1,"Legacy receipts without authoritative route evidence cannot make Drive fully verified")
     }
 
     func testMismatchedDriveReceiptsCannotMakeDeliveryGreen() throws {

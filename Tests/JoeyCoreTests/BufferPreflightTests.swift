@@ -96,11 +96,11 @@ final class BufferPreflightTests: XCTestCase {
         var job = JobRecord(id:"test-completed-job",request:request)
         job.state = .completed; job.folderID = "episode-folder-id"
         let sha = String(repeating:"a",count:64)
-        job.source = SourceRecord(id:request.sourceID,owner:.dub,title:"Test",path:request.localPath!,bytes:9000,sha256:sha,duration:137,width:720,height:1280,fps:30,hasAudio:true,kind:.nativeVideo,streams:[],authorizationBasis:"Synthetic authorized fixture",classificationEvidence:"Synthetic")
+        job.source = SourceRecord(id:request.sourceID,owner:.dub,title:request.title,path:request.localPath!,bytes:9000,sha256:sha,duration:137,width:720,height:1280,fps:30,hasAudio:true,kind:.nativeVideo,streams:[],authorizationBasis:"Synthetic authorized fixture",classificationEvidence:"Synthetic")
         job.transcript = Transcript(sourceID:request.sourceID,sourceSHA256:sha,duration:137,engine:"fixture",segments:[TranscriptSegment(start:0,end:137,text:"Complete source transcript")])
-        let receipt = DriveReceipt(id:"accepted-output-id",name:"clip.mp4",parent:job.folderID!,bytes:1_000_000,md5:"accepted-md5",sha256:sha,url:"https://drive.google.com/file/d/accepted-output-id/view",permissions:["anyone:reader","user:owner"],verifiedAt:Date())
+        let receipt = DriveReceipt(id:"accepted-output-id",name:"clip.mp4",parent:job.folderID!,bytes:1_000_000,md5:String(repeating:"b",count:32),sha256:sha,url:"https://drive.google.com/file/d/accepted-output-id/view",permissions:["anyone:reader","user:owner"],verifiedAt:Date(),destination:try DestinationResolver.resolve(source:job.source!,request:request,asset:.clip),permissionFingerprint:String(repeating:"a",count:64))
         job.clips = [ClipRecord(id:1,title:"Test clip",intervals:[Interval(0,137)],filename:"clip.mp4",measuredDuration:137,bytes:1_000_000,sha256:sha,qa:QAReport(checkedAt:Date(),checks:["audio_fidelity_sync":"Source PCM matched"],outputSHA256:sha,passed:true,limitations:[]),drive:receipt)]
-        for name in ["clip_manifest.json","RECONCILE.md","Clip Index — Test.csv","Test — Full Transcript.txt"] {job.companions[name] = receipt}
+        for name in Records.companionNames(source:job.source!) {var companion = receipt;companion.id = name;companion.name = name;job.companions[name] = companion}
         job.registerRows = ["Sheet!A2:ZZ2"]
         return job
     }
@@ -126,14 +126,14 @@ final class BufferPreflightTests: XCTestCase {
 
     func testDriveReadbackRejectsWrongOwnerFolderHashDuplicatesAndAccessChanges() throws {
         let job = try completedJob(temporaryDirectory()), clip = job.clips[0], source = job.source!
-        let file: [String:Any] = ["id":"accepted-output-id","name":"clip.mp4","mimeType":"video/mp4","trashed":false,"parents":["episode-folder-id"],"size":"1000000","md5Checksum":"accepted-md5","permissions":[["type":"anyone","role":"reader"],["type":"user","role":"owner"]]]
+        let file: [String:Any] = ["id":"accepted-output-id","name":"clip.mp4","mimeType":"video/mp4","trashed":false,"parents":["episode-folder-id"],"size":"1000000","md5Checksum":String(repeating:"b",count:32),"permissions":[["type":"anyone","role":"reader"],["type":"user","role":"owner"]]]
         let folder: [String:Any] = ["id":"episode-folder-id","mimeType":"application/vnd.google-apps.folder","trashed":false,"parents":[DriveDelivery.videoRoot],"appProperties":["joeySourceID":source.id,"joeyOwner":"dub"]]
-        XCTAssertNoThrow(try BufferPreflight.validateDrive(file:file,folder:folder,source:source,clip:clip,folderID:"episode-folder-id",md5:"accepted-md5"))
+        XCTAssertNoThrow(try BufferPreflight.validateDrive(file:file,folder:folder,source:source,request:job.request,clip:clip,folderID:"episode-folder-id",md5:String(repeating:"b",count:32)))
         for change: [String:Any] in [["id":"other-output-id"],["md5Checksum":"different"],["parents":[DriveDelivery.audioRoot]],["trashed":true],["permissions":[["type":"anyone","role":"writer"]]]] {
-            XCTAssertThrowsError(try BufferPreflight.validateDrive(file:file.merging(change,uniquingKeysWith:{$1}),folder:folder,source:source,clip:clip,folderID:"episode-folder-id",md5:"accepted-md5"))
+            XCTAssertThrowsError(try BufferPreflight.validateDrive(file:file.merging(change,uniquingKeysWith:{$1}),folder:folder,source:source,request:job.request,clip:clip,folderID:"episode-folder-id",md5:String(repeating:"b",count:32)))
         }
         var wrongOwner = folder; wrongOwner["appProperties"] = ["joeySourceID":source.id,"joeyOwner":"taxstone"]
-        XCTAssertThrowsError(try BufferPreflight.validateDrive(file:file,folder:wrongOwner,source:source,clip:clip,folderID:"episode-folder-id",md5:"accepted-md5"))
+        XCTAssertThrowsError(try BufferPreflight.validateDrive(file:file,folder:wrongOwner,source:source,request:job.request,clip:clip,folderID:"episode-folder-id",md5:String(repeating:"b",count:32)))
     }
 
     func testAcceptedOutputPathRejectsTraversalAndSymbolicLinks() throws {

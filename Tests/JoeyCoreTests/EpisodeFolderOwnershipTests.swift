@@ -9,9 +9,14 @@ final class EpisodeFolderOwnershipTests: XCTestCase {
         return directory
     }
     private func source() -> SourceRecord {
-        SourceRecord(id:"fixture-source",owner:.taxstone,title:"Fixture",path:"unused",bytes:1,sha256:"fixture",
+        SourceRecord(id:"fixture-source",owner:.taxstone,title:"Fixture",path:"unused",bytes:1,sha256:String(repeating:"a",count:64),
             duration:10,width:160,height:90,fps:30,hasAudio:false,kind:.nativeVideo,streams:[],
             authorizationBasis:"Generated fixture",classificationEvidence:"Synthetic checkpoint")
+    }
+    private func request() throws -> JobRequest {
+        var request = try Fixtures.request(dir:FileManager.default.temporaryDirectory,path:"unused")
+        request.owner = .taxstone;request.sourceID = source().id;request.title = source().title
+        return request
     }
     private func adapter(_ fixture: FolderProvider) throws -> DriveDelivery {
         FolderProtocol.fixture = fixture
@@ -23,13 +28,13 @@ final class EpisodeFolderOwnershipTests: XCTestCase {
     }
     private func intent(in directory: URL, jobID: String) throws -> URL {
         let url = directory.appendingPathComponent("folder-intent.json")
-        try Persistence.save(["root":DriveDelivery.videoRoot,"name":FolderProvider.name,"jobID":jobID,
+        try Persistence.save(["root":DriveDestination.taxstoneClips.id,"name":FolderProvider.name,"jobID":jobID,
             "started":"2026-01-01T00:00:00Z"],to:url)
         return url
     }
     private func assertRejected(_ delivery: DriveDelivery, jobID: String, intent: URL) async {
         do {
-            _ = try await delivery.episodeFolder(source:source(),jobID:jobID,intentURL:intent)
+            _ = try await delivery.episodeFolder(source:source(),request:request(),jobID:jobID,existingFolderID:nil,intentURL:intent)
             XCTFail("A folder without this job's verified ownership was accepted")
         } catch {
             XCTAssertTrue(error.localizedDescription.contains("job") || error.localizedDescription.contains("identity"),error.localizedDescription)
@@ -38,9 +43,10 @@ final class EpisodeFolderOwnershipTests: XCTestCase {
 
     func testSameJobRetriesReuseFolderWithoutMutation() async throws {
         let directory = try workspace(), fixture = FolderProvider(jobID:"same-job")
+        fixture.properties["joeySourceSHA256"] = source().sha256
         let delivery = try adapter(fixture)
         for _ in 0..<2 {
-            let id = try await delivery.episodeFolder(source:source(),jobID:"same-job",intentURL:directory.appendingPathComponent("absent-intent.json"))
+            let id = try await delivery.episodeFolder(source:source(),request:request(),jobID:"same-job",existingFolderID:nil,intentURL:directory.appendingPathComponent("absent-intent.json"))
             XCTAssertEqual(id,FolderProvider.id)
         }
         XCTAssertEqual(fixture.mutations,0)
@@ -65,13 +71,59 @@ final class EpisodeFolderOwnershipTests: XCTestCase {
         let directory = try workspace(), fixture = FolderProvider(jobID:nil,untagged:true)
         let delivery = try adapter(fixture), savedIntent = try intent(in:directory,jobID:"recover-job")
         for _ in 0..<2 {
-            let id = try await delivery.episodeFolder(source:source(),jobID:"recover-job",intentURL:savedIntent)
+            let id = try await delivery.episodeFolder(source:source(),request:request(),jobID:"recover-job",existingFolderID:nil,intentURL:savedIntent)
             XCTAssertEqual(id,FolderProvider.id)
         }
         XCTAssertEqual(fixture.properties["joeyJobID"],"recover-job")
         XCTAssertEqual(fixture.properties["joeySourceID"],"fixture-source")
         XCTAssertEqual(fixture.mutations,1)
         XCTAssertEqual(fixture.mkdirCount,0)
+    }
+
+    func testCompatibleExistingManifestReusesFolderWithoutAnotherDirectory() async throws {
+        let directory = try workspace(),fixture = FolderProvider(jobID:nil,untagged:true)
+        let request = try request()
+        var prior = JobRecord(id:"compatible-job",request:request);prior.source = source()
+        fixture.manifest = try Persistence.encoder.encode(prior)
+        let delivery = try adapter(fixture)
+        let id = try await delivery.episodeFolder(source:source(),request:request,jobID:prior.id,existingFolderID:FolderProvider.id,
+            intentURL:directory.appendingPathComponent("no-intent.json"))
+        XCTAssertEqual(id,FolderProvider.id);XCTAssertEqual(fixture.mkdirCount,0)
+        XCTAssertEqual(fixture.properties["joeySourceSHA256"],source().sha256)
+        XCTAssertEqual(fixture.properties["joeyJobID"],prior.id)
+    }
+
+    func testExistingManifestWithDifferentSourceHashIsPreserved() async throws {
+        let directory = try workspace(),fixture = FolderProvider(jobID:nil,untagged:true)
+        var prior = JobRecord(id:"compatible-job",request:try request());prior.source = source()
+        prior.source!.sha256 = String(repeating:"b",count:64)
+        fixture.manifest = try Persistence.encoder.encode(prior)
+        await assertRejected(try adapter(fixture),jobID:prior.id,intent:directory.appendingPathComponent("no-intent.json"))
+        XCTAssertEqual(fixture.mutations,0);XCTAssertEqual(fixture.mkdirCount,0)
+    }
+
+    func testLegacyMatchingTagsRequireCompatibleManifestBeforeBindingHash() async throws {
+        let directory = try workspace(), fixture = FolderProvider(jobID:"legacy-job")
+        var prior = JobRecord(id:"legacy-job",request:try request());prior.source = source()
+        fixture.manifest = try Persistence.encoder.encode(prior)
+        let delivery = try adapter(fixture)
+        for _ in 0..<2 {
+            let id = try await delivery.episodeFolder(source:source(),request:request(),jobID:prior.id,
+                existingFolderID:FolderProvider.id,intentURL:directory.appendingPathComponent("no-intent.json"))
+            XCTAssertEqual(id,FolderProvider.id)
+        }
+        XCTAssertEqual(fixture.properties["joeySourceSHA256"],source().sha256)
+        XCTAssertEqual(fixture.mutations,1);XCTAssertEqual(fixture.mkdirCount,0)
+    }
+
+    func testLegacyMatchingTagsRejectConflictingSourceBytesBeforeMutation() async throws {
+        let directory = try workspace(), fixture = FolderProvider(jobID:"legacy-job")
+        var prior = JobRecord(id:"legacy-job",request:try request());prior.source = source()
+        prior.source!.sha256 = String(repeating:"b",count:64)
+        fixture.manifest = try Persistence.encoder.encode(prior)
+        await assertRejected(try adapter(fixture),jobID:prior.id,intent:directory.appendingPathComponent("no-intent.json"))
+        XCTAssertNil(fixture.properties["joeySourceSHA256"])
+        XCTAssertEqual(fixture.mutations,0);XCTAssertEqual(fixture.mkdirCount,0)
     }
 
     func testCreationIntentCannotClaimFolderWithConflictingJobTag() async throws {
@@ -106,7 +158,7 @@ final class EpisodeFolderOwnershipTests: XCTestCase {
         fixture.exists = false;fixture.loseMkdirResponse = true
         let delivery = try adapter(fixture), savedIntent = directory.appendingPathComponent("folder-intent.json")
         for _ in 0..<2 {
-            let id = try await delivery.episodeFolder(source:source(),jobID:"new-job",intentURL:savedIntent)
+            let id = try await delivery.episodeFolder(source:source(),request:request(),jobID:"new-job",existingFolderID:nil,intentURL:savedIntent)
             XCTAssertEqual(id,FolderProvider.id)
         }
         XCTAssertEqual(fixture.mkdirCount,1)
@@ -129,7 +181,7 @@ final class EpisodeFolderOwnershipTests: XCTestCase {
             let original = directory.appendingPathComponent("original.synthetic")
             try Data("Synthetic original identity".utf8).write(to:original)
             var request = try Fixtures.request(dir:directory,path:original.path)
-            request.owner = .taxstone;request.fileToDrive = true
+            request.owner = .taxstone;request.fileToDrive = true;request.sourceID = source().id;request.title = source().title
             let fullID = try request.stableID()
             request.mode = .highlights;request.fixedIntervals = [Interval(0,6)]
             var job = JobRecord(id:try request.stableID(),request:request)
@@ -170,6 +222,7 @@ private final class FolderProvider: @unchecked Sendable {
     var exists = true, hasChildren = false, corruptTagReadback = false
     var loseMkdirResponse = false, claimDuringMkdir = false
     var mutations = 0, mkdirCount = 0
+    var manifest: Data?
     private var createdTime = "2026-01-02T00:00:00Z"
     init(jobID: String?, untagged: Bool = false) {
         properties = untagged ? [:] : ["joeySourceID":"fixture-source","joeyOwner":"taxstone"]
@@ -183,6 +236,10 @@ private final class FolderProvider: @unchecked Sendable {
         case "config":
             let token = String(decoding:try JSONSerialization.data(withJSONObject:["access_token":"dummy-fixture-only"]),as:UTF8.self)
             return ProcessResult(stdout:try JSONSerialization.data(withJSONObject:["fixture":["type":"drive","token":token]]),stderr:"",status:0)
+        case "copyto":
+            guard let manifest,arguments[1] == "fixture:clip_manifest.json" else {throw JoeyError.failed("Unexpected fixture download")}
+            try manifest.write(to:URL(fileURLWithPath:arguments[2]))
+            return ProcessResult(stdout:Data(),stderr:"",status:0)
         case "mkdir":
             mkdirCount += 1;exists = true;createdTime = ISO8601DateFormatter().string(from:Date())
             if claimDuringMkdir {properties = ["joeySourceID":"fixture-source","joeyOwner":"taxstone","joeyJobID":"different-job"]}
@@ -195,10 +252,14 @@ private final class FolderProvider: @unchecked Sendable {
         lock.lock();defer {lock.unlock()}
         let url = try XCTUnwrap(request.url)
         guard url.host == "www.googleapis.com" else {throw JoeyError.failed("Unexpected provider host")}
-        let root: [String:Any] = ["id":DriveDelivery.videoRoot,"mimeType":"application/vnd.google-apps.folder","trashed":false]
+        let chain = [DriveDestination.taxstoneClips.id] + DriveDestination.taxstoneClips.ancestorIDs
+        let root: [String:Any] = ["id":url.lastPathComponent,"name":DriveDestination.taxstoneClips.name,
+            "mimeType":"application/vnd.google-apps.folder","trashed":false,
+            "parents":chain.firstIndex(of:url.lastPathComponent).flatMap {$0+1 < chain.count ? [chain[$0+1]] : nil} ?? [],
+            "permissions":[["type":"user","role":"owner"]]]
         func folder() -> [String:Any] {
             ["id":Self.id,"name":Self.name,"mimeType":"application/vnd.google-apps.folder","trashed":false,
-             "parents":[DriveDelivery.videoRoot],"appProperties":properties,"createdTime":createdTime]
+             "permissions":[["type":"user","role":"owner"]],"parents":[DriveDestination.taxstoneClips.id],"appProperties":properties,"createdTime":createdTime]
         }
         let result: [String:Any]
         if request.httpMethod == "PATCH",url.lastPathComponent == Self.id {
@@ -215,12 +276,19 @@ private final class FolderProvider: @unchecked Sendable {
             }
             if corruptTagReadback {properties["joeyJobID"] = "different-job";properties["joeySourceID"] = "different-source"}
             result = folder()
-        } else if request.httpMethod == "GET",url.lastPathComponent == DriveDelivery.videoRoot {result = root}
+        } else if request.httpMethod == "GET",chain.contains(url.lastPathComponent) {result = root}
         else if request.httpMethod == "GET",url.lastPathComponent == Self.id {result = folder()}
+        else if request.httpMethod == "GET",url.lastPathComponent == "synthetic_manifest_id",let manifest {
+            let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try manifest.write(to:temporary);defer {try? FileManager.default.removeItem(at:temporary)}
+            result = ["id":"synthetic_manifest_id","name":"clip_manifest.json","parents":[Self.id],"trashed":false,
+                "md5Checksum":try Integrity.md5(temporary)]
+        }
         else if request.httpMethod == "GET",url.lastPathComponent == "files" {
             let query = URLComponents(url:url,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{$0.name == "q"})?.value ?? ""
-            if query.contains("'\(DriveDelivery.videoRoot)'") {result = ["files":exists ? [folder()] : []]}
-            else if query.contains("'\(Self.id)'") {result = ["files":hasChildren ? [["id":"existing-record","name":"clip_manifest.json"]] : []]}
+            if query.contains("'\(DriveDestination.taxstoneClips.id)'") {result = ["files":exists ? [folder()] : []]}
+            else if query.contains("'\(Self.id)'") {result = ["files":manifest != nil ? [["id":"synthetic_manifest_id","name":"clip_manifest.json"]] : hasChildren ? [["id":"existing-record","name":"clip_manifest.json"]] : []]}
+            else if query.contains("appProperties has") {result = ["files":[]]}
             else {throw JoeyError.failed("Unexpected folder listing")}
         } else {throw JoeyError.failed("Unexpected provider mutation blocked by fixture")}
         return try JSONSerialization.data(withJSONObject:result)
@@ -248,15 +316,18 @@ private actor FolderRecoveryDelivery: CoordinatorDelivery {
     func metadata(_ id: String) async throws -> [String:Any] {throw JoeyError.failed("Unexpected source read")}
     func downloadOriginal(reference: String, directory: URL) async throws -> URL {throw JoeyError.failed("Saved source must be reused")}
     func archive(source: SourceRecord, request: JobRequest) async throws -> String {"https://example.invalid/synthetic-archive"}
-    func episodeFolder(source: SourceRecord, jobID: String, intentURL: URL) async throws -> String {
-        try await delivery.episodeFolder(source:source,jobID:jobID,intentURL:intentURL)
+    func episodeFolder(source: SourceRecord, request: JobRequest, jobID: String, existingFolderID: String?, intentURL: URL) async throws -> String {
+        try await delivery.episodeFolder(source:source,request:request,jobID:jobID,existingFolderID:existingFolderID,intentURL:intentURL)
     }
     func resolveArtwork(source: SourceRecord, configuration: Configuration, root: URL) async throws -> Artwork {throw JoeyError.failed("Unexpected artwork")}
+    func verifyPackage(job: JobRecord, directory: URL) async throws {
+        guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Synthetic package incomplete")}
+    }
     func reconcileRegister(job: JobRecord, tab: String) async throws -> [String] {[]}
-    func upload(_ local: URL, name: String?, parent: String, replaceCompanion: Bool) async throws -> DriveReceipt {
+    func upload(_ local: URL, name: String?, parent: String, destination: FilingDestination, replaceCompanion: Bool) async throws -> DriveReceipt {
         uploads += 1
         return DriveReceipt(id:"synthetic_"+Integrity.textHash(local.lastPathComponent),name:name ?? local.lastPathComponent,parent:parent,
             bytes:Int64(try Data(contentsOf:local).count),md5:try Integrity.md5(local),sha256:try Integrity.sha256(local),
-            url:"https://example.invalid/fixture",permissions:["user:owner"],verifiedAt:Date())
+            url:"https://example.invalid/fixture",permissions:["user:owner"],verifiedAt:Date(),destination:destination,permissionFingerprint:String(repeating:"a",count:64))
     }
 }

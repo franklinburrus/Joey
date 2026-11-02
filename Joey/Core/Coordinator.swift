@@ -4,10 +4,11 @@ import Foundation
 /// readback. Tests can replace this boundary without reaching live accounts.
 protocol CoordinatorDelivery: TaxstoneReuseProvider, Sendable {
     func archive(source: SourceRecord, request: JobRequest) async throws -> String
-    func episodeFolder(source: SourceRecord, jobID: String, intentURL: URL) async throws -> String
-    func upload(_ local: URL, name: String?, parent: String, replaceCompanion: Bool) async throws -> DriveReceipt
+    func episodeFolder(source: SourceRecord, request: JobRequest, jobID: String, existingFolderID: String?, intentURL: URL) async throws -> String
+    func upload(_ local: URL, name: String?, parent: String, destination: FilingDestination, replaceCompanion: Bool) async throws -> DriveReceipt
     func resolveArtwork(source: SourceRecord, configuration: Configuration, root: URL) async throws -> Artwork
     func reconcileRegister(job: JobRecord, tab: String) async throws -> [String]
+    func verifyPackage(job: JobRecord, directory: URL) async throws
 }
 extension DriveDelivery: CoordinatorDelivery {}
 
@@ -293,14 +294,16 @@ public actor Coordinator {
             }
             job.stage = "Drive folder"; try await save()
             try authorizeNewOperation()
-            job.folderID = try await delivery.episodeFolder(source:source,jobID:job.id,intentURL:dir.appendingPathComponent("folder-intent.json")); try await save()
+            let destination = try DestinationResolver.resolve(source:source,request:request,asset:.clip)
+            job.folderID = try await delivery.episodeFolder(source:source,request:request,jobID:job.id,existingFolderID:job.folderID,intentURL:dir.appendingPathComponent("folder-intent.json")); try await save()
             let folder = job.folderID!
             var filingErrors: [String] = []
             for index in job.clips.indices {
                 do {
                     job.stage = "Drive clip \(job.clips[index].id)"; try await save()
                     try authorizeNewOperation()
-                    let receipt = try await delivery.upload(dir.appendingPathComponent(job.clips[index].filename),name:nil,parent:folder,replaceCompanion:false)
+                    let receipt = try await delivery.upload(dir.appendingPathComponent(job.clips[index].filename),name:nil,parent:folder,destination:destination,replaceCompanion:false)
+                    guard receipt.parent == folder, receipt.destination == destination else {throw JoeyError.failed("Clip receipt has the wrong episode parent or destination")}
                     try Self.acceptDelivery(receipt,for:&job.clips[index])
                     try await save()
                 } catch {
@@ -315,7 +318,7 @@ public actor Coordinator {
             let files = try Records.write(job:job,directory:dir)
             for file in files where !["clip_manifest.json","RECONCILE.md"].contains(file.lastPathComponent) {
                 try authorizeNewOperation()
-                job.companions[file.lastPathComponent] = try await delivery.upload(file,name:nil,parent:folder,replaceCompanion:true); try await save()
+                job.companions[file.lastPathComponent] = try await delivery.upload(file,name:nil,parent:folder,destination:destination,replaceCompanion:true); try await save()
             }
             job.stage = "register reconciliation"; try await save()
             try authorizeNewOperation()
@@ -326,8 +329,11 @@ public actor Coordinator {
             let finalFiles = try Records.write(job:final,directory:dir)
             for file in finalFiles where ["clip_manifest.json","RECONCILE.md"].contains(file.lastPathComponent) {
                 try authorizeNewOperation()
-                job.companions[file.lastPathComponent] = try await delivery.upload(file,name:nil,parent:folder,replaceCompanion:true); try await save()
+                job.companions[file.lastPathComponent] = try await delivery.upload(file,name:nil,parent:folder,destination:destination,replaceCompanion:true); try await save()
             }
+            job.stage = "final Drive package verification"; try await save()
+            guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Required completion evidence is missing or incorrectly routed")}
+            try await delivery.verifyPackage(job:job,directory:dir)
             job.state = .completed; job.stage = "complete"; job.error = nil; try await save()
             return job
         } catch {

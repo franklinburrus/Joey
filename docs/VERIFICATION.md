@@ -1,3 +1,139 @@
+## Routing release verification — 2026-11-02
+
+Current integration branch: `codex/drive-routing`, based on `c10d1215e84d39d065f6b461805477617656da94` (merged PR #3). The earlier routing report below is historical evidence, not the current release state. Evidence directory: `/Users/frank/Library/Caches/Joey-Native-Build/routing-release-20261102`.
+
+Independent review found a legacy-folder source-hash bypass. Matching owner/source/job tags no longer suffice when `joeySourceSHA256` is absent: the adapter verifies the downloaded manifest or bounded empty-folder creation intent, then binds and reads back the hash. A present conflicting hash rejects before mutation. Two regressions reproduced three failed assertions before repair; all 13 folder-ownership tests passed afterward. Independent rereview found no further material defect.
+
+Commands below ran from the existing native checkout through the minimal-environment launcher. Direct exit status was 0 for every final command. Swift/Xcode used `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
+
+```sh
+python3 Tools/run-local.py /usr/bin/swift test --jobs 2 --filter EpisodeFolderOwnershipTests
+python3 Tools/run-local.py /usr/bin/env -u JOEY_REAL_MEDIA_INPUTS -u JOEY_LOCAL_ASSISTANT_SMOKE -u JOEY_MODEL_INDEPENDENT_EVIDENCE /usr/bin/swift test --jobs 2
+python3 Tools/run-local.py python3 -m unittest discover -s Tests -p 'test_*.py'
+python3 Tools/run-local.py /usr/bin/xcodebuild -project Joey.xcodeproj -scheme Joey -configuration Debug -destination platform=macOS -derivedDataPath /Users/frank/Library/Caches/Joey-Native-Build/routing-release-20261102/native-build -jobs 2 CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual build
+python3 Tools/run-local.py /usr/bin/codesign --verify --deep --strict --verbose=2 /Users/frank/Library/Caches/Joey-Native-Build/routing-release-20261102/native-build/Build/Products/Debug/Joey.app
+JOEY_REAL_MEDIA_INPUTS=/Users/frank/Library/Caches/Joey-Native-Build/routing-release-20261102/live-input.json python3 Tools/run-local.py /usr/bin/swift test --jobs 2 --filter LiveDriveRoutingTests
+git diff --check
+```
+
+Full Swift suite: **246 executed, 242 passed, 4 opt-in skips, 0 failures**, 181.729 seconds. Python: **22 passed**. Native Debug build and strict deep ad-hoc signature: **passed**. Existing compiler/duplicate-file warnings remain; no warning-free claim. The skips are the installed-assistant check, two real-media checks, and separately enabled live routing readback. Simulated mutation/recovery tests do not establish production writes.
+
+Separate live read-only test: **1 passed**, 64.934 seconds. All eight roots/ancestors/permissions verified. All **299** historical receipts match; all **15 packages / 239 clips** remain misplaced and are rejected by the production location validator. The test now asserts every receipt match. No duplicate names or equivalent-byte files were found within those packages; no matching tagged/named episode folder was found directly under the intended destination roots. This bounded search does not claim a global byte-duplicate census. Exact IDs remain in the inventory below and fresh `live-readback.json`; no historical media or companion changed.
+
+### Historical migration plan — prepared only, separate authorization required
+
+Use `live-readback.json` as the immutable proposal and process its packages sorted by `sourceID`, then `folderID`. For each package, retain the exact folder/file IDs, current single parent, intended root, complete child manifest, hashes, sizes, names and effective permissions. Do not create a new episode directory or upload duplicate media.
+
+Before any separately authorized migration, independently reread the folder and every child, revalidate destination ancestry and duplicate checks, and compare against this proposal. Stop that package on drift, ambiguous parent, conflicting folder, incomplete companions or any effective-access change. Assess inherited permissions before moving; this plan does not authorize sharing changes. If existing access cannot remain identical, obtain a revised migration decision.
+
+For an approved unchanged package, use one Drive parent update on the existing folder ID: add the verified intended root and remove only the recorded previous parent. Read back exact parents/ancestry, all child IDs/names/bytes/hashes, effective permissions and duplicate absence. The deterministic rollback is the inverse parent update on that same folder ID, conditional on it still having only the expected new parent and unchanged content/access; verify the inverse independently. Never delete, rename, copy or rerender clips. Journal before/after evidence per package outside Git. Reconcile local routing receipts and applicable existing register rows by exact source/clip identity only after provider verification; a parent move alone cannot establish COMPLETED. Companion changes or contract migration need their own explicit scope. No part of this migration was executed.
+
+Integration, installation and new production acceptance are pending at this checkpoint. Current Taxstone account metadata and five official upload-document readbacks are saved outside Git; the immutable shared encoding contract remains unchanged. Existing DUB delivery cannot be reused as a new register-write acceptance without duplicating historical media. Final deployment/production receipts will be recorded in a verified follow-up.
+
+---
+
+## Authoritative Drive routing correction — verified local implementation, 2026-11-02
+
+**Local implementation/build/tests: PASSED. Live Drive roots, existing file receipts and schema reads: VERIFIED. New production delivery and installed-app replacement: NOT PERFORMED.** Evidence directory: `/Users/frank/Library/Caches/Joey-Native-Build/drive-routing-20261102`.
+
+Repository before editing: `/Users/frank/Documents/Joey`, origin `https://github.com/franklinburrus/Joey.git`, branch `main`; local and remote `main` both `d58947ecf2808ab759862f9daf94fdd999797747`. The existing `Joey.xcodeproj` and SwiftUI architecture were reused. Twenty-two unrelated untracked duplicate files were preserved. No commit, push, installation, production restart, media relocation/deletion or provider mutation was performed.
+
+### Implemented contract
+
+`Joey/Core/DestinationResolver.swift` owns all eight IDs and their verified ancestor chains. Routing depends on source identity/hash, owner, inspected format and clip/full-episode classification. The existing `joeBudden` workflow distinguishes historical DUB-owned Joe requests without changing their serialized identities. New originals resolve automatically; verified legacy originals remain in their current archives. Manual destination controls were removed.
+
+`DriveDelivery` requires this resolved destination for uploads, validates exact root/parent/ancestry, reconciles uncertain writes before retry, rejects duplicate filenames and equivalent media under another filename, preserves existing file IDs and sharing fingerprints, and downloads companion bytes for SHA-256 readback. Folder reuse requires matching source/job tags, a verified compatible manifest, or the existing bounded empty-folder creation intent. Moved legacy packages are discovered by saved folder ID and exact source/name searches; incompatible packages are reported without relocation or duplicate creation.
+
+The coordinator checks expected receipt parents/routes and final package readback before COMPLETED. All four canonical companions, unique IDs, source-bound transcript, accepted QA, applicable unique register receipts and exact route evidence are required. Failed filing retains QA_PASSED with the error and accepted media. Legacy receipts without authoritative routing evidence cannot make the Drive stage or Completed badge green. Joe automation, Taxstone verification and Buffer preflight use the same completion/routing contract. DUB Master Link List mapping/readback remains unchanged; Joe and Taxstone do not write DUB-only rows. Historical rows are preserved.
+
+### Commands and direct results
+
+All executable commands used `Tools/run-local.py`; Swift/Xcode commands used `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
+
+```sh
+python3 Tools/run-local.py /usr/bin/env -u JOEY_REAL_MEDIA_INPUTS -u JOEY_LOCAL_ASSISTANT_SMOKE -u JOEY_MODEL_INDEPENDENT_EVIDENCE /usr/bin/swift test --jobs 2
+python3 Tools/run-local.py /usr/bin/xcodebuild -project Joey.xcodeproj -scheme Joey -configuration Debug -destination platform=macOS -derivedDataPath /Users/frank/Library/Caches/Joey-Native-Build/drive-routing-20261102/native-build -jobs 2 CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual build
+python3 Tools/run-local.py /usr/bin/codesign --verify --deep --strict --verbose=2 /Users/frank/Library/Caches/Joey-Native-Build/drive-routing-20261102/native-build/Build/Products/Debug/Joey.app
+```
+
+- Final full Swift suite: direct exit **0**, **239 executed, 235 passed, 4 intentional opt-in skips, 0 failures**, 175.729 seconds. `final-full-tests.log`. Skips are the installed-assistant check, two existing real-media checks, and the new separately enabled live Drive readback.
+- Native Debug build: direct exit **0**, **BUILD SUCCEEDED**, `final-native-build.log`. Existing capture-ownership and AppIntents metadata warnings remain; this is not a warning-free build claim.
+- Strict deep signature verification: direct exit **0**, valid on disk and designated requirement satisfied. Local ad-hoc build only; no installation or public distribution.
+- `git diff --check`: direct exit **0**.
+
+Regression evidence: `red.log` reproduced the obsolete root IDs (1 test, 2 expected failures). `completion-red.log` reproduced the missing transcript-binding and legacy green-Drive checks (1 test, 2 expected failures). Subsequent targeted tests and the final full suite passed. A test-only QA timestamp comparison initially compared pre-serialization subsecond precision with the persisted checkpoint; the test now compares the actual persisted QA without loosening production checks. Provider protocol fixture compile/signature mismatches were repaired during implementation. Earlier logs remain in the evidence directory.
+
+Coverage includes all eight mappings; audio content in an MP4; owner/identity/hash/date validation; wrong root, actual parent and ancestor rejection; same-folder reuse and compatible-manifest adoption; conflicting manifest preservation; lost mkdir/upload responses; duplicate filenames and byte-equivalent media; existing-original reuse without relocation; permission preservation; companion download corruption; missing register receipts; final provider failure; correct completion and QA_PASSED transitions; accepted-file/QA reuse; and existing native/email/queue/media regressions. Provider mutations in these automated tests are simulated boundaries, not production delivery evidence.
+
+### Live read-only verification
+
+```sh
+JOEY_REAL_MEDIA_INPUTS=/Users/frank/Library/Caches/Joey-Native-Build/drive-routing-20261102/live-input.json python3 Tools/run-local.py /usr/bin/swift test --jobs 2 --filter LiveDriveRoutingTests
+python3 Tools/run-local.py .build/debug/joey-run check-drive --root /Users/frank/Library/Caches/Joey-Native-Build/drive-routing-20261102/preflight
+```
+
+Both commands returned direct exit **0**. The separate live test executed **1 test, 1 passed, 0 failures**, 64.552 seconds. It uses the real existing rclone OAuth and real provider metadata through the production adapter; its helper permits only read/list/authentication operations. Initial connector metadata independently confirmed the hierarchy. `live-readback.json` records all eight exact roots, names, ancestor chains, permission fingerprints and `canAddChildren=true` for each. Existing anyone-with-link reader access was observed; sharing was not changed.
+
+The runner used an isolated copy of existing settings. `provider-preflight.log` confirms all eight roots and the current **20-column** DUB Master Link List schema. Read access/schema validation is not a new register write or write-permission proof. No CSV was substituted for an applied register update.
+
+Existing real packages: **15 episode folders, 239 clips, 60 companions**. All **299** provider file receipts still match saved IDs, filenames, immediate parents, sizes and MD5 checksums. All **15 episode folders** are outside the newly required direct clip-root locations, and the production placement validator rejected every one. This verifies actual wrong-location rejection and existing remote integrity; it does not establish corrected production delivery.
+
+| Source ID | Clips | Existing episode folder | Actual parent | Expected root |
+| --- | ---: | --- | --- | --- |
+| `youtube:KfNBD15tkPA` | 17 | `1DBHs-sQ8jpyALLiisOw1HUi09_aFoBDb` | `1N7HyLq-Fq8a2RIaXMe7Xs17Y8UqYuCcJ` | `1X5VNP6fo3VpZPu4ZW4p7Ggk2o_IAVGSI` |
+| `x:broadcast:1oKMvNPnEzDGQ` | 35 | `1_NJU2jWQEz3uSAvDYGXXJM9tfIr9s5iD` | `1N7HyLq-Fq8a2RIaXMe7Xs17Y8UqYuCcJ` | `1380CHJ3a3kl7fXNIKWqUM7_DeTZUwxsy` |
+| `soundcloud:802783417` | 2 | `1t6VEL_G2ozPSTaNANXldU6gy7de6Cmqr` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` |
+| `soundcloud:1169874577` | 19 | `1M-CakIReL8oZmihXq0escl_EtMVdDOAf` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` |
+| `soundcloud:2126698314` | 11 | `1fjWePls7ieTTTKpqFnGrYSRnmIM6OE-4` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` |
+| `soundcloud:210734469` | 21 | `1-lNT9IKT0Jwc3TStt-7rAd91xGkXqdSk` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` |
+| `soundcloud:274535613` | 22 | `1m2kcq1GyRf4yRg3vBFqjWbewRlwkzRzs` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` |
+| `soundcloud:2215319513` | 11 | `13STZ5d14uH-riK1bp9XvTvkgWCwZlZFN` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` |
+| `soundcloud:2331720617` | 6 | `1bkZtSggMnaqrigvULctZ3pSnndH8YO9F` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` |
+| `soundcloud:230455821` | 22 | `1bDnduFUj79RSkTrumUQV8yluLMNNeZ1E` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` |
+| `soundcloud:1112603617` | 22 | `19bc8NiQAKFrEtAqK8ETiZRmgKJNvSg1R` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` |
+| `soundcloud:245240397` | 21 | `1KvUL1C6fscdsnVHgBDiU1gA8Xzc-WrRs` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` |
+| `soundcloud:1288986418` | 2 | `1S7CkmADbbJooOZE6R2vRBq_2Y4XXF5cG` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` |
+| `soundcloud:218912703` | 17 | `11FyrmbdvN_h5TLXCvfnT8DNFdcYnFRmu` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` |
+| `soundcloud:1993424227` | 11 | `14gXkMAK9o5DY04VXixIlY8081aAL-DMY` | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | `1kxv3bbnPPRt914npHFUI51jrbCY0atyU` |
+
+The Joe Episode 977 and DUB broadcast packages share historical parent `1N7HyLq-Fq8a2RIaXMe7Xs17Y8UqYuCcJ`. Thirteen Taxstone packages sit under `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` (Taxstone X Clips), adding a retired platform-specific level. The two former Joey clip folders are currently empty. Existing media and companions were not moved, deleted, duplicated, rerendered or rewritten.
+
+### Remaining operational scope
+
+The tested application is at `/Users/frank/Library/Caches/Joey-Native-Build/drive-routing-20261102/native-build/Build/Products/Debug/Joey.app`; the installed app remains unchanged. Deployment must use the existing protected installation/rollback procedure under current installation authority. The 15 legacy packages require a separately authorized reconciliation/relocation decision because this task explicitly forbids automatic moves or deletion. Their accepted bytes and old receipts remain preserved; the new code refuses to present those receipts as current routing completion.
+
+A new eligible production package through the corrected adapter, including actual uploads, companion downloads and applicable DUB register writes/readback, has not been run. Existing accepted packages were used read-only because copying or moving them would violate this correction's preservation scope. Do not claim live upload/retry acceptance, installed-app behavior, social ingestion or publication from these tests. No current credential outage was observed: all roots and schema reads succeeded. No new dependency, paid API or infrastructure was introduced.
+
+### Changed files
+
+- `Joey/Core/BufferPreflight.swift`
+- `Joey/Core/Coordinator.swift`
+- `Joey/Core/Delivery.swift`
+- `Joey/Core/DestinationResolver.swift`
+- `Joey/Core/Domain.swift`
+- `Joey/Core/JobPresentation.swift`
+- `Joey/Core/ProductionIntake.swift`
+- `Joey/Core/Records.swift`
+- `Joey/Core/TaxstoneLibrary.swift`
+- `Joey/EmailSettingsView.swift`
+- `Joey/JobModel.swift`
+- `Joey/NewJobView.swift`
+- `Tests/JoeyCoreTests/BufferPreflightTests.swift`
+- `Tests/JoeyCoreTests/DeliveryTests.swift`
+- `Tests/JoeyCoreTests/DestinationRoutingTests.swift`
+- `Tests/JoeyCoreTests/DriveFilingTests.swift`
+- `Tests/JoeyCoreTests/EpisodeFolderOwnershipTests.swift`
+- `Tests/JoeyCoreTests/LiveDriveRoutingTests.swift`
+- `Tests/JoeyCoreTests/PresentationTests.swift`
+- `Tests/JoeyCoreTests/RecoveryRegressionTests.swift`
+- `docs/IMPLEMENTATION_PLAN.md`
+- `docs/OPERATING_GUIDE.md`
+- `docs/REQUIREMENTS.md`
+- `docs/STATUS.md`
+- `docs/VERIFICATION.md`
+
+---
+
 ## Clip Intelligence and GPT Buffer Handoff — verified 2026-10-31
 
 Installed current-source native build and signature passed. Final sanitized `swift test` returned direct exit 0: 118 XCTest cases, 115 passed, 3 intentional skips, 0 failures/errors. Real accepted Taxstone clip 17 from The Lost Episode passed local decode/hash, exact Drive readback and 131,072 anonymous range-byte comparisons. Core and installed-native exports reused batch `F4288378-65EE-4735-97D1-0418062AE0EE` without provider writes. Native receipt import rejected an unknown fixture batch without changing the ledger. Isolated tests cover legitimate/partial/uncertain receipts, duplicates, renewal, exact mode/identity and restart recovery. Installation/post-launch preservation covered all 118 accepted MP4 identities, original/transcript hashes and unchanged settings. Taxstone resumed; Joe remained enabled at baseline 976 and 30-minute checks. Exact commands, evidence locations and remaining external execution/ingestion boundaries are in the latest STATUS.md and BUFFER_HANDOFF.md. This is handoff implementation acceptance, not live Buffer ingestion or publication.

@@ -36,6 +36,10 @@ public enum Records {
             return "\""+safe.replacingOccurrences(of:"\"",with:"\"\"")+"\""
         }.joined(separator:",")}.joined(separator:"\r\n")+"\r\n"
     }
+    public static func companionNames(source: SourceRecord) -> [String] {
+        let base = Persistence.safeName(source.title)+" — "+Persistence.safeName(source.id)
+        return ["Clip Index — "+base+".csv",base+" — Full Transcript.txt","clip_manifest.json","RECONCILE.md"]
+    }
     public static func write(job: JobRecord, directory: URL) throws -> [URL] {
         guard let source = job.source else { throw JoeyError.failed("Source missing from local package") }
         let base = Persistence.safeName(source.title)+" — "+Persistence.safeName(source.id)
@@ -59,7 +63,7 @@ public enum Records {
         # Joey reconciliation
 
         Source: \(source.title) — \(source.id)
-        Owner: \(source.owner.rawValue)
+        Owner: \((try? DestinationResolver.resolve(source:source,request:job.request,asset:.clip).owner.rawValue) ?? source.owner.rawValue)
         State: \(job.state.rawValue)
         Stage: \(job.stage)
         Planned clips: \(job.clips.count)

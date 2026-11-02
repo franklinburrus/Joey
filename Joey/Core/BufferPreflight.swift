@@ -72,7 +72,8 @@ public enum BufferPreflight {
         async let file = drive.metadata(receipt.id)
         async let folder = drive.metadata(job.folderID!)
         let metadata = try await file, folderMetadata = try await folder
-        try validateDrive(file:metadata,folder:folderMetadata,source:source,clip:clip,folderID:job.folderID!,md5:try Integrity.md5(output))
+        try validateDrive(file:metadata,folder:folderMetadata,source:source,request:job.request,clip:clip,folderID:job.folderID!,md5:try Integrity.md5(output))
+        _ = try await drive.verifyLocation(parent:job.folderID!,destination:DestinationResolver.resolve(source:source,request:job.request,asset:.clip))
         let matches = try await drive.children(job.folderID!).filter { $0["name"] as? String == clip.filename }
         guard matches.count == 1, matches[0]["id"] as? String == receipt.id else {
             throw JoeyError.dependency("Buffer preflight: duplicate or missing Drive output requires reconciliation")
@@ -120,7 +121,7 @@ public enum BufferPreflight {
     }
 
     static func validateJob(_ job: JobRecord, clip: ClipRecord) throws -> SourceRecord {
-        guard job.state == .completed, let source = job.source, let transcript = job.transcript,
+        guard job.state == .completed, job.hasRequiredCompletionEvidence, let source = job.source, let transcript = job.transcript,
               job.unavailableTranscriptFeatures.isEmpty,
               source.id == job.request.sourceID, source.owner == job.request.owner,
               !source.authorizationBasis.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
@@ -211,7 +212,8 @@ public enum BufferPreflight {
         return (probe,checks)
     }
 
-    static func validateDrive(file: [String:Any], folder: [String:Any], source: SourceRecord, clip: ClipRecord, folderID: String, md5: String) throws {
+    static func validateDrive(file: [String:Any], folder: [String:Any], source: SourceRecord, request: JobRequest, clip: ClipRecord, folderID: String, md5: String) throws {
+        let destination = try DestinationResolver.resolve(source:source,request:request,asset:.clip)
         guard let receipt = clip.drive, file["id"] as? String == receipt.id, file["name"] as? String == clip.filename,
               file["mimeType"] as? String == "video/mp4", file["trashed"] as? Bool == false,
               file["parents"] as? [String] == [folderID], Int64(file["size"] as? String ?? "") == clip.bytes,
@@ -219,7 +221,7 @@ public enum BufferPreflight {
               (file["sha256Checksum"] as? String).map({$0 == clip.sha256}) ?? true,
               folder["id"] as? String == folderID, folder["trashed"] as? Bool == false,
               folder["mimeType"] as? String == "application/vnd.google-apps.folder",
-              folder["parents"] as? [String] == [source.kind == .audio ? DriveDelivery.audioRoot : DriveDelivery.videoRoot],
+              folder["parents"] as? [String] == [destination.rootID],
               let properties = folder["appProperties"] as? [String:String], properties["joeySourceID"] == source.id,
               properties["joeyOwner"] == source.owner.rawValue,
               let permissions = file["permissions"] as? [[String:Any]], !permissions.isEmpty else {

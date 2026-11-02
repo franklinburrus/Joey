@@ -100,7 +100,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             do {
                 let episodes = try await SourceDiscovery.recentJoeEpisodes()
                 latestJoe = episodes.first
-                let completed = Set(jobs.filter {$0.state == .completed && $0.request.productionWorkflow == .joeBudden}.map {$0.request.sourceID})
+                let completed = Set(jobs.filter {$0.state == .completed && $0.hasRequiredCompletionEvidence && $0.request.productionWorkflow == .joeBudden}.map {$0.request.sourceID})
                 joeAutomation.reconcile(episodes,completed:completed)
                 joeStatus = episodes.isEmpty ? "No completed numbered episode found among the 30 recent uploads." : "Latest numbered episode from Joe Budden TV. Recent-upload check completed."
                 if automationStateReadable {try saveJoe()}
@@ -176,7 +176,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             }
             do {
                 let prior = jobs.first {$0.request.sourceID == episode.id && $0.request.productionWorkflow == .joeBudden}
-                if prior?.state != .completed {
+                if prior?.state != .completed || prior?.hasRequiredCompletionEvidence != true {
                     let request: JobRequest
                     if let prior {request = prior.request}
                     else {
@@ -191,7 +191,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
                     start(request,automatic:true)
                     if let processing = task {await waitForProcessing(processing)}
                 }
-                if let done = jobs.first(where:{$0.request.sourceID == episode.id && $0.request.productionWorkflow == .joeBudden}), done.state == .completed {
+                if let done = jobs.first(where:{$0.request.sourceID == episode.id && $0.request.productionWorkflow == .joeBudden}), done.state == .completed && done.hasRequiredCompletionEvidence {
                     joeAutomation.queue.removeAll {$0.id == episode.id}
                 } else {
                     joeAutomation.lastError = jobs.first(where:{$0.request.sourceID == episode.id && $0.request.productionWorkflow == .joeBudden})?.error ?? "Episode remains incomplete; saved for retry."

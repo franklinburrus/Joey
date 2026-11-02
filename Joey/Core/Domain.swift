@@ -312,6 +312,8 @@ public struct DriveReceipt: Codable, Equatable, Sendable {
     public var url: String
     public var permissions: [String]
     public var verifiedAt: Date
+    public var destination: FilingDestination?
+    public var permissionFingerprint: String?
 }
 public struct JobRecord: Codable, Identifiable, Sendable {
     public var id: String
@@ -341,11 +343,12 @@ public struct JobRecord: Codable, Identifiable, Sendable {
     /// Saved delivery evidence must identify the accepted bytes in this job's
     /// episode folder. This does not perform a fresh provider readback.
     public var verifiedDriveClipCount: Int {
-        guard let folderID, !folderID.isEmpty else {return 0}
+        guard let folderID, !folderID.isEmpty,let source,
+              let destination = try? DestinationResolver.resolve(source:source,request:request,asset:.clip) else {return 0}
         return clips.filter {clip in
             guard let receipt = clip.drive, !receipt.id.isEmpty,
                   let hash = clip.sha256, !hash.isEmpty, let bytes = clip.bytes, bytes > 0 else {return false}
-            return receipt.parent == folderID && receipt.name == clip.filename &&
+            return receipt.parent == folderID && receipt.destination == destination && receipt.name == clip.filename &&
                 receipt.sha256 == hash && receipt.bytes == bytes &&
                 clip.qa?.passed == true && clip.qa?.outputSHA256 == hash
         }.count
@@ -353,9 +356,21 @@ public struct JobRecord: Codable, Identifiable, Sendable {
     /// Shared completion evidence for recovery and presentation. The coordinator
     /// also checks current local bytes before reopening a completed checkpoint.
     public var hasRequiredCompletionEvidence: Bool {
-        !clips.isEmpty && unavailableTranscriptFeatures.isEmpty &&
-        verifiedDriveClipCount == clips.count && companions["clip_manifest.json"] != nil &&
-        (request.owner != .dub || registerRows.count == clips.count)
+        guard !clips.isEmpty, unavailableTranscriptFeatures.isEmpty,
+              verifiedDriveClipCount == clips.count,let source,let folderID,
+              let destination = try? DestinationResolver.resolve(source:source,request:request,asset:.clip),
+              Set(clips.compactMap { $0.drive?.id }).count == clips.count,
+              !DestinationResolver.requiresDUBRegister(request) ||
+                (registerRows.count == clips.count && Set(registerRows).count == clips.count),
+              Set(companions.keys) == Set(Records.companionNames(source:source)),
+              let transcript,
+              (try? transcript.validate(sourceID:source.id,sha256:source.sha256,duration:source.duration)) != nil else {return false}
+        let receipts = clips.compactMap(\.drive) + Array(companions.values)
+        return Set(receipts.map(\.id)).count == receipts.count && receipts.allSatisfy {
+            !$0.id.isEmpty && $0.parent == folderID && $0.destination == destination &&
+            $0.bytes > 0 && $0.sha256.count == 64 && $0.md5?.count == 32 &&
+            !$0.permissions.isEmpty && $0.permissionFingerprint?.count == 64
+        } && companions.allSatisfy {$0.key == $0.value.name}
     }
     public var resumesAutomatically: Bool {
         state == .processing || state == .planned || state == .filed ||

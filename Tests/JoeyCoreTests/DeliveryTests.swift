@@ -2,6 +2,11 @@ import XCTest
 @testable import JoeyCore
 
 final class DeliveryTests: XCTestCase {
+    func testAuthoritativeDUBRootsReplaceRetiredJoeyFolders() {
+        XCTAssertEqual(DriveDelivery.videoRoot, "1380CHJ3a3kl7fXNIKWqUM7_DeTZUwxsy")
+        XCTAssertEqual(DriveDelivery.audioRoot, "1FRi-yy2D9yenjQRailTA2iAbPaqAEPXm")
+    }
+
     func testCancelledTaskCannotDispatchProviderMutation() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [TransientProvider.self]
