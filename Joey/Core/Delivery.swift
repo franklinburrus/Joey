@@ -1,6 +1,12 @@
 import Foundation
 
 public actor DriveDelivery {
+    private struct ProviderHTTPError: LocalizedError {
+        let status: Int
+        let message: String
+        var transient: Bool {[429,500,502,503,504].contains(status)}
+        var errorDescription: String? {message}
+    }
     public static let videoRoot = DriveDestination.dubVideoClips.id
     public static let audioRoot = DriveDestination.dubAudioClips.id
     public static let masterSheet = "17uhDO06vmVEz96YrUnA6aHyV5fL_3AAs3ylOjrYRLwI"
@@ -58,7 +64,7 @@ public actor DriveDelivery {
             guard (200..<300).contains(http.statusCode) else {
                 let obj = try? JSONSerialization.jsonObject(with:data) as? [String:Any]
                 let error = obj?["error"] as? [String:Any]
-                throw JoeyError.dependency("\(sheets ? "Sheets":"Drive") HTTP \(http.statusCode): \(error?["message"] as? String ?? "provider rejected request")")
+                throw ProviderHTTPError(status:http.statusCode,message:"\(sheets ? "Sheets":"Drive") HTTP \(http.statusCode): \(error?["message"] as? String ?? "provider rejected request")")
             }
             return (try JSONSerialization.jsonObject(with:data) as? [String:Any]) ?? [:]
         }
@@ -84,7 +90,7 @@ public actor DriveDelivery {
             let result = try await self.session.data(for:request)
             if let http = result.1 as? HTTPURLResponse,
                [429,500,502,503,504].contains(http.statusCode) {
-                throw JoeyError.dependency("Provider HTTP \(http.statusCode): transient request failure")
+                throw ProviderHTTPError(status:http.statusCode,message:"Provider HTTP \(http.statusCode): transient request failure")
             }
             return result
         }
@@ -452,24 +458,41 @@ public actor DriveDelivery {
         }
         throw JoeyError.dependency("Matching Taxstone artwork unresolved for \(source.id) after checking configured assets and established archive/operational folders")
     }
+    private func registerRows(_ endpoint: String, matching headers: [String]? = nil) async throws -> [[Any]] {
+        let object = try await request(endpoint,sheets:true)
+        guard let rows = object["values"] as? [[Any]], let currentHeaders = rows.first as? [String] else {
+            throw JoeyError.dependency("Master Link List current schema unavailable")
+        }
+        try Records.validateHeaders(currentHeaders)
+        if let headers, currentHeaders != headers {
+            throw JoeyError.dependency("Master Link List schema changed during reconciliation; retry requires a fresh schema read")
+        }
+        return rows
+    }
+    private func transientAppendFailure(_ error: Error) -> Bool {
+        if let http = error as? ProviderHTTPError {return http.transient}
+        guard let transport = error as? URLError else {return false}
+        return [.timedOut,.networkConnectionLost,.cannotConnectToHost,.cannotFindHost,
+                .dnsLookupFailed,.notConnectedToInternet].contains(transport.code)
+    }
     public func reconcileRegister(job: JobRecord, tab: String) async throws -> [String] {
         guard DestinationResolver.requiresDUBRegister(job.request) else { return [] }
         let range = "'"+tab.replacingOccurrences(of:"'",with:"''")+"'!A1:AZ"
         let escaped = range.addingPercentEncoding(withAllowedCharacters:.urlPathAllowed)!
         let endpoint = "spreadsheets/"+Self.masterSheet+"/values/"+escaped
-        let object = try await request(endpoint,sheets:true)
-        guard let all = object["values"] as? [[Any]], let first = all.first else { throw JoeyError.dependency("Master Link List current schema unavailable") }
-        let headers = first.map {String(describing:$0)}
-        try Records.validateHeaders(headers)
+        let all = try await registerRows(endpoint)
+        let headers = all[0].map {String(describing:$0)}
         var receipts: [String] = []
         for clip in job.clips {
             guard let drive = clip.drive else { throw JoeyError.failed("Cannot register unverified clip") }
             let values = try Records.registerValues(job:job,clip:clip,headers:headers)
             // Always fresh-read before a possible append, including retry after
             // a network error. Identity is the verified Drive file ID.
-            for attempt in 0..<3 {
-                let current = try await request(endpoint,sheets:true)
-                let rows = current["values"] as? [[Any]] ?? []
+            var appendAttempts = 0
+            var appendFailure: Error?
+            while true {
+                try Task.checkCancellation()
+                let rows = try await registerRows(endpoint,matching:headers)
                 let idColumn = headers.firstIndex(of:"Drive file ID")!
                 let matches = rows.enumerated().filter {$0.offset > 0 && $0.element.count > idColumn && String(describing:$0.element[idColumn]) == drive.id}
                 guard matches.count <= 1 else { throw JoeyError.dependency("Duplicate Master Link List rows for \(drive.id)") }
@@ -482,15 +505,30 @@ public actor DriveDelivery {
                         let path = "spreadsheets/"+Self.masterSheet+"/values/"+cell.addingPercentEncoding(withAllowedCharacters:.urlPathAllowed)!
                         _ = try await request(path,method:"PUT",query:["valueInputOption":"RAW"],body:["values":[[value]]],sheets:true)
                     }
-                    let fresh = try await request(endpoint,sheets:true)["values"] as? [[Any]] ?? []
+                    let fresh = try await registerRows(endpoint,matching:headers)
                     let found = fresh.enumerated().filter {$0.offset > 0 && $0.element.count > idColumn && String(describing:$0.element[idColumn]) == drive.id}
                     guard found.count == 1, values.allSatisfy({$0.key < found[0].element.count && String(describing:found[0].element[$0.key]) == $0.value}) else { throw JoeyError.failed("Master Link List required cell readback failed") }
                     receipts.append("\(tab)!\(found[0].offset+1):\(drive.id)"); break
                 }
+                // Even the final uncertain append gets read back above. Only
+                // an absent identity plus a transient failure permits replay.
+                if appendAttempts > 0 && appendFailure == nil {
+                    throw JoeyError.failed("Master Link List successful append missing from readback; no additional append attempted")
+                }
+                if let appendFailure, !transientAppendFailure(appendFailure) {throw appendFailure}
+                guard appendAttempts < 3 else {
+                    throw appendFailure ?? JoeyError.failed("Register append/readback incomplete; retry will reconcile by file ID")
+                }
                 var row = Array(repeating:"",count:headers.count)
                 for (column,value) in values { row[column] = value }
-                do { _ = try await request(endpoint+":append",method:"POST",query:["valueInputOption":"RAW","insertDataOption":"INSERT_ROWS"],body:["values":[row]],sheets:true) }
-                catch { if attempt == 2 { throw error } }
+                appendAttempts += 1
+                do {
+                    _ = try await request(endpoint+":append",method:"POST",query:["valueInputOption":"RAW","insertDataOption":"INSERT_ROWS"],body:["values":[row]],sheets:true)
+                    appendFailure = nil
+                } catch is CancellationError {throw CancellationError()}
+                catch let error as URLError where error.code == .cancelled {throw CancellationError()}
+                catch let error as ProviderHTTPError where !error.transient {throw error}
+                catch {appendFailure = error}
                 // Successful append still loops through exact readback.
             }
         }
