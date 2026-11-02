@@ -1,3 +1,90 @@
+## Historical DUB companion reconciliation — final routing-project closeout (2026-11-02)
+
+Scope: Frank authorized in-place correction of existing historical DUB companions and consistent local receipts. This resolves the prior outstanding record-upload authority. No media, production, migration, register mutation, sharing change, application change or requirements change was authorized or performed. Baseline main/origin/main is `b30f3ddfc8038738a71b601354a62f4c8427ee43`; branch `codex/historical-dub-records`. Origin and Xcode project were verified. AGENTS, Ultracave, current requirements, roadmap, STATUS and prior VERIFICATION were reviewed. The existing 22 unrelated untracked files were preserved.
+
+Working evidence: `/Users/frank/Library/Caches/Joey-Native-Build/record-closeout-20261102/`. Durable recoverable records: `/Users/frank/Library/Application Support/Joey Native/record-reconciliation/dub-bc24818564d22380585be027-20261102/`. Neither directory is in Git.
+
+### Bounded correction and before/after identities
+
+Fresh preflight matched all 16 packages/262 clips/64 companions to the preceding final provider state, including media hashes, file IDs/parents/names and access. Only one historical DUB package required content edits: job `dub-bc24818564d22380585be027`, source `x:broadcast:1oKMvNPnEzDGQ`, original SHA-256 `2dc4e7c4e639ef56f9c28bb43e761c1a757d04c83e0dc66e03b38d50433a51fe`. Episode folder `1_NJU2jWQEz3uSAvDYGXXJM9tfIr9s5iD` remains directly inside X Video Clips `1380CHJ3a3kl7fXNIKWqUM7_DeTZUwxsy`. Its verified existing source archive remains intact; its local source path is historical and was not reacquired.
+
+All four DUB companions were retrieved, hashed and backed up alongside exact local records, provider ETags, versions, head-revision IDs and revision metadata. The correction plan is `correction-plan.json`. Each of the following original IDs is also its final ID:
+
+| Record | Unchanged Drive ID | Original SHA-256 | Final SHA-256 |
+| --- | --- | --- | --- |
+| Canonical Clip Index | `1dGk5Z8oh9Eeu1kMyAmmWzKcmmqQ9LprB` | `4abf6f83ae02b80f8db55f5458370cf233804eedcdbf504427374de3485ce54a` | `342db05efe47088e47a6c73248d50f6e86fcb05852fcadf2892dbfefdc2265b6` |
+| clip_manifest.json | `16gkG0VVotxLf1GUU2T6zW4xhM8oWdXoG` | `232ff7d0ec01fc9edf1f6322a967d4981374961f72a45cd3a7584c412f7089c4` | `6af78340d3c67f28189fb26ba89a20075dfe33105a955ad32e290d30a25ed92b` |
+| RECONCILE.md | `1BE6y8qowsgISTaPRqpzN3QUW3kDYHuTo` | `1f311240823b99257d597098b5b98c7abad8ab35e7857444ff5e7c64a9f389d7` | `1761e9a5ab045c017f5bd84275c237e2d00ecef4e33e75cd5416ef293e9b31bf` |
+
+Index edits are exactly six measured-duration tokens: clip 7 `129.766667` to `129.740000`; 9 `133.766667` to `133.740000`; 24 `116.700000` to `116.680000`; 25 `122.366667` to `122.340000`; 32 `133.866667` to `133.840000`; 35 `110.952000` to `110.966016`. Every other CSV byte remains unchanged.
+
+The remote manifest held stale bytes, SHA-256, QA and Drive fields for all 35 clips, plus those six stale measured durations. Their replacements come from the pre-existing accepted local checkpoint, independently matched to current local and provider hashes. QA checkedAt values and original check findings were retained; no new QA was invented. New destination/access receipts reflect actual current metadata. Only affected clip fields, index/transcript receipts and a clearly named historical-record reconciliation object changed. Original source/request/transcript, exclusions, order/titles/intervals, intervalMappings and coverage/encoding tolerances remain equal to the backed-up manifest. The complete transcript (`1P4Cy3Zu8_WBzqJiTueCtUZpr7HXYy85f`) remains unchanged at SHA-256 `ea251ddf21a38e5d848697572a0c2aaef566b8b7b94949473dd7f1922fb2e64a`.
+
+RECONCILE preserves its valid historical counts, source, coverage and editorial limitations. It corrects the obsolete shared-portrait/padding description to the accepted 1920×1080 source-only landscape correction, identifies the actual creator/root/episode location, records index/manifest hashes and register results, and explicitly excludes new production or platform-ingestion acceptance. No media bytes changed to satisfy the current export profile. The uploaded manifest retains FILED finalization semantics; its own and RECONCILE receipts remain omitted, as in Records.write. RECONCILE references the index/manifest hashes, while the local durable checkpoint stores all four final receipts. This avoids circular hashes.
+
+### Conditional updates, readback and preservation
+
+The connected Drive content-update tool does not expose an If-Match precondition. The existing rclone OAuth connection was therefore reused in memory with Drive's supported v2 content-update endpoint. No new credentials or dependency was introduced. Discovery confirmed PUT content-update semantics; a GET with an intentionally mismatched ETag returned HTTP 412 before any mutation. Each update rechecked its backed-up resource ETag/version/revision and metadata immediately before sending the exact replacement bytes to `/upload/drive/v2/files/{existingID}?uploadType=media&newRevision=true`, with If-Match and the existing MIME type. Metadata/parents/names/sharing were not submitted for change.
+
+All three PUTs returned HTTP 200. Each had one attempt and zero automatic retries. An intent record preceded each write. Each response was followed by a separate v3 media GET, full byte/hash/size comparison and metadata/permission checks. Existing IDs, parents, names, MIME types, links, properties, creation dates and permission objects stayed unchanged. Original/final head-revision IDs are in the per-record `*-readback.json` and `before/companions.json` files; the 16-file durable backup was independently hashed after copying.
+
+A separate final process retrieved all four DUB companions again and inventoried all 16 packages. It initially rejected a strict metadata-object comparison because provider version counters advanced after the successful writes (7 to 8/10), while head revision, bytes, checksums, modifiedTime and all other captured fields were unchanged. `readback-metadata-differences.json` isolates that sole difference. No write was repeated. The comparison was corrected to permit only a monotonically increasing version counter while continuing to require equality of every content/revision/identity/access field. Independent readback then passed.
+
+Final provider result: 16 packages, 262 clips, 64 companions; three records corrected and 61 unchanged. Zero missing expected IDs, duplicate expected IDs, duplicate canonical names or duplicate clip SHA-256/size identities. Exact DUB coverage remains 0–4729.152333 seconds, with zero exclusions, omissions or duplicated intervals. Every CSV row agrees with the manifest's clip identity, title, exact intervals, measured duration, filename, source ID, link and saved QA. Every manifest clip matches current provider identity/bytes and accepted local SHA-256. All companion permissions and parents remain unchanged. Evidence: `final-readback.json`, `after/independent-*`, `repair-result.json` and per-record receipts.
+
+Master Link List independently read before and after: current schema and all populated A:Y values/formulas are identical, with 4,467 data rows. All 35 DUB rows at Master Library 4417–4451 remain unique and match actual Drive IDs, links, filenames, durations and source/episode references. No register correction was needed or attempted. Unrelated rows, formulas and schema are unchanged. Taxstone and Joe records were not written.
+
+### Persisted state, installed application and executed verification
+
+After final provider readback, the already-idle native app was stopped under its existing lock/queue safeguards. `sync_local.py` acquired processing, worker, Taxstone-store and email-store locks; verified every affected local file against its exact backup; atomically replaced the three canonical records; and saved the matching 35 clip/four companion receipts in the existing DUB checkpoint. It preserved the historical COMPLETED state, source, request, QA, transcript, intervals, exclusions and job identity, updating only receipts and updatedAt. The app was relaunched through the minimal-environment launcher. No Process/Resume action was selected.
+
+All build/test/diagnostic tools were invoked through `python3 Tools/run-local.py`; Swift used `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. The scripts below live only in the evidence directory.
+
+| Command / log | Actual result |
+| --- | --- |
+| `/usr/bin/python3 .../preflight.py` (`preflight.log`) | Exit 0; live package/register preflight, exact backups and bounded correction plan. |
+| `/usr/bin/python3 .../repair_records.py` (`repair-records.log`) | Exit 0; three guarded in-place PUTs, HTTP 200 each, zero retries, independent byte readback passed. |
+| `/usr/bin/python3 .../final_readback.py` (`final-readback.log`) | Initial exit 1: provider version-counter-only divergence, no media/content discrepancy and no new write. |
+| Same final readback with the isolated counter reconciliation (`final-readback-reconciled.log`) | Exit 0; all record/media/register/access/coverage checks passed. |
+| `swift test --skip-build --filter 'DestinationRoutingTests\|RecoveryRegressionTests\|Record'` (`deterministic-tests.log`) | 26 tests passed, zero failed/skipped; exit 0; 5.199 seconds. |
+| `swift test --skip-build --filter LiveDriveRoutingTests`, with explicit `JOEY_REAL_MEDIA_INPUTS=.../live-routing-input.json` (`live-routing-final.log`) | One live read-only test passed, zero failed/skipped; exit 0; 70.291 seconds. Seven roots, 16 packages, 262 clips, no location rejection or duplicate match. |
+| Existing idle-stop script, then `/usr/bin/python3 .../sync_local.py` | Exit 0 each; three local records and one existing checkpoint synchronized under locks. |
+| `swiftc -I .build/out/Products/Debug -L .build/out/Products/Debug -lJoeyCore .../read_records.swift -o .../read-records` | Initial diagnostic-only compile failed on internal-symbol visibility and throwing precondition autoclosures. Corrected the diagnostic to use the test-enabled module and explicit hash values; exit 0. No application code changed. |
+| `.../read-records` (`read-records.json`) | Exit 0; actual DUB/Taxstone saved records decode, satisfy completion/display predicates and match 35/23 clip hashes plus four companion hashes each. Seven active destinations; Joe archive excluded; no provider writes/processing. |
+| `/usr/bin/python3 .../preservation.py` (`preservation.log`) | Exit 0; 278 accepted local outputs match checkpoint/QA hashes, 20 unchanged job identities, 22 unchanged unrelated files, installed bundle/signature unchanged, automations paused. |
+| `git diff --check` and complete scoped diff review | Exit 0; documentation-only scope, no prohibited artifacts or requirements changes. |
+
+The read-only diagnostic links the already-built JoeyCore; it is not a Joey application rebuild or reinstall. Native observation subsequently confirmed DUB Completed/35 verified clips/records verified and the preserved Taxstone Completed/23 verified clips after opening both jobs. The initial computer-tool locked-Mac report was a false positive and was superseded by successful native observation after Frank's correction; it is not a remaining dependency. Evidence: `native-reopen.json`.
+
+The installed ten-file bundle remains identical to the prior verified release; executable SHA-256 `cc7f277e97607f20e6ae32b1438f0b8550096373ae6cf9a2ac1a7ff7493fbab7`, strict signature exit 0. No install, media operation, new job or register write occurred. Existing runtime JSON changes are limited to the authorized DUB manifest/checkpoint and the monitor's ordinary lastCheckedAt timestamp; the new durable backup directory is separate. Both show automations stay paused, and queue/enabled state is unchanged. Prior full-suite 260 passed/four skipped and Python 22 passed remain historical results; neither suite was rerun as a whole because application/helpers are unchanged.
+
+### PRE-COMMIT DRIFT AUDIT AND CLOSEOUT MATRIX
+
+Current task: finish the authorized historical DUB records and close the routing/migration project. Branch/base: `codex/historical-dub-records`, `b30f3ddfc8038738a71b601354a62f4c8427ee43`. Roadmap phase: final reconciliation of the authoritative filing correction; no new media production phase.
+
+- Requirements alignment: PASS. Current requirements were read and left byte-identical. Existing source/type routing, exact coverage, honest historical QA, verified provider records, sharing and non-circular receipts are preserved.
+- Roadmap alignment: PASS. The sole remaining companion dependency is resolved; valid migration and production evidence is reused without repeating it.
+- Scope control: PASS. Only STATUS, VERIFICATION and the roadmap closeout paragraph enter Git. All three external changes target the explicitly authorized existing DUB record IDs. No media/register/Taxstone/destination mutation or new dependency.
+- Ambiguity and uncertainty: resolved the former upload-authorization boundary through Frank's latest explicit instruction. Investigated and reconciled provider counter drift without repeating writes. Corrected the transient UI-tool lock report. No essential ambiguity remains.
+- Architecture and quality: PASS. No application architecture/source/build change. Reused the existing OAuth connection, native core, locks and durable records; guarded external edits with ETags and retained verified rollback bytes.
+- Verification and evidence: PASS. Reviewed authoritative instructions, the complete intended diff, before/after provider/local content, all 35 register identities, recovery/routing tests, installed state and preserved unrelated files. Tests and diagnostics are distinguished from historical production and social acceptance.
+
+| Closeout criterion | Result |
+| --- | --- |
+| Seven active destinations and one retired role | PASS |
+| All 16 moved packages/current locations | PASS |
+| Three historical DUB companion corrections, same IDs | PASS |
+| Independent downloaded-byte and semantic readback | PASS |
+| Existing 35 register rows and unrelated sheet data | PASS; no writes |
+| Media identity/bytes, permissions, duplicates and missing files | PASS |
+| Local receipts, native reopening and unchanged installed routing | PASS |
+| Documentation and pre-commit scope/secret review | PASS |
+| Repository integration | Authoritative status is the containing PR; final remote/tree receipt is `integration.json`. |
+
+Commit eligibility: PASS. There is no remaining operational exception for this routing/record project. Closure is effective on verified Git merge. New-DUB production acceptance, current social ingestion, actual sleep/wake and unrelated product requirements remain outside this closeout and are not claimed complete.
+
+---
+
 ## Creator-folder routing, Joe retention and protected installation — verified continuation (2026-11-02)
 
 Evidence directory: `/Users/frank/Library/Caches/Joey-Native-Build/taxstone-consolidation-20261102/`. This continuation follows Frank's completed manual reorganization and explicit creator-retention decisions. It does not run a new production job or claim new DUB production acceptance. Baseline: `79abe72eb107ecc7eface0e9aebd64eb1c09ec11`, origin `https://github.com/franklinburrus/Joey.git`, branch `codex/taxstone-consolidation`; live origin/main matched the baseline before integration. No staged work existed; 22 unrelated untracked duplicate files were preserved.
