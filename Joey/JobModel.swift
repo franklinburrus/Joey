@@ -125,9 +125,16 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
     }
     func pauseJoe() {
         joeAutomation.enabled = false
-        let queue = automationRunning ? automationTask:nil, processing = automationRunning ? task:nil
+        // The Joe loop remains active while it lends its turn to email.
+        // That turn owns discovery and the accepted task until it returns.
+        let ownsTurn = automationRunning && !email.dispatching
+        let queue = ownsTurn ? automationTask:nil, processing = ownsTurn ? task:nil
         queue?.cancel();processing?.cancel()
         do {try saveJoe()} catch {self.error = error.localizedDescription}
+        guard ownsTurn else {
+            joeStatus = "Automatic processing paused. Queue and accepted work retained."
+            return
+        }
         joeStatus = "Pausing automatic processing; queue and accepted work retained."
         let ownsCancellation = !cancelling
         if ownsCancellation {cancelling = true}
@@ -302,8 +309,8 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         }
     }
     func cancel() {
-        if libraryBusy {pauseTaxstoneLibrary()}
-        else if automationRunning {pauseJoe()}
+        if libraryBusy && !email.dispatching {pauseTaxstoneLibrary()}
+        else if automationRunning && !email.dispatching {pauseJoe()}
         else {
             let processing = task
             processing?.cancel()

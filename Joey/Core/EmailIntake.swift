@@ -126,6 +126,7 @@ public struct EmailWork: Codable, Identifiable, Sendable {
     public var retryRequested: Bool?
     /// Only a local Process action creates this intent. Old ledgers omit it.
     public var processingRequested: Bool?
+    public var canCancelFromQueue: Bool {status == .queued || status == .retryable}
 }
 public struct EmailIntakeState: Codable, Sendable {
     public var version = 2
@@ -335,6 +336,9 @@ public final class EmailIntakeStore {
               next.work[index].status != .running, next.work[index].status != .completed else {
             throw JoeyError.invalid("This saved link is already processing or completed")
         }
+        guard next.work[index].status != .cancelled || next.capacity > 0 else {
+            throw JoeyError.invalid("The email queue is full; cancel another queued link before retrying")
+        }
         let workflow = try workflow.validated()
         if next.work[index].request != nil || next.work[index].processingRequested == true {
             guard workflow == (try next.work[index].workflow.validated()) else {throw JoeyError.invalid("A requested workflow cannot change; reuse its saved job")}
@@ -345,6 +349,21 @@ public final class EmailIntakeStore {
         next.work[index].retryAt = nil;next.work[index].reason = nil
         try commit(next)
     }
+    public func cancelWork(_ id: String) throws {
+        var next = state
+        guard let index = next.work.firstIndex(where:{$0.id == id}), next.work[index].canCancelFromQueue else {
+            throw JoeyError.invalid("Only queued or failed links can be cancelled here; use the active job's Cancel action while processing")
+        }
+        // Keep the source/request mapping and receipts as deduplication evidence.
+        // Cancellation revokes pending intent; only an explicit Retry can restore it.
+        next.work[index].status = .cancelled
+        next.work[index].reason = "Queue entry cancelled; saved link, request and accepted work retained"
+        next.work[index].processingRequested = nil
+        next.work[index].retryRequested = nil
+        next.work[index].retryAt = nil
+        try commit(next)
+    }
+
     public func dismiss(_ receiptID: String) throws {
         var next = state
         guard let index = next.receipts.firstIndex(where:{$0.id == receiptID && $0.status == "pendingAuthorization"}) else {return}

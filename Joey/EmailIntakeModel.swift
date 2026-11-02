@@ -171,6 +171,12 @@ import Network
     func dismiss(_ id: String) {
         do {try store?.dismiss(id);publish()} catch {failedPersistence(error)}
     }
+    func cancelWork(_ id: String) {
+        guard available, let store else {return}
+        do {try store.cancelWork(id);publish();error = nil}
+        catch let failure as JoeyError {error = failure.localizedDescription}
+        catch {failedPersistence(error)}
+    }
     func process(_ id: String, workflow: EmailWorkflow) {
         guard available, let store else {return}
         do {
