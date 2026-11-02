@@ -39,7 +39,7 @@ final class ProductionIntakeTests: XCTestCase {
     func testJoeIntakeKeepsDriveContractSeparateAndRequiresFullProduction() throws {
         var request = try ProductionIntake.request(source:episode(976),content:.joeBudden,mode:.highlights,sharedProfile:nil)
         XCTAssertEqual(request.mode,.fullShow)
-        XCTAssertEqual(request.archiveRootID,"1IIYLVDhCvwf5ZoMb0aM5vpSCe-eMCmyK")
+        XCTAssertNil(request.archiveRootID,"Joe retains delivered clips, not a permanent full-episode archive")
         XCTAssertEqual(request.profile.driveOnlyJoe,true)
         XCTAssertNil(request.profile.x)
         XCTAssertThrowsError(try ProductionIntake.request(source:episode(976),content:.taxstone,mode:.fullShow,sharedProfile:nil))

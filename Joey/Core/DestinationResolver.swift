@@ -9,15 +9,19 @@ public enum DriveDestination: String, Codable, CaseIterable, Sendable {
     case dubAudioClips, dubVideoClips, taxstoneClips, joeBuddenClips
     case dubAudioEpisodes, dubVideoEpisodes, taxstoneEpisodes, joeBuddenEpisodes
 
+    /// Keep the retired Joe archive case decodable for historical receipts.
+    /// New Joe jobs retain clips only, so provider preflight must not require it.
+    public static var active: [DriveDestination] { allCases.filter { $0 != .joeBuddenEpisodes } }
+
     public var id: String {
         switch self {
         case .dubAudioClips: return "1FRi-yy2D9yenjQRailTA2iAbPaqAEPXm"
         case .dubVideoClips: return "1380CHJ3a3kl7fXNIKWqUM7_DeTZUwxsy"
-        case .taxstoneClips: return "1kxv3bbnPPRt914npHFUI51jrbCY0atyU"
+        case .taxstoneClips: return "1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8"
         case .joeBuddenClips: return "1X5VNP6fo3VpZPu4ZW4p7Ggk2o_IAVGSI"
         case .dubAudioEpisodes: return "109_QzHpF0Bi-OG6-AxuTDw1uHG4zeop3"
         case .dubVideoEpisodes: return "1GpuGWGIbSt3afwsi9L782soT9WJKOHS9"
-        case .taxstoneEpisodes: return "12g_etkCruq4tjG07t9hAqQffc4NqbSQK"
+        case .taxstoneEpisodes: return "1wQMwzUconRC3UCvH2jpL1kD__ctBv29p"
         case .joeBuddenEpisodes: return "1IIYLVDhCvwf5ZoMb0aM5vpSCe-eMCmyK"
         }
     }
@@ -25,24 +29,25 @@ public enum DriveDestination: String, Codable, CaseIterable, Sendable {
         switch self {
         case .dubAudioClips: return "X Audio Clips"
         case .dubVideoClips: return "X Video Clips"
-        case .taxstoneClips, .taxstoneEpisodes: return "Taxstone"
-        case .joeBuddenClips: return "Joe Budden " // Existing Drive name includes a trailing space.
+        case .taxstoneClips: return "Taxstone Clips"
+        case .taxstoneEpisodes: return "Taxstone Full Episodes"
+        case .joeBuddenClips: return "Joe Budden Clips"
         case .dubAudioEpisodes: return "Full X Audio Spaces"
         case .dubVideoEpisodes: return "Full X Broadcasts"
         case .joeBuddenEpisodes: return "Joe"
         }
     }
     public var ancestorIDs: [String] {
-        let media = ["1pV7ztF72nRMJoVe44EQvsijvGqNt5AeN","18Ix3mVu8gCFSa-EGGpzQsh03SajrZvKm",DestinationResolver.dubRoot]
+        let content = ["18Ix3mVu8gCFSa-EGGpzQsh03SajrZvKm",DestinationResolver.dubRoot]
         switch self {
-        case .dubAudioClips, .dubVideoClips, .taxstoneClips:
-            return ["1VjjrNczNAiDwt3fPkGIG10wePrtK36xn"] + media
+        case .dubAudioClips, .dubVideoClips, .dubAudioEpisodes, .dubVideoEpisodes:
+            return ["1JQH012UFDeHukvigMf4dGxCoUgWvMc4U"] + content
         case .joeBuddenClips:
-            return ["1-HjL5kpENfWQm5jwshAhU3QM-THI6u53"] + media
-        case .dubAudioEpisodes, .dubVideoEpisodes:
-            return ["1JQH012UFDeHukvigMf4dGxCoUgWvMc4U","1tTuXCzAOYASK5S-KKuYrFzYQRVjQebx4"] + media
-        case .taxstoneEpisodes, .joeBuddenEpisodes:
-            return ["1tTuXCzAOYASK5S-KKuYrFzYQRVjQebx4"] + media
+            return ["1-HjL5kpENfWQm5jwshAhU3QM-THI6u53"] + content
+        case .taxstoneClips, .taxstoneEpisodes:
+            return ["1kxv3bbnPPRt914npHFUI51jrbCY0atyU"] + content
+        case .joeBuddenEpisodes:
+            return ["1tTuXCzAOYASK5S-KKuYrFzYQRVjQebx4","1pV7ztF72nRMJoVe44EQvsijvGqNt5AeN"] + content
         }
     }
 }
@@ -101,7 +106,8 @@ public enum DestinationResolver {
         case (.taxstone,_,.clip): destination = .taxstoneClips
         case (.taxstone,_,.fullEpisode): destination = .taxstoneEpisodes
         case (.joeBudden,_,.clip): destination = .joeBuddenClips
-        case (.joeBudden,_,.fullEpisode): destination = .joeBuddenEpisodes
+        case (.joeBudden,_,.fullEpisode):
+            throw JoeyError.invalid("Joe Budden full episodes are temporary processing sources, not Drive archive deliveries")
         }
         if asset == .fullEpisode, source.archiveReference == nil, let oldSelection = request.archiveRootID,
            oldSelection != destination.id {

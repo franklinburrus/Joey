@@ -18,7 +18,7 @@ final class LiveDriveRoutingTests: XCTestCase {
         })
         var roots: [[String:Any]] = []
         var rootChildren: [String:[[String:Any]]] = [:]
-        for destination in DriveDestination.allCases {
+        for destination in DriveDestination.active {
             let metadata = try await provider.verifyRoot(destination)
             rootChildren[destination.id] = try await provider.children(destination.id)
             roots.append(["id":destination.id,"name":destination.name,"ancestors":destination.ancestorIDs,
@@ -66,6 +66,6 @@ final class LiveDriveRoutingTests: XCTestCase {
         let result: [String:Any] = ["scope":"LIVE READ-ONLY; no production upload or relocation","checkedAt":ISO8601DateFormatter().string(from:Date()),
             "roots":roots,"packages":packages]
         try JSONSerialization.data(withJSONObject:result,options:[.prettyPrinted,.sortedKeys]).write(to:URL(fileURLWithPath:output),options:.atomic)
-        XCTAssertEqual(roots.count,8)
+        XCTAssertEqual(roots.count,7)
     }
 }

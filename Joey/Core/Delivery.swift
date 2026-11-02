@@ -25,7 +25,7 @@ public actor DriveDelivery {
     }
     public func preflight(tab: String) async throws -> [String:String] {
         var result: [String:String] = [:]
-        for destination in DriveDestination.allCases {
+        for destination in DriveDestination.active {
             let id = destination.id
             let info = try await verifyRoot(destination)
             result[id] = "\(info["name"] as? String ?? "unnamed"): \(try await children(id).count) children"
