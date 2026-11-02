@@ -10,6 +10,8 @@
 
 ## Authoritative filing correction — 2026-11-02
 
+Latest explicit continuation: Frank completed the creator-first reorganization under Content, confirmed all DUB destinations, consolidated Taxstone into Taxstone Clips/Taxstone Full Episodes, renamed Joe Budden Clips and retired Joe's full-episode archive. Verify his actual moves with rclone and preserve IDs/bytes/permissions; update the existing resolver's names, roots and ancestry. Preserve historical serialized Joe archive identities while excluding that retired root from active preflight. Stop archiving new Joe full episodes; register only fresh application-owned Joe sources for removal after durable verified completion, using the existing storage/lock safeguards. Preserve all Taxstone full episodes, DUB originals, accepted media, imports, reused sources and records. Add isolated lifecycle/recovery regressions, run affected checks and the native build, audit the complete diff, then integrate and redeploy the necessary app change. No new production job or media reprocessing is part of this continuation. Current results and exact final IDs are in STATUS/VERIFICATION and REQUIREMENTS section 11; the following paragraphs preserve the earlier eight-root release history.
+
 Frank's eight-root mapping in REQUIREMENTS section 11 supersedes the historical two-root implementation. Extend the existing Swift coordinator and Drive adapter, without replacing the native application or changing media production requirements.
 
 1. Centralize destination and verified ancestry in `DestinationResolver.swift`. Preserve request serialization; use the explicit Joe workflow as its ownership discriminator.

@@ -11,16 +11,15 @@ final class DestinationRoutingTests: XCTestCase {
             hasAudio:true,kind:kind,streams:[],authorizationBasis:"Synthetic",classificationEvidence:"Inspected synthetic source")
         return (source,request)
     }
-    func testAllEightDestinationsUseOwnershipFormatAndAsset() throws {
+    func testActiveDestinationsUseOwnershipFormatAndAsset() throws {
         let combinations: [(Owner,MediaKind,Bool,DriveAsset,String)] = [
             (.dub,.audio,false,.clip,"1FRi-yy2D9yenjQRailTA2iAbPaqAEPXm"),
             (.dub,.nativeVideo,false,.clip,"1380CHJ3a3kl7fXNIKWqUM7_DeTZUwxsy"),
-            (.taxstone,.audio,false,.clip,"1kxv3bbnPPRt914npHFUI51jrbCY0atyU"),
+            (.taxstone,.audio,false,.clip,"1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8"),
             (.dub,.nativeVideo,true,.clip,"1X5VNP6fo3VpZPu4ZW4p7Ggk2o_IAVGSI"),
             (.dub,.audio,false,.fullEpisode,"109_QzHpF0Bi-OG6-AxuTDw1uHG4zeop3"),
             (.dub,.nativeVideo,false,.fullEpisode,"1GpuGWGIbSt3afwsi9L782soT9WJKOHS9"),
-            (.taxstone,.nativeVideo,false,.fullEpisode,"12g_etkCruq4tjG07t9hAqQffc4NqbSQK"),
-            (.dub,.nativeVideo,true,.fullEpisode,"1IIYLVDhCvwf5ZoMb0aM5vpSCe-eMCmyK")]
+            (.taxstone,.nativeVideo,false,.fullEpisode,"1wQMwzUconRC3UCvH2jpL1kD__ctBv29p")]
         for (owner,kind,joe,asset,expected) in combinations {
             let (source,request) = try fixture(owner:owner,kind:kind,joe:joe)
             let route = try DestinationResolver.resolve(source:source,request:request,asset:asset)
@@ -47,7 +46,7 @@ final class DestinationRoutingTests: XCTestCase {
     func testSourceKindOverridesMP4ExtensionAndTaxstoneKeepsOwnership() throws {
         for kind in [MediaKind.audio,.nativeVideo] {
             let (source,request) = try fixture(owner:.taxstone,kind:kind)
-            XCTAssertEqual(try DestinationResolver.resolve(source:source,request:request,asset:.clip).rootID,"1kxv3bbnPPRt914npHFUI51jrbCY0atyU")
+            XCTAssertEqual(try DestinationResolver.resolve(source:source,request:request,asset:.clip).rootID,"1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8")
         }
         let (source,request) = try fixture()
         XCTAssertEqual(URL(fileURLWithPath:source.path).pathExtension,"mp4")
@@ -60,5 +59,21 @@ final class DestinationRoutingTests: XCTestCase {
         XCTAssertTrue(DestinationResolver.requiresDUBRegister(dub))
         dub.owner = .taxstone
         XCTAssertFalse(DestinationResolver.requiresDUBRegister(dub))
+    }
+    func testCreatorAncestryAndJoeArchiveRetirementPreserveSavedIdentity() throws {
+        let content = "18Ix3mVu8gCFSa-EGGpzQsh03SajrZvKm"
+        XCTAssertEqual(DriveDestination.active.count,7)
+        for destination in DriveDestination.active {
+            XCTAssertEqual(destination.ancestorIDs.count,3)
+            XCTAssertEqual(destination.ancestorIDs[1],content)
+        }
+        XCTAssertEqual(DriveDestination.taxstoneClips.ancestorIDs.first,"1kxv3bbnPPRt914npHFUI51jrbCY0atyU")
+        XCTAssertEqual(DriveDestination.taxstoneEpisodes.name,"Taxstone Full Episodes")
+        XCTAssertEqual(DriveDestination.joeBuddenClips.name,"Joe Budden Clips")
+        let (source,request) = try fixture(joe:true)
+        XCTAssertThrowsError(try DestinationResolver.resolve(source:source,request:request,asset:.fullEpisode))
+        var legacy = request;legacy.archiveRootID = "1IIYLVDhCvwf5ZoMb0aM5vpSCe-eMCmyK"
+        XCTAssertEqual(try legacy.identityData(),try request.identityData())
+        XCTAssertEqual(try JSONDecoder().decode(DriveDestination.self,from:Data("\"joeBuddenEpisodes\"".utf8)),.joeBuddenEpisodes)
     }
 }

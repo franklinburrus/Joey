@@ -19,7 +19,7 @@ public enum ProductionIntake {
         let request = JobRequest(owner:content == .taxstone ? .taxstone:.dub,sourceID:source.id,title:source.title,
             episodeDate:source.episodeDate,dateEvidence:source.episodeDate == nil ? nil:"Original provider upload_date for "+source.url,
             originalURL:source.url,authorizationBasis:"User-initiated Joey link workflow; no separate authorization form",
-            archiveReference:archive,archiveRootID:joe ? DriveDestination.joeBuddenEpisodes.id:archiveRoot,
+            archiveReference:archive,archiveRootID:joe ? nil:archiveRoot,
             expectedDuration:source.duration,mode:joe ? .fullShow:mode,transcriptPath:transcript,
             profile:profile,fileToDrive:true,productionWorkflow:joe ? .joeBudden:.link)
         try request.validate();return request

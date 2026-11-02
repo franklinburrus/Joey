@@ -212,7 +212,7 @@ public struct JobRequest: Codable, Equatable, Sendable {
               localPath != nil || originalURL != nil else { throw JoeyError.invalid("Source identity and an original source are required") }
         if let productionWorkflow {
             guard localPath == nil, let originalURL, fileToDrive, transcriptPolicy != .modelIndependent else {
-                throw JoeyError.invalid("Production workflows require a source link, full-original filing and transcript-assisted processing")
+                throw JoeyError.invalid("Production workflows require a source link, verified clip delivery and transcript-assisted processing")
             }
             if productionWorkflow == .taxstoneLibrary {
                 guard owner == .taxstone, mode == .fullShow, let archiveReference,
@@ -246,6 +246,9 @@ public struct JobRequest: Codable, Equatable, Sendable {
     func identityData(ignoringProfile: Bool = false) throws -> Data {
         var copy = self
         copy.profile = ignoringProfile ? .joeBuddenDrive : profile.identityContract
+        // Retiring Joe's archive must not create a second job for an existing
+        // immutable source request. The saved job ID remains authoritative.
+        if copy.productionWorkflow == .joeBudden {copy.archiveRootID = nil}
         return try Persistence.encoder.encode(copy)
     }
     func stableID() throws -> String {

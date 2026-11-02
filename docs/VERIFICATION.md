@@ -1,3 +1,78 @@
+## Creator-folder routing, Joe retention and protected installation — verified continuation (2026-11-02)
+
+Evidence directory: `/Users/frank/Library/Caches/Joey-Native-Build/taxstone-consolidation-20261102/`. This continuation follows Frank's completed manual reorganization and explicit creator-retention decisions. It does not run a new production job or claim new DUB production acceptance. Baseline: `79abe72eb107ecc7eface0e9aebd64eb1c09ec11`, origin `https://github.com/franklinburrus/Joey.git`, branch `codex/taxstone-consolidation`; live origin/main matched the baseline before integration. No staged work existed; 22 unrelated untracked duplicate files were preserved.
+
+### Current folder state and preservation
+
+The earlier eight routes are accounted for: seven remain active, and Joe's permanent full-episode root is intentionally retired. All seven live roots match REQUIREMENTS section 11 and `DestinationResolver.swift`, including exact names, IDs and creator/Content/Dub ancestry. The temporary Taxstone root `1mAceYA2DVmKEwAhImXV2yh1k6h-rPKZp` is trashed and is not the configured destination. The correct Taxstone Clips root is the renamed existing X root `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8`. Taxstone Full Episodes is `1wQMwzUconRC3UCvH2jpL1kD__ctBv29p`; Joe Budden Clips is `1X5VNP6fo3VpZPu4ZW4p7Ggk2o_IAVGSI`, without the former trailing space. Old Media is empty; Content contains Dub, Taxstone, Joe Budden and Other.
+
+`content-user-final-tree.json`, `taxstone-user-final-inventory.json`, `taxstone-root-metadata-final.json` and `user-moves-verified.json` establish Frank's final moves. All 1,758 previously inventoried Taxstone clip-tree objects remain: 1,606 files and 152 nested folders. IDs, relative paths, names, sizes, MIME types, supported hashes and permission objects match. There are zero missing expected IDs and zero duplicate IDs. There are 1,605 checksum-bearing files; the native spreadsheet's binary checksum is unavailable, so its ID/metadata/access preservation is verified without claiming binary integrity. All 106 full episodes remain present. No assistant Taxstone mutation occurred: the obsolete migration plan stopped before mutation when its inventory changed.
+
+`reconcile_episode_locations.py` executed one bounded rclone `moveto` per authorized episode folder, with `--retries 1 --low-level-retries 1`, collision checks and saved intent. Both commands returned exit 0. Their independent receipts verify unchanged directory/file IDs, file hashes and permissions:
+
+| Episode folder | Final parent | Preserved contents |
+| --- | --- | --- |
+| DUB `1_NJU2jWQEz3uSAvDYGXXJM9tfIr9s5iD` | X Video Clips `1380CHJ3a3kl7fXNIKWqUM7_DeTZUwxsy` | 35 clips, four companions |
+| Joe 977 `1DBHs-sQ8jpyALLiisOw1HUi09_aFoBDb` | Joe Budden Clips `1X5VNP6fo3VpZPu4ZW4p7Ggk2o_IAVGSI` | 17 clips, four companions |
+
+The old intermediate Dub folder was not removed because unrelated historical archives remain there. No copies, media reuploads, duplicate deletions or sharing changes occurred. `episode-moves-result.json` and the two per-folder `*-move-receipt.json` files record the actual results.
+
+A separate final GET-only pass (`final_provider_readback.py`, exit 0) compared against the preceding closeout receipts: 16 packages, 262 MP4 clips and 64 companions, all in the applicable direct clip roots. All 326 delivered file metadata objects match the prior receipts, including IDs, names, immediate parents, sizes, MD5/SHA-256, existing links and permission objects. There are zero missing expected files, duplicate expected IDs or duplicate clip SHA-256/size identities. Folder access matches; all DUB/Taxstone original identities remain unchanged. Joe's historical Drive source is trashed by Frank; this is recorded as his action, not an assistant deletion. This bounded reconciliation does not claim a whole-Drive duplicate audit.
+
+### Register and companion records
+
+The same independent pass retrieved the live Master Library schema and all populated A:Y values with FORMULA rendering. Current data rows: 4,467. All 35 existing DUB clip IDs appear exactly once at rows 4417–4451, with matching live Drive files and links. The full bounded value/formula snapshot and schema exactly match the preceding corrected snapshot; no cells or rows changed in this continuation. The earlier six-cell correction remains intact. Evidence: `final-register-readback.json`; this is read-only reconciliation, not a new production register write.
+
+Parent relocation alone required no ID or link rewrite. Historical DUB companion-content discrepancies from the preceding closeout remain: manifest `16gkG0VVotxLf1GUU2T6zW4xhM8oWdXoG` describes older accepted clip bytes; index `1dGk5Z8oh9Eeu1kMyAmmWzKcmmqQ9LprB` retains six stale durations; RECONCILE has an outdated presentation/placement narrative. Existing manifest/index correction proposals are preserved in `routing-closeout-20261102/`. Their receipt integrity is verified, but their semantic consistency is not passed. Applying companion-content uploads still needs the outstanding record-only exception to the earlier no-reupload boundary. Folder-move authority does not authorize that upload. Runtime receipts and companion bytes remain unchanged; no legacy job was falsely promoted to COMPLETED.
+
+### Implementation and test results
+
+The existing native architecture owns every change: destination catalog/preflight, link intake, request identity, coordinator completion sequencing and StorageManager. Joe's retired archive enum stays decodable; new intake omits that archive, no new Joe original is filed, and identity normalization reopens legacy requests without another job. Only fresh app-owned Joe acquisitions receive a source-retention receipt before the inspected-source checkpoint. Deletion requires durable completion, required delivery evidence, current accepted hashes, no unfinished shared-source dependency, canonical no-follow file/directory identity and exact original SHA-256. The processing lock and existing exclusive worker lease fence removal; an intent receipt supports crash-after-unlink recovery without deleting a later replacement. Incomplete, imported, reused, historical, modified, linked and shared sources are protected. Cleanup failure preserves verified completed delivery.
+
+All executable commands used `python3 Tools/run-local.py`; Swift/Xcode used `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. Evidence logs are in the directory above.
+
+| Command / evidence | Actual result |
+| --- | --- |
+| Initial affected Swift run (`affected-tests.log`) | 68 tests; one obsolete intake assertion failed because it still expected the retired Joe archive. Assertion corrected to the explicit new rule. |
+| Corrected affected Swift run (`affected-tests-green.log`) | 68 passed, zero failures; exit 0. |
+| `swift test --jobs 2` (`full-tests.log`) | 264 executed, 260 passed, four intentional skips, zero failures; exit 0; 229.374 seconds. |
+| `swift test --skip-build --filter LiveDriveRoutingTests` with explicit `JOEY_REAL_MEDIA_INPUTS=.../live-routing-input.json` | One live read-only test passed, zero failures; exit 0; 71.554 seconds. Seven roots and 16 packages; zero placement rejections or duplicate matches. |
+| `swift test --jobs 2 --filter RecoveryRegressionTests/testJoeSourceCleanupWaitsForSurvivingWorkerLease` (`worker-lease-red.log`) | One test failed with three assertions before repair, proving source removal while a surviving worker held its lease. Isolated synthetic source only. |
+| `swift test --jobs 2 --filter 'RecoveryRegressionTests\|StorageTests\|DestinationRoutingTests\|ProductionIntakeTests\|DeliveryTests\|DeliveryOwnershipTests\|DestinationFolderTests'` (`final-affected-tests.log`) | 46 executed and passed, zero failures; exit 0; 12.985 seconds, after adding the exclusive worker lease. Only matching test classes ran; no inflated claim for unmatched filter names. |
+| `xcodebuild -project Joey.xcodeproj -scheme Joey -configuration Debug -destination platform=macOS -derivedDataPath .../native-build CODE_SIGN_IDENTITY=- build` | Initial and final native builds succeeded, exit 0. Final log `native-build-final.log` includes the worker-lock repair. |
+| `codesign --verify --deep --strict .../Joey.app` | Exit 0 for candidate, staged and installed bundles. |
+| Final provider readback and preservation scripts | Exit 0. No provider writes; 326 receipts and 278 accepted local outputs verified. |
+| `git diff --check` | Exit 0. |
+
+Four full-suite skips are explicit opt-in external/media/assistant acceptance tests, not failed tests. The live routing test was then independently enabled and passed. Existing duplicate-file build warnings concern preserved untracked files; no new dependency or build setting was introduced. Python helpers did not change, so the preceding 22-pass result remains historical and was not rerun. New retention tests use synthetic local bytes; no live Joe source deletion or new production workflow was exercised.
+
+### Protected installation and native reopening
+
+`verification.json` binds the tested source diff and ten candidate bundle hashes. Protected installation completed at `2026-11-02T18:13:17Z`; installed executable SHA-256 is `cc7f277e97607f20e6ae32b1438f0b8550096373ae6cf9a2ac1a7ff7493fbab7`. The installed app exactly matches the tested candidate. Rollback: `/Users/frank/Applications/Joey Rollbacks/2026-11-02-before-creator-routing/Joey Native.app`.
+
+The idle app had no live helpers; processing/storage/library locks were held before exit and email-store lock released after exit. Installation used atomic staging/replacement, strict signature verification and checkpoint snapshots. All 446 protected file identities and 278 accepted outputs survived. The earlier hash pass also verified 1,545 unchanged runtime JSON files, 20 unchanged job identities and all 22 unrelated untracked files. Evidence: `preservation-final.json`, `installation/before.json`, `installation/installation.json` and `installation/relaunch-readback.json`.
+
+Launched the installed executable through the minimal environment. Native UI reopened the accepted Taxstone episode as Completed, with 23/23 QA and Drive checks. Existing Joe and DUB jobs opened without Process/Resume: 17 and 35 QA passes respectively; DUB retains 35 saved register rows. Their historical incomplete status was preserved. Visible DUB title and picture match its source; the known grouped accessibility title retained a prior selection, as in the preceding release, without changing job identity. No unrelated UI refactor was added. Show automation remains paused; no new job or source-retention receipt was created. The only post-launch protected JSON change is Joe's existing lastCheckedAt timestamp; enabled state, queue, checkpoints and accepted media remain unchanged. An initial post-launch diagnostic assumed an optional email-intake.json existed; correcting that diagnostic to the already-used optional-file behavior produced the successful readback above without modifying runtime data.
+
+### PRE-COMMIT DRIFT AUDIT
+
+- Current task: verify and integrate Frank's final creator hierarchy and Joe retention amendment; preserve the separate unresolved historical DUB companion gate.
+- Branch/base: `codex/taxstone-consolidation` from `79abe72eb107ecc7eface0e9aebd64eb1c09ec11`.
+- Roadmap phase: authoritative filing correction, Tasks 1/3/4 where required for identity, recovery, verified delivery and installation. No new media pipeline or production acceptance work.
+- Files reviewed: AGENTS.md, `.agents/skills/ultracave/SKILL.md`, REQUIREMENTS, IMPLEMENTATION_PLAN, STATUS, VERIFICATION, OPERATING_GUIDE and STORAGE; six changed core Swift files, four changed test files, the complete task diff, staged scope and preserved untracked inventory.
+- Requirements alignment: PASS. Exact current roots and source-type/creator separation; explicit Joe retention exception only; Taxstone/DUB originals and all accepted outputs preserved. Updated obsolete active archive labels and operating-guide generalizations to match Frank's explicit rule. No media, QA, register or completion gate weakened.
+- Roadmap alignment: PASS. Extends existing catalog/coordinator/storage patterns; no new service, dependency, abstraction layer or unrelated milestone.
+- Scope control: PASS. Only authorized source/tests/docs enter the proposed commit. All 22 unrelated untracked files excluded. Drive mutations limited to the two specifically authorized episode-parent moves; Frank's Taxstone changes independently verified.
+- Ambiguities: settled creator hierarchy and retired Joe archive carried forward. Abandoned temporary Taxstone destination excluded. Historical DUB companion upload authority remains explicitly unresolved, with the exact proposal preserved. No requirement invented to force another broadcast.
+- Architecture and quality: PASS. Native Swift/SwiftUI and existing locks/atomic receipts retained. Audit exposed missing worker exclusion; isolated failing regression confirmed it, the existing exclusive lease repaired it, and affected tests/build passed. No credentials, media, models, runtime snapshots or dependencies enter Git.
+- Verification and evidence: PASS for the bounded implementation. Live provider identity/integrity/access, full and affected tests, build/signature, installed reopening and preservation are independently recorded. Synthetic cleanup checks are not presented as production deletion evidence.
+- Remaining risks/limits: historical DUB companion semantics prevent full record closeout; no live Joe deletion, new DUB delivery, platform ingestion or actual sleep/wake test was attempted. Existing incomplete jobs remain incomplete. These limits do not block this explicit partial implementation commit.
+- Commit eligibility: **PASS for the documented partial scope**. Authorized next action: scoped commit/push/PR/check/merge and final remote readback. Full routing/record task status remains **PARTIAL** until the existing DUB companion correction is authorized and verified.
+
+Git integration is tracked by [PR #9](https://github.com/franklinburrus/Joey/pull/9), initially pushed at `bfb82ed2bc23a5d46bae8facb57169b9beb3e10d`. GitHub readback reports main unprotected, no rulesets, no required checks, zero commit statuses/check runs/workflow runs and a clean mergeable PR at the inspected head. These are absence-of-CI findings, not cloud test passes. The follow-up changes only STATUS/VERIFICATION to identify the containing PR; the tested and installed application source is unchanged. Its scoped diff/secret/untracked-preservation recheck passes; no build/test rerun is needed for these record-only edits. Final merge SHA and exact remote/source-tree readback are retained in `integration.json`; the PR itself carries the authoritative merge state.
+
+---
+
 ## Routing/migration closeout — PARTIAL (2026-11-02)
 
 This is verification of existing delivery and Frank's reported completed file moves, plus narrowly authorized record repair. It is not a new production run. The earlier new-DUB source/register-write acceptance gate is outside this task. No media download, render, upload, move, copy, deletion, new job, publication or scheduling occurred. No Drive media/companion bytes or permissions changed. The sole external mutation was six independently verified duration-cell corrections in the existing Master Link List.

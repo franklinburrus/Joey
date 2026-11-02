@@ -48,9 +48,21 @@ struct ScratchAttempt: Codable {
     var files: [ScratchFile] = []
 }
 
-/// Owns only fresh render-attempt scratch. All unregistered legacy storage is
-/// protected. The caller retains the existing exclusive processing lock, so
-/// cleanup cannot race coordinator work or another app instance.
+struct TemporaryJoeSource: Codable {
+    var version = 1
+    let jobID: String
+    let sourceID: String
+    let directoryInode: UInt64
+    let directoryDevice: Int32
+    let file: ScratchFile
+    var removalStarted = false
+    var removedAt: Date?
+}
+
+/// Owns fresh render-attempt scratch and explicitly registered temporary Joe
+/// sources. All unregistered legacy storage is protected. The caller retains
+/// the existing exclusive processing lock, so cleanup cannot race coordinator
+/// work or another app instance.
 public final class StorageManager {
     @TaskLocal public static var processingRoot: URL?
     // Internal dependency injection for isolated capacity/recovery tests. The
@@ -126,6 +138,101 @@ public final class StorageManager {
         var hash = SHA256()
         while let data = try handle.read(upToCount:1024*1024),!data.isEmpty {hash.update(data:data)}
         return hash.finalize().map {String(format:"%02x",$0)}.joined() == file.sha256
+    }
+    /// Called only for a fresh acquisition owned by this Joe job. Reused,
+    /// imported and historical originals are never enrolled retroactively.
+    func registerTemporaryJoeSource(job: JobRecord) throws {
+        guard job.request.productionWorkflow == .joeBudden, job.state != .completed,
+              job.request.localPath == nil, job.request.archiveReference == nil,
+              Self.component(job.id), let source = job.source else {
+            throw JoeyError.invalid("Temporary source ownership requires a newly acquired Joe job")
+        }
+        let directory = root.appendingPathComponent("jobs/"+job.id)
+        let file = URL(fileURLWithPath:source.path)
+        guard file.deletingLastPathComponent().path == directory.path,
+              file.deletingPathExtension().lastPathComponent == "original",
+              ["mp4","mkv","webm","m4a","mp3","opus"].contains(file.pathExtension),
+              !job.clips.contains(where:{$0.filename == file.lastPathComponent}) else {
+            throw JoeyError.invalid("Joe temporary source is outside its acquisition directory")
+        }
+        try Self.noLinks(file)
+        let fd = try Self.openDirectory(directory); defer {Darwin.close(fd)}
+        var ds = stat(), fs = stat()
+        guard fstat(fd,&ds) == 0, fstatat(fd,file.lastPathComponent,&fs,AT_SYMLINK_NOFOLLOW) == 0,
+              (fs.st_mode & S_IFMT) == S_IFREG, fs.st_nlink == 1, fs.st_size == source.bytes else {
+            throw JoeyError.invalid("Temporary Joe source identity is not a regular owned file")
+        }
+        let identity = ScratchFile(name:file.lastPathComponent,bytes:source.bytes,inode:UInt64(fs.st_ino),device:fs.st_dev,sha256:source.sha256)
+        guard try Self.verifiedFile(identity,directory:fd) else {throw JoeyError.invalid("Temporary Joe source hash changed")}
+        let receipt = directory.appendingPathComponent("source-retention.json")
+        if fm.fileExists(atPath:receipt.path) {
+            let previous: TemporaryJoeSource = try Persistence.load(receipt)
+            guard previous.version == 1, previous.jobID == job.id, previous.sourceID == source.id,
+                  previous.file == identity, previous.directoryInode == UInt64(ds.st_ino),
+                  previous.directoryDevice == ds.st_dev, !previous.removalStarted, previous.removedAt == nil else {
+                throw JoeyError.invalid("Existing temporary source receipt conflicts; source preserved")
+            }
+            return
+        }
+        try Persistence.save(TemporaryJoeSource(jobID:job.id,sourceID:source.id,directoryInode:UInt64(ds.st_ino),
+            directoryDevice:ds.st_dev,file:identity),to:receipt)
+    }
+    /// Delivery is durable before removal. The intent receipt makes a crash
+    /// between unlink and readback recoverable without deleting a replacement.
+    @discardableResult func releaseTemporaryJoeSource(job: JobRecord) throws -> Bool {
+        guard job.request.productionWorkflow == .joeBudden, job.state == .completed,
+              job.hasRequiredCompletionEvidence, Self.component(job.id), let source = job.source else {return false}
+        let directory = root.appendingPathComponent("jobs/"+job.id)
+        let receipt = directory.appendingPathComponent("source-retention.json")
+        guard fm.fileExists(atPath:receipt.path) else {return false}
+        let lease = try ProcessingLock(directory:root,name:"storage-workers.lock")
+        defer {withExtendedLifetime(lease) {}}
+        try Self.noLinks(receipt)
+        var owned: TemporaryJoeSource = try Persistence.load(receipt)
+        guard owned.version == 1, owned.jobID == job.id, owned.sourceID == source.id,
+              Self.component(owned.file.name), owned.file.sha256 == source.sha256,
+              owned.file.bytes == source.bytes, source.path == directory.appendingPathComponent(owned.file.name).path,
+              !job.clips.contains(where:{$0.filename == owned.file.name}) else {
+            throw JoeyError.invalid("Temporary source receipt differs from the completed job; source preserved")
+        }
+        if owned.removedAt != nil {return true}
+        for clip in job.clips {
+            guard Self.component(clip.filename) else {throw JoeyError.invalid("Unsafe accepted clip name; source preserved")}
+            let output = directory.appendingPathComponent(clip.filename)
+            try Self.noLinks(output)
+            guard try Integrity.sha256(output) == clip.sha256 else {
+                throw JoeyError.invalid("Accepted Joe clip changed; source preserved")
+            }
+        }
+        // A second unfinished job may have reused this original. Malformed
+        // checkpoints stop removal rather than hiding an unknown dependency.
+        for otherDirectory in try fm.contentsOfDirectory(at:root.appendingPathComponent("jobs"),includingPropertiesForKeys:nil) {
+            let checkpoint = otherDirectory.appendingPathComponent("job.json")
+            guard fm.fileExists(atPath:checkpoint.path) else {continue}
+            let other: JobRecord = try Persistence.load(checkpoint)
+            if other.id != job.id, other.source?.path == source.path,
+               other.state != .completed || !other.hasRequiredCompletionEvidence {
+                throw JoeyError.dependency("Another unfinished job still needs this Joe source; source preserved")
+            }
+        }
+        let fd = try Self.openDirectory(directory); defer {Darwin.close(fd)}
+        var ds = stat(), fs = stat()
+        guard fstat(fd,&ds) == 0, UInt64(ds.st_ino) == owned.directoryInode, ds.st_dev == owned.directoryDevice else {
+            throw JoeyError.invalid("Joe source directory identity changed; source preserved")
+        }
+        if fstatat(fd,owned.file.name,&fs,AT_SYMLINK_NOFOLLOW) != 0 {
+            guard errno == ENOENT, owned.removalStarted else {throw JoeyError.invalid("Temporary source disappeared without a removal intent")}
+        } else {
+            guard try Self.verifiedFile(owned.file,directory:fd) else {throw JoeyError.invalid("Temporary source changed; replacement preserved")}
+            owned.removalStarted = true; try Persistence.save(owned,to:receipt)
+            guard unlinkat(fd,owned.file.name,0) == 0 else {throw JoeyError.failed("Could not remove completed Joe source")}
+            _ = fsync(fd)
+            guard fstatat(fd,owned.file.name,&fs,AT_SYMLINK_NOFOLLOW) != 0, errno == ENOENT else {
+                throw JoeyError.failed("Joe source removal readback failed")
+            }
+        }
+        owned.removedAt = Date(); try Persistence.save(owned,to:receipt)
+        return true
     }
     public static func capacity(at url: URL) throws -> (free: Int64, reserve: Int64) {
         let a = try FileManager.default.attributesOfFileSystem(forPath:url.path)
