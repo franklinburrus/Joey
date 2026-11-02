@@ -58,8 +58,8 @@ import Network
         }
     }
     func tick(now: Date = Date()) {
-        guard available, state.enabled else {return}
-        if !state.requiresAuthentication && !state.requiresResynchronization && (state.nextCheckAt ?? .distantPast) <= now {
+        guard available else {return}
+        if state.enabled && !state.requiresAuthentication && !state.requiresResynchronization && (state.nextCheckAt ?? .distantPast) <= now {
             checkNow()
         }
         owner?.resumeJoeQueue(includeJoe:false)
@@ -163,8 +163,13 @@ import Network
     func dismiss(_ id: String) {
         do {try store?.dismiss(id);publish()} catch {failedPersistence(error)}
     }
-    func retry(_ id: String) {
-        do {try store?.retry(id);publish();owner?.resumeJoeQueue(includeJoe:false)}
+    func process(_ id: String, workflow: EmailWorkflow) {
+        guard available, let store else {return}
+        do {
+            try store.requestProcessing(id,workflow:workflow);publish();error = nil
+            owner?.resumeJoeQueue(includeJoe:false)
+        }
+        catch let failure as JoeyError {error = failure.localizedDescription}
         catch {failedPersistence(error)}
     }
 }

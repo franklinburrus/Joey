@@ -142,9 +142,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         if includeJoe && joeAutomation.enabled && automationStateReadable {joeResumeRequested = true}
         guard !cancelling, !recovering, automationTask == nil,
               !busy, !libraryBusy, !preparingSource else {return}
-        let emailReady = email.available && email.state.canDispatch && email.state.work.contains {
-            $0.account == email.state.settings.account && ($0.status == .queued || $0.status == .retryable) && ($0.retryAt ?? .distantPast) <= Date()
-        }
+        let emailReady = email.available && email.state.nextRequestedWork() != nil
         guard joeResumeRequested || emailReady else {return}
         let runJoe = joeResumeRequested;joeResumeRequested = false
         automationTask = Task {
@@ -217,17 +215,19 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         }
         return .accepted
     }
-    /// One durable email request per turn. Library/Joe loops offer the same
+    /// One explicitly requested email item per turn. Library/Joe loops offer the same
     /// turn between episodes, so no automation owns an unbounded media queue.
     func runEmailItem(interleaved: Bool = false, now: Date = Date()) async {
         guard !cancelling, !busy, !preparingSource, (!libraryBusy || interleaved),
-              email.available, email.state.canDispatch, !email.dispatching, let store = email.store else {return}
+              email.available, !email.dispatching, let store = email.store else {return}
         do {try store.reconcile(jobs);email.publish()} catch {email.failedPersistence(error);return}
-        guard let work = email.state.work.first(where:{
-            $0.account == email.state.settings.account && ($0.status == .queued || $0.status == .retryable) && ($0.retryAt ?? .distantPast) <= now
-        }) else {return}
+        guard let work = email.state.nextRequestedWork(now:now) else {return}
         email.dispatching = true;preparingSource = true
         defer {email.dispatching = false;preparingSource = false}
+        // Consume the explicit intent before any external discovery. A crash
+        // during lookup must return to a held item, not authorize another run.
+        do {try store.updateWork(work.id,status:.running);email.publish()}
+        catch {email.failedPersistence(error);return}
         do {
             var request = work.request
             if request == nil {
@@ -253,14 +253,15 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
                         archiveRoot:work.workflow.archiveRoot.isEmpty ? nil:work.workflow.archiveRoot)
                 }
                 try Task.checkCancellation()
-                guard email.state.canDispatch, !cancelling else {return}
+                guard email.available, !cancelling else {throw CancellationError()}
                 try store.freeze(work.id,request:request!);email.publish()
             }
-            guard email.state.canDispatch, !cancelling, let request else {return}
-            try store.updateWork(work.id,status:.running);email.publish()
+            guard email.available, !cancelling, let request else {throw CancellationError()}
+            try Task.checkCancellation()
             let acceptance = start(request,automatic:true)
             guard acceptance == .accepted, let processing = task else {
                 try store.updateWork(work.id,status:acceptance == .deferred ? .queued:.retryable,reason:"Processing owner is unavailable")
+                if acceptance == .deferred {try store.requestProcessing(work.id,workflow:work.workflow)}
                 email.publish();return
             }
             // Pausing intake never cancels an accepted media task. The existing
@@ -274,6 +275,8 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             email.publish()
         } catch is CancellationError {
             // No cursor or frozen request is discarded on discovery cancellation.
+            do {try store.updateWork(work.id,status:.cancelled,reason:"Stopped; saved link and request retained");email.publish()}
+            catch {email.failedPersistence(error)}
         } catch {
             do {try store.updateWork(work.id,status:.retryable,reason:error.localizedDescription);email.publish()}
             catch {email.failedPersistence(error)}

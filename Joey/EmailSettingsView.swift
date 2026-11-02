@@ -18,6 +18,8 @@ struct EmailSettingsView: View {
                 Text(EmailIntakeSettings.alias).font(.body.monospaced()).textSelection(.enabled)
                 Text("Send new messages directly to this alias in To or Cc, from an allowed address, with your secret Joey token. Joey checks INBOX while the app and Mac are awake. Mail moved by another client before a check may be missed.")
                     .font(.callout).foregroundStyle(.secondary)
+                Text("Email only saves links. Choose Content and Workflow for a queued link, then click Process when ready.")
+                    .font(.callout)
                 Label(model.state.enabled ? "Email intake enabled":"Email intake paused",systemImage:model.state.enabled ? "checkmark.circle.fill":"pause.circle")
                     .foregroundStyle(model.state.enabled ? .green:.secondary)
                 LabeledContent("Pending intake",value:String(model.state.pendingCount))
@@ -37,6 +39,15 @@ struct EmailSettingsView: View {
                     Button("Establish New-Mail Baseline…") {confirmBaseline = true}
                         .disabled(model.checking)
                 }
+                VStack(alignment:.leading,spacing:16) {
+                    Text("Queued Links").font(.headline)
+                    let pending = model.state.work.filter {$0.status != .completed}
+                    if pending.isEmpty {Text("No queued links.").foregroundStyle(.secondary)}
+                    ForEach(pending) {work in
+                        EmailQueuedLinkView(model:model,work:work,selectJob:selectJob)
+                        Divider()
+                    }
+                }
                 DisclosureGroup("Connection and Email Template") {
                     VStack(alignment:.leading,spacing:12) {
                         Text("The app-specific password accesses the parent mailbox, not only this alias. Joey uses read-only IMAP and never sends, moves, marks or deletes mail. Use a separate app-specific password from your Apple Account; never enter your main account password.")
@@ -46,18 +57,6 @@ struct EmailSettingsView: View {
                         SecureField("App-specific password (leave blank to retain)",text:$password)
                         TextField("Allowed senders, separated by commas",text:$senders,axis:.vertical)
                             .autocorrectionDisabled()
-                        Picker("Content",selection:$settings.workflow.content) {
-                            Text("DUB").tag(LinkContent.dub)
-                            Text("Taxstone").tag(LinkContent.taxstone)
-                            Text("Joe Budden").tag(LinkContent.joeBudden)
-                        }
-                        Picker("Workflow",selection:$settings.workflow.mode) {
-                            Text("Full Show").tag(JobMode.fullShow)
-                            Text("Highlights").tag(JobMode.highlights)
-                        }.disabled(settings.workflow.content == .joeBudden)
-                        TextField("Existing full-source archive folder ID (optional)",text:$settings.workflow.archiveRoot)
-                        Text("Uses your existing production profiles, source archives, automatic QA and Drive delivery. Official Joe Budden episodes retain their existing routing. Settings changes pause intake; queued requests keep their original workflow.")
-                            .font(.callout).foregroundStyle(.secondary)
                         Button("Save Secure Setup") {
                             settings.allowedSenders = senders.components(separatedBy:CharacterSet(charactersIn:",;\n")).filter {!$0.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty}
                             model.saveSetup(settings,password:password)
@@ -86,7 +85,7 @@ struct EmailSettingsView: View {
                         ForEach(Array(model.state.receipts.reversed().prefix(50))) {receipt in
                             VStack(alignment:.leading,spacing:6) {
                                 Text(receipt.receivedAt.formatted()).font(.callout)
-                                Text(receipt.status == "queued" ? "Accepted; linked job status below":receipt.status).font(.subheadline.bold())
+                                Text(receipt.status == "queued" ? "Links saved to queue":receipt.status).font(.subheadline.bold())
                                 Text(MailCheckFailure.message(receipt.reason)).font(.callout)
                                 ForEach(receipt.sources,id:\.id) {source in Text(source.url).font(.caption).textSelection(.enabled)}
                                 ForEach(receipt.workIDs,id:\.self) {id in
@@ -95,9 +94,6 @@ struct EmailSettingsView: View {
                                         if let reason = work.reason {Text(reason).font(.callout).textSelection(.enabled)}
                                         if let jobID = work.jobID {
                                             Button("Open Job") {selectJob(jobID)}
-                                        }
-                                        if work.status == .retryable || work.status == .cancelled {
-                                            Button("Retry Saved Request") {model.retry(id)}
                                         }
                                     }
                                 }
@@ -120,5 +116,51 @@ struct EmailSettingsView: View {
         } message: {
             Text("Saved receipts and jobs remain. Existing INBOX messages will not be replayed. Resend any uncaptured source links as fresh mail after enabling.")
         }
+    }
+}
+
+private struct EmailQueuedLinkView: View {
+    @ObservedObject var model: EmailIntakeModel
+    let work: EmailWork
+    var selectJob: (String) -> Void
+    @State private var workflow = EmailWorkflow()
+
+    private var requested: Bool {work.processingRequested == true}
+    private var active: Bool {work.status == .running || requested}
+
+    var body: some View {
+        VStack(alignment:.leading,spacing:10) {
+            Text(work.source.url).font(.callout).textSelection(.enabled)
+            Text(work.status == .running ? "Processing" : requested ? "Waiting for the current job to finish" : "Saved — waiting for you")
+                .font(.subheadline.bold())
+            if let reason = work.reason {Text(reason).font(.callout).textSelection(.enabled)}
+            if work.request == nil {
+                Picker("Content",selection:$workflow.content) {
+                    Text("DUB").tag(LinkContent.dub)
+                    Text("Taxstone").tag(LinkContent.taxstone)
+                    Text("Joe Budden").tag(LinkContent.joeBudden)
+                }.disabled(active)
+                Picker("Workflow",selection:$workflow.mode) {
+                    Text("Full Show").tag(JobMode.fullShow)
+                    Text("Highlights").tag(JobMode.highlights)
+                }.disabled(active || workflow.content == .joeBudden)
+                TextField("Existing full-source archive folder ID (optional)",text:$workflow.archiveRoot)
+                    .disabled(active)
+                Text("Uses existing production profiles, automatic QA and Drive filing. Official Joe Budden episodes keep their Joe workflow.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Saved workflow retained. Retry reuses the existing request and accepted work.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            HStack {
+                Button(work.status == .retryable || work.status == .cancelled ? "Retry":"Process") {
+                    model.process(work.id,workflow:workflow)
+                }.disabled(active)
+                if let jobID = work.jobID {Button("Open Job") {selectJob(jobID)}}
+            }
+        }
+        .onAppear {workflow = work.workflow}
+        .onChange(of:work.workflow) {_,value in workflow = value}
+        .onChange(of:workflow.content) {_,value in if value == .joeBudden {workflow.mode = .fullShow}}
     }
 }

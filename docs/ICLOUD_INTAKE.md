@@ -16,11 +16,9 @@ deletes messages, or publishes media.
    intake alias or an unrelated Apple Account sign-in address. Enter the
    app-specific password in the secure field. Never use your main Apple
    Account password or paste a password into chat.
-3. Enter the allowed sending addresses, separated by commas. Choose DUB,
-   Taxstone or Joe Budden, and Full Show or Highlights. The existing verified
-   production profiles and automatic official Joe routing still apply. If
-   necessary, supply the existing complete-source archive folder ID. Email
-   prose cannot select folders, change these settings or run commands.
+3. Enter the allowed sending addresses, separated by commas. Email intake
+   only saves supported source links. Content and Workflow are selected later
+   for each queued link; email prose cannot choose folders or run commands.
 4. Choose **Save Secure Setup**. Joey creates a 256-bit random intake token
    and saves it with the app password in its own non-synchronizing Keychain
    item. Save reads that item back in this build. Ordinary settings, receipts,
@@ -49,6 +47,26 @@ only Joey's item for the current account; it does not revoke Apple's password
 remotely. Disconnect before replacing an account if its Joey credential should
 also be removed.
 
+## Processing saved links
+
+Open **Settings → iCloud Email Intake → Queued Links**. Each incoming authorized
+link waits here without source discovery, download or processing. Choose DUB,
+Taxstone or Joe Budden and Full Show or Highlights for that item. Supply the
+existing complete-source archive folder ID only if needed, then click **Process**.
+Official Joe Budden episodes retain their existing Joe routing and Full Show
+workflow. Existing production profiles, QA, full-source archival and Drive
+filing requirements still apply.
+
+Process saves your choice before starting. If another job owns processing, the
+item waits for a turn. Unselected items stay queued across checks, wake and
+restart. A failure requires **Retry**; an interrupted attempt requires Process
+again. A frozen request retains its original workflow and accepted outputs.
+Repeated emails reuse the saved item without resetting it or requesting a run.
+All pending links appear independently of the bounded recent-receipt history.
+
+Mail Enable/Pause controls collection only. You can process an already saved
+link while mail is paused or disconnected. No replies or outgoing email are sent.
+
 ## Operation and recovery
 
 While enabled, Joey checks about once per 60 seconds. Checks never overlap.
@@ -76,23 +94,28 @@ rejections, queued work, running jobs, retryable failures and completed jobs.
 A receipt is not evidence of media completion. Open Job navigates to the real
 coordinator job. Missing/incorrect tokens do not dispatch; resend with the
 current template, then dismiss the obsolete local pending receipt if desired.
-Dismissal does not change server mail. Retry Saved Request preserves the frozen
+Dismissal does not change server mail. Retry in Queued Links preserves the frozen
 request and accepted output, including after explicit cancellation.
 
-Pause stops future checks and new email dispatch. An already accepted media
-job continues; use its existing Cancel action to stop it. Manual, Joe Budden
-and Taxstone processing share the existing media owner. Email gets turns
-between automatic episodes; it never creates another renderer. Failures stay
-retryable while independent items proceed. Production requirements, original
+Pause stops future mail checks. An already requested or accepted media job
+continues; use its existing Cancel action to stop active processing. Manual,
+Joe Budden and Taxstone processing share the existing media owner. Only links
+with an explicit Process choice get turns between automatic episodes; email
+never creates another renderer. Failures wait for Retry while independently
+requested items proceed. Production requirements, original
 archival, transcripts, automatic QA, Drive filing and register reconciliation
 are unchanged.
 
 One private `email-intake.json` under Joey's application-support directory saves
-the account-specific INBOX baselines, minimal receipts, queue, frozen requests
-and coordinator job mappings together. Receipt identity uses account, mailbox,
+the account-specific INBOX baselines, minimal receipts, queue, frozen requests,
+explicit processing choices and coordinator job mappings together. Receipt
+identity uses account, mailbox,
 UIDVALIDITY and UID, never Message-ID or read/unread flags. Media identity is the
 existing immutable JobRequest; mail timestamps and UIDs do not change it.
-Repeated links/messages and restart reuse that request and existing job. Display
+Repeated links/messages and restart reuse that request and existing job.
+Version 1 ledgers upgrade without granting processing intent to any old item;
+version 2 saves are rejected by older automatic-dispatch builds. Rollback must
+preserve this ledger and leave intake disabled in such an older build. Display
 history is bounded to 500 receipts; frozen request mappings are retained.
 
 A changed UIDVALIDITY invalidates the numeric cursor. Joey preserves the ledger
@@ -118,11 +141,13 @@ dummy Keychain values and sanitized helper errors. They do not access a real
 mailbox or prove media delivery.
 
 After secure setup in the intended app build, verify the designated fresh
-message appears once, binds to one coordinator request/job, and remains one job
-after Check Now and relaunch. Send unrelated synthetic mail only if separately
+message appears once in Queued Links with no discovery or job after Check Now
+and relaunch. Choose its Content/Workflow and click Process; verify it binds
+to one coordinator request/job. Send unrelated synthetic mail only if separately
 authorized; inspect the designated message's unchanged flags/location through
-your normal mail client. Exercise one queued message while Joey is busy, then
-confirm it receives a processing turn. Use only a small, authorized supported
+your normal mail client. Click Process for one queued message while Joey is busy,
+then confirm it receives a processing turn; an unselected message must keep
+waiting. Use only a small, authorized supported
 source for a live downstream media test. Confirm required Drive/record evidence
 separately; a saved receipt or connection test is not delivery.
 

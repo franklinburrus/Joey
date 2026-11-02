@@ -99,7 +99,7 @@ final class EmailIntakeTests: XCTestCase {
         }
         try store.recordFailure("authenticationFailed",now:now)
         XCTAssertTrue(store.state.requiresAuthentication)
-        XCTAssertFalse(store.state.canDispatch)
+        XCTAssertNil(store.state.nextRequestedWork())
     }
     func testSecondAccountCanDispatchTheSameFrozenMediaWork() throws {
         let store = try EmailIntakeStore(root:root())
@@ -119,6 +119,82 @@ final class EmailIntakeTests: XCTestCase {
         try store.configure(settings);try store.activate(EmailScan(uidValidity:7,uidNext:11,frontier:10,messages:[]));try store.pause()
         do {try store.activate(EmailScan(uidValidity:8,uidNext:50,frontier:49,messages:[]));XCTFail("Reset accepted")}
         catch {XCTAssertEqual((error as? MailCheckFailure)?.code,"uidValidityChanged")}
+    }
+    func testWorkflowChosenPerItemSurvivesRestartAndDuplicateMail() throws {
+        let location = try root(), store = try EmailIntakeStore(root:location)
+        var settings = EmailIntakeSettings();settings.account = "parent@icloud.com";settings.allowedSenders = ["sender@example.test"]
+        settings.workflow.content = .joeBudden // legacy global default must not control new work
+        try store.configure(settings);try store.activate(EmailScan(uidValidity:7,uidNext:1,frontier:0,messages:[]))
+        let link = "https://youtu.be/abcdefghijk"
+        try store.ingest(EmailScan(uidValidity:7,uidNext:2,frontier:1,messages:[EmailMessage(uid:1,status:"authorized",reason:"templateToken",links:[link])]))
+        let work = try XCTUnwrap(store.state.work.first)
+        XCTAssertEqual(work.workflow.content,.dub)
+        XCTAssertNil(store.state.nextRequestedWork())
+        var choice = EmailWorkflow();choice.content = .taxstone;choice.mode = .highlights;choice.archiveRoot = "existingFolder123"
+        try store.requestProcessing(work.id,workflow:choice)
+        let reopened = try EmailIntakeStore(root:location)
+        XCTAssertEqual(reopened.state.nextRequestedWork()?.workflow,choice)
+        settings.workflow.mode = .highlights;try reopened.configure(settings)
+        try reopened.ingest(EmailScan(uidValidity:7,uidNext:3,frontier:2,messages:[EmailMessage(uid:2,status:"authorized",reason:"templateToken",links:[link])]))
+        XCTAssertEqual(reopened.state.work.count,1)
+        XCTAssertEqual(reopened.state.receipts.last?.workIDs,[work.id])
+        XCTAssertEqual(reopened.state.work.first?.workflow,choice)
+        var changed = choice;changed.content = .dub
+        XCTAssertThrowsError(try reopened.requestProcessing(work.id,workflow:changed))
+    }
+    func testLegacyQueuedRetryableAndRunningWorkRequireProcessAfterMigration() throws {
+        let location = try root()
+        var legacy = EmailIntakeState();legacy.version = 1
+        legacy.enabled = true
+        for (index,status) in [EmailWorkStatus.queued,.retryable,.running].enumerated() {
+            let source = try EmailSource("https://x.com/i/broadcasts/source\(index)")
+            var work = EmailWork(id:"legacy-\(index)",account:"parent@icloud.com",source:source,workflow:EmailWorkflow())
+            work.status = status;work.retryRequested = true
+            legacy.work.append(work)
+        }
+        let url = location.appendingPathComponent("email-intake.json")
+        try Persistence.save(legacy,to:url)
+        let original = try Data(contentsOf:url)
+        let store = try EmailIntakeStore(root:location)
+        XCTAssertNil(store.state.nextRequestedWork(now:.distantFuture))
+        XCTAssertEqual(store.state.work.map(\.id),["legacy-0","legacy-1","legacy-2"])
+        XCTAssertEqual(try Data(contentsOf:url),original) // no write before the email lease
+        try store.pause()
+        let persisted: EmailIntakeState = try Persistence.load(url)
+        XCTAssertEqual(persisted.version,2) // old auto-dispatch builds reject this ledger
+        XCTAssertNil(persisted.nextRequestedWork(now:.distantFuture))
+    }
+    func testProcessSelectionFailedSaveNeverAuthorizesWork() throws {
+        let location = try root()
+        var state = EmailIntakeState()
+        let source = try EmailSource("https://youtu.be/abcdefghijk")
+        state.work = [EmailWork(id:"item",account:"parent@icloud.com",source:source,workflow:EmailWorkflow())]
+        let url = location.appendingPathComponent("email-intake.json")
+        try Persistence.save(state,to:url)
+        let store = try EmailIntakeStore(root:location)
+        var invalid = EmailWorkflow();invalid.archiveRoot = "not a folder"
+        XCTAssertThrowsError(try store.requestProcessing("item",workflow:invalid))
+        try FileManager.default.removeItem(at:url)
+        try FileManager.default.createDirectory(at:url,withIntermediateDirectories:false)
+        XCTAssertThrowsError(try store.requestProcessing("item",workflow:EmailWorkflow()))
+        XCTAssertNil(store.state.nextRequestedWork())
+        XCTAssertEqual(store.state.work.first?.workflow,EmailWorkflow())
+    }
+    func testLegacyJoeHighlightsSelectionCanRetryItsFrozenFullShowRequest() throws {
+        let location = try root()
+        var state = EmailIntakeState();state.version = 1
+        var workflow = EmailWorkflow();workflow.content = .joeBudden;workflow.mode = .highlights
+        let source = try EmailSource("https://youtu.be/abcdefghijk")
+        var work = EmailWork(id:"legacy-joe",account:"parent@icloud.com",source:source,workflow:workflow)
+        var request = try Fixtures.request(dir:location,path:"synthetic-missing-source")
+        request.sourceID = source.id;request.mode = .fullShow
+        work.request = request;work.status = .retryable;state.work = [work]
+        try Persistence.save(state,to:location.appendingPathComponent("email-intake.json"))
+        let store = try EmailIntakeStore(root:location)
+        try store.requestProcessing(work.id,workflow:workflow)
+        XCTAssertNotNil(store.state.nextRequestedWork())
+        XCTAssertEqual(store.state.work.first?.workflow.mode,.fullShow)
+        XCTAssertEqual(try store.state.work.first?.request?.identityData(),try request.identityData())
     }
     func testPrivateStdinReachesSupervisedChildWithEOFAndNoCaptureLeak() async throws {
         let secret = Data("JOEY_SYNTHETIC_STDIN_SECRET".utf8)

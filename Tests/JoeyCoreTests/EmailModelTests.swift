@@ -28,7 +28,23 @@ final class EmailModelTests: XCTestCase {
             XCTAssertNil(model.task)
         }
     }
-    @MainActor func testPauseDoesNotCancelAcceptedMediaButDisablesFurtherEmailDispatch() throws {
+    @MainActor func testNewEmailAndPeriodicTurnsNeverDiscoverBeforeProcess() async throws {
+        let model = try queuedModel()
+        var calls = 0
+        model.email.lookup = {_ in calls += 1;throw JoeyError.dependency("Unexpected automatic discovery")}
+        model.email.tick(now:.distantPast)
+        await model.runEmailItem()
+        await model.runEmailItem(interleaved:true,now:.distantFuture)
+        XCTAssertEqual(calls,0)
+        XCTAssertNil(model.task)
+        XCTAssertTrue(model.jobs.isEmpty)
+        XCTAssertNil(model.email.state.work.first?.request)
+        XCTAssertEqual(model.email.state.work.first?.status,.queued)
+        let reopened = try EmailIntakeStore(root:model.root)
+        XCTAssertEqual(reopened.state.work.count,1)
+        XCTAssertEqual(reopened.state.currentBaseline?.frontier,1)
+    }
+    @MainActor func testPauseDoesNotCancelAcceptedMediaAndStopsMailCollection() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer {try? FileManager.default.removeItem(at:root)}
         let model = JobModel(root:root,startsAutomatically:false)
@@ -41,6 +57,8 @@ final class EmailModelTests: XCTestCase {
     }
     @MainActor func testBusyQueueSurvivesAndDiscoveryRunsAfterOwnerReleases() async throws {
         let model = try queuedModel()
+        let work = try XCTUnwrap(model.email.state.work.first)
+        model.email.process(work.id,workflow:work.workflow)
         var calls = 0
         model.email.lookup = {_ in calls += 1;throw JoeyError.dependency("Synthetic source is unavailable")}
         for owner in ["manual","library"] {
@@ -55,17 +73,25 @@ final class EmailModelTests: XCTestCase {
         XCTAssertEqual(saved.state.currentBaseline?.frontier,1)
         XCTAssertEqual(saved.state.work.count,1)
     }
-    @MainActor func testPauseDuringDiscoveryCannotDispatchAndIndependentItemCanProgress() async throws {
-        let model = try queuedModel()
-        model.email.lookup = {_ in
-            model.email.pause()
-            return DiscoveredSource(id:"youtube:abcdefghijk",title:"Fixture",url:"https://www.youtube.com/watch?v=abcdefghijk",duration:600)
-        }
+    @MainActor func testExplicitProcessWorksWhileMailIsPausedAndFailureDoesNotRetry() async throws {
+        let model = try queuedModel(), store = try XCTUnwrap(model.email.store)
+        let work = try XCTUnwrap(store.state.work.first)
+        model.email.pause()
+        var workflow = EmailWorkflow();workflow.content = .taxstone;workflow.mode = .highlights
+        model.email.process(work.id,workflow:workflow)
+        var calls = 0
+        model.email.lookup = {_ in calls += 1;throw JoeyError.dependency("Synthetic discovery failure")}
         await model.runEmailItem()
-        XCTAssertNil(model.task)
-        XCTAssertNil(model.email.state.work.first?.request)
-        XCTAssertEqual(model.email.state.work.first?.status,.queued)
+        XCTAssertEqual(calls,1)
+        XCTAssertEqual(model.email.state.work.first?.workflow,workflow)
+        XCTAssertEqual(model.email.state.work.first?.status,.retryable)
+        XCTAssertNil(model.email.state.nextRequestedWork(now:.distantFuture))
+        await model.runEmailItem(now:.distantFuture)
+        XCTAssertEqual(calls,1)
         XCTAssertFalse(model.email.state.enabled)
+        model.email.process(work.id,workflow:workflow)
+        await model.runEmailItem()
+        XCTAssertEqual(calls,2)
     }
     @MainActor func testFrozenRequestEntersRealCoordinatorWithoutRediscoveryAfterCrash() async throws {
         let model = try queuedModel(), store = try XCTUnwrap(model.email.store)
@@ -79,6 +105,9 @@ final class EmailModelTests: XCTestCase {
         model.email.publish()
         model.email.lookup = {_ in XCTFail("Frozen request must not be rediscovered");throw CancellationError()}
         await model.runEmailItem()
+        XCTAssertTrue(model.jobs.isEmpty) // an interrupted legacy item waits for Process
+        model.email.process(work.id,workflow:work.workflow)
+        await model.runEmailItem()
         let jobID = try XCTUnwrap(model.email.state.work.first?.jobID)
         let checkpoint = model.root.appendingPathComponent("jobs/\(jobID)/job.json")
         XCTAssertTrue(FileManager.default.fileExists(atPath:checkpoint.path))
@@ -86,10 +115,31 @@ final class EmailModelTests: XCTestCase {
         XCTAssertEqual(model.email.state.work.first?.status,.retryable)
         let first: JobRecord = try Persistence.load(checkpoint)
         try store.updateWork(work.id,status:.running) // crash after dispatch
-        model.email.publish()
+        try store.reconcile(model.jobs);model.email.publish()
+        model.email.process(work.id,workflow:work.workflow)
         await model.runEmailItem(now:Date().addingTimeInterval(1000))
         XCTAssertEqual(model.jobs.map(\.id),[first.id])
         XCTAssertEqual(model.email.state.work.first?.jobID,first.id)
+    }
+    @MainActor func testCancelledDiscoveryWaitsForExplicitRetry() async throws {
+        let model = try queuedModel()
+        let work = try XCTUnwrap(model.email.state.work.first)
+        model.email.process(work.id,workflow:work.workflow)
+        var calls = 0
+        model.email.lookup = {_ in
+            calls += 1
+            let interrupted = try EmailIntakeStore(root:model.root)
+            XCTAssertNil(interrupted.state.work.first?.processingRequested)
+            try interrupted.reconcile([])
+            XCTAssertEqual(interrupted.state.work.first?.status,.queued)
+            XCTAssertNil(interrupted.state.nextRequestedWork())
+            throw CancellationError()
+        }
+        await model.runEmailItem()
+        await model.runEmailItem(now:.distantFuture)
+        XCTAssertEqual(calls,1)
+        XCTAssertNil(model.email.state.nextRequestedWork(now:.distantFuture))
+        XCTAssertNil(model.email.state.work.first?.request)
     }
     @MainActor func testExplicitRetryOfCancelledJobSurvivesReconciliation() async throws {
         let model = try queuedModel(), store = try XCTUnwrap(model.email.store)
@@ -102,7 +152,7 @@ final class EmailModelTests: XCTestCase {
         try Persistence.save(job,to:model.root.appendingPathComponent("jobs/\(id)/job.json"))
         model.jobs = [job]
         try store.updateWork(work.id,status:.cancelled);model.email.publish()
-        model.email.retry(work.id)
+        model.email.process(work.id,workflow:work.workflow)
         await model.runEmailItem()
         let saved: JobRecord = try Persistence.load(model.root.appendingPathComponent("jobs/\(id)/job.json"))
         XCTAssertNotEqual(saved.state,.cancelled)

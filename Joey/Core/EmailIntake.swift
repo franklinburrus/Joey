@@ -35,6 +35,15 @@ public struct EmailWorkflow: Codable, Equatable, Sendable {
     public var mode: JobMode = .fullShow
     public var archiveRoot: String = ""
     public init() {}
+    public func validated() throws -> Self {
+        var copy = self
+        copy.archiveRoot = archiveRoot.trimmingCharacters(in:.whitespacesAndNewlines)
+        guard copy.archiveRoot.isEmpty || copy.archiveRoot.range(of:"^[A-Za-z0-9_-]{10,200}$",options:.regularExpression) != nil else {
+            throw JoeyError.invalid("Archive folder must be an existing Drive folder ID")
+        }
+        if copy.content == .joeBudden {copy.mode = .fullShow}
+        return copy
+    }
 }
 
 public struct EmailIntakeSettings: Codable, Equatable, Sendable {
@@ -53,9 +62,6 @@ public struct EmailIntakeSettings: Codable, Equatable, Sendable {
               !copy.allowedSenders.isEmpty, copy.allowedSenders.count <= 20,
               copy.allowedSenders.allSatisfy({$0.count <= 254 && $0.range(of:address,options:.regularExpression) != nil}) else {
             throw JoeyError.invalid("Enter the primary iCloud Mail address and 1–20 complete allowed sender addresses")
-        }
-        guard copy.workflow.archiveRoot.isEmpty || copy.workflow.archiveRoot.range(of:"^[A-Za-z0-9_-]{10,200}$",options:.regularExpression) != nil else {
-            throw JoeyError.invalid("Archive folder must be an existing Drive folder ID")
         }
         return copy
     }
@@ -118,9 +124,11 @@ public struct EmailWork: Codable, Identifiable, Sendable {
     public var attempts = 0
     public var retryAt: Date?
     public var retryRequested: Bool?
+    /// Only a local Process action creates this intent. Old ledgers omit it.
+    public var processingRequested: Bool?
 }
 public struct EmailIntakeState: Codable, Sendable {
-    public var version = 1
+    public var version = 2
     public var settings = EmailIntakeSettings()
     public var enabled = false
     public var baselines: [EmailBaseline] = []
@@ -138,7 +146,9 @@ public struct EmailIntakeState: Codable, Sendable {
         work.filter {$0.status != .completed && $0.status != .cancelled}.count + receipts.filter {$0.status == "pendingAuthorization"}.count
     }
     public var capacity: Int {max(0,100-pendingCount)}
-    public var canDispatch: Bool {enabled && !requiresAuthentication && !requiresResynchronization}
+    public func nextRequestedWork(now: Date = Date()) -> EmailWork? {
+        work.first {$0.processingRequested == true && ($0.status == .queued || $0.status == .retryable) && ($0.retryAt ?? .distantPast) <= now}
+    }
 }
 
 /// The application owns an email-only lock for this store's lifetime. It never
@@ -151,8 +161,18 @@ public final class EmailIntakeStore {
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
         url = root.appendingPathComponent("email-intake.json")
         state = FileManager.default.fileExists(atPath:url.path) ? try Persistence.load(url):EmailIntakeState()
-        guard state.version == 1, Set(state.work.map(\.id)).count == state.work.count else {
+        guard [1,2].contains(state.version), Set(state.work.map(\.id)).count == state.work.count else {
             throw JoeyError.failed("Saved email state is incompatible; preserve email-intake.json for recovery")
+        }
+        if state.version == 1 {
+            // Upgrade in memory; the next atomic mutation writes version 2.
+            // Initialization precedes the caller's lease, so never write here.
+            // Version 1 binaries reject version 2 instead of auto-running it.
+            state.version = 2
+            for index in state.work.indices {
+                state.work[index].processingRequested = nil
+                state.work[index].retryRequested = nil
+            }
         }
     }
     public func lock() throws -> ProcessingLock {try ProcessingLock(directory:url.deletingLastPathComponent(),name:"email-intake.lock")}
@@ -221,11 +241,13 @@ public final class EmailIntakeStore {
                 for source in sources {
                     // Receipt timestamps and UIDs are deliberately absent from
                     // media identity. Frozen requests survive title changes.
-                    let contract = source.id + "|" + String(decoding:try Persistence.encoder.encode(next.settings.workflow),as:UTF8.self)
-                    let key = Integrity.textHash(contract)
+                    // Intake identity is the source, independent of settings
+                    // chosen later. Preserve legacy keys and frozen mappings.
+                    let existing = next.work.first {$0.source.id == source.id}
+                    let key = existing?.id ?? Integrity.textHash(source.id)
                     ids.append(key)
                     if !next.work.contains(where:{$0.id == key}) {
-                        next.work.append(EmailWork(id:key,account:next.settings.account,source:source,workflow:next.settings.workflow))
+                        next.work.append(EmailWork(id:key,account:next.settings.account,source:source,workflow:EmailWorkflow()))
                     } else if let index = next.work.firstIndex(where:{$0.id == key}) {
                         // A newly authorized receipt in another configured
                         // account can continue the same frozen media contract.
@@ -266,6 +288,7 @@ public final class EmailIntakeStore {
         var next = state
         guard let index = next.work.firstIndex(where:{$0.id == id}) else {return}
         next.work[index].status = status;next.work[index].reason = reason
+        if status != .queued {next.work[index].processingRequested = nil}
         if status == .running {next.work[index].retryRequested = nil}
         if let jobID {next.work[index].jobID = jobID}
         if status == .retryable {
@@ -277,14 +300,24 @@ public final class EmailIntakeStore {
     public func reconcile(_ jobs: [JobRecord]) throws {
         var next = state
         for index in next.work.indices {
-            guard let request = next.work[index].request else {continue}
+            guard let request = next.work[index].request else {
+                if next.work[index].status == .running {
+                    next.work[index].status = .queued
+                    next.work[index].processingRequested = nil
+                }
+                continue
+            }
             let identity = try request.identityData()
             let matches = try jobs.filter {try $0.request.identityData() == identity}
             guard matches.count <= 1 else {throw JoeyError.failed("Multiple jobs match an email request; preserve and reconcile their checkpoints")}
             if let job = matches.first {
                 next.work[index].jobID = job.id
-                if job.state == .completed && job.hasRequiredCompletionEvidence {next.work[index].status = .completed}
-                else if job.state == .cancelled && next.work[index].retryRequested != true {next.work[index].status = .cancelled}
+                if job.state == .completed && job.hasRequiredCompletionEvidence {
+                    next.work[index].status = .completed;next.work[index].processingRequested = nil
+                }
+                else if job.state == .cancelled && next.work[index].retryRequested != true {
+                    next.work[index].status = .cancelled;next.work[index].processingRequested = nil
+                }
                 else if next.work[index].status == .completed {
                     next.work[index].status = .retryable
                     next.work[index].reason = job.error ?? "Coordinator completion evidence is no longer complete"
@@ -294,10 +327,19 @@ public final class EmailIntakeStore {
         }
         if try Persistence.encoder.encode(next) != Persistence.encoder.encode(state) {try commit(next)}
     }
-    public func retry(_ id: String) throws {
+    public func requestProcessing(_ id: String, workflow: EmailWorkflow) throws {
         var next = state
-        guard let index = next.work.firstIndex(where:{$0.id == id}) else {return}
+        guard let index = next.work.firstIndex(where:{$0.id == id}),
+              next.work[index].status != .running, next.work[index].status != .completed else {
+            throw JoeyError.invalid("This saved link is already processing or completed")
+        }
+        let workflow = try workflow.validated()
+        if next.work[index].request != nil || next.work[index].processingRequested == true {
+            guard workflow == (try next.work[index].workflow.validated()) else {throw JoeyError.invalid("A requested workflow cannot change; reuse its saved job")}
+        }
+        next.work[index].workflow = workflow
         next.work[index].status = .queued;next.work[index].retryRequested = true
+        next.work[index].processingRequested = true
         next.work[index].retryAt = nil;next.work[index].reason = nil
         try commit(next)
     }
