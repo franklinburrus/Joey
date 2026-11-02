@@ -1,3 +1,59 @@
+## Final production acceptance — Taxstone verified; overall task PARTIAL (2026-11-02)
+
+Real installed-app acceptance completed `taxstone-ab50e1cf3e21aec596cc88be`, source `soundcloud:261140871`, at `2026-11-02T15:05:24Z`. **23 clips passed automated QA and Drive verification; all four companions passed upload/download readback; the durable job checkpoint is COMPLETED.** Correct direct-root episode folder: https://drive.google.com/drive/folders/1eXKK3Pit7VnWKtlUF6zTHyBFoaejY0t1, parent `1kxv3bbnPPRt914npHFUI51jrbCY0atyU`. No manual destination selection was needed.
+
+An independent read-only Python provider audit used the existing real rclone OAuth and direct Google metadata/content GETs. It verified all 27 file IDs, exact names, parents, sizes, local SHA-256 and matching provider checksums, permission fingerprints, one matching source folder, no duplicate filenames/clip bytes, source-bound transcript, exact CSV timestamps and complete chronological source coverage. It independently downloaded all four companion files. The uploaded manifest remains FILED with the durable app checkpoint identified as completion authority, avoiding circular self-hashes or premature external completion. Original archive `1wN7bh6hEwzdduJi9XrzVNmKyxJD2n92C` remains unchanged under legacy parent `1wQMwzUconRC3UCvH2jpL1kD__ctBv29p`; no original was moved or duplicated. Source and destination permissions remained unchanged.
+
+Real recovery evidence: native Cancel and Save Progress after clip 1, restart, and Resume preserved its accepted bytes/mtime/QA. During filing, the bounded diagnostic interrupted exactly one supervised `rclone copyto` for new clip 2 at `15:02:10Z`; the app, originals and historical media were untouched. Production reconciliation retried automatically and continued. Final checks preserved all 23 accepted hashes/mtimes/QA receipts, the same episode folder, and the already verified clip-1 provider ID. The completed-job runner reopen returned exit 0 without new delivery work. No duplicate episode folder or remote file remained.
+
+Final live audit returned exit **0**, **1 test passed**, 82.344 seconds. It verified **326 receipts across 16 packages / 262 clips**: the new correct package plus the **15 historical misplaced packages / 239 clips / 299 receipts**, unchanged from the pre-production audit. All eight roots and permission fingerprints are unchanged. Historical migration remains unexecuted; the deterministic reversible plan below and `historical-migration-plan.json` identify the proposed exact folder/parent operations.
+
+The first before/after comparison helper exited 1 because Swift dictionary iteration emitted companion receipts in a different array order. Inspection confirmed only ordering differed. Sorting receipts by immutable Drive ID produced an exact match for all 15 historical packages (exit 0); no provider data, expected integrity value or application validation was changed.
+
+Commands and direct exits (all 0):
+
+```sh
+python3 Tools/run-local.py python3 /Users/frank/Library/Caches/Joey-Native-Build/routing-release-20261102/provider-acceptance.py before
+python3 Tools/run-local.py python3 /Users/frank/Library/Caches/Joey-Native-Build/routing-release-20261102/interrupt-one-upload.py
+python3 Tools/run-local.py python3 /Users/frank/Library/Caches/Joey-Native-Build/routing-release-20261102/provider-acceptance.py after
+python3 Tools/run-local.py python3 /Users/frank/Library/Caches/Joey-Native-Build/routing-release-20261102/filing-recovery.py after
+python3 Tools/run-local.py .build/debug/joey-run run /Users/frank/Library/Caches/Joey-Native-Build/routing-release-20261102/completed-request.json --root '/Users/frank/Library/Application Support/Joey Native'
+JOEY_REAL_MEDIA_INPUTS=/Users/frank/Library/Caches/Joey-Native-Build/routing-release-20261102/live-input-after.json python3 Tools/run-local.py /usr/bin/swift test --jobs 2 --filter LiveDriveRoutingTests
+python3 Tools/run-local.py python3 /Users/frank/Library/Caches/Joey-Native-Build/routing-release-20261102/final-preservation.py
+```
+
+All **255 previously accepted local MP4s**, unrelated protected records, source/plan, REQUIREMENTS and **22 unrelated untracked files** remain unchanged. Installed bundle hashes still match the tested build. DUB and Taxstone capability observations were renewed from current matching authenticated accounts and official upload-surface documentation; immutable account/surface/technical limits and all other settings were preserved. Joe's ordinary `lastCheckedAt` changed; both show queues remain paused. For the post-acceptance capability refresh, two idle-stop diagnostic probes exited 1 around the app-lifetime email lock; source inspection confirmed that lifetime lease, and independent readback then verified app exit and lock release before settings renewal (exit 0). No forced kill or lock bypass occurred. The installed app reopened successfully afterward.
+
+Evidence: `provider-before.json`, `provider-after.json`, `production-progress.jsonl`, `production-recovery-before.json`, `production-recovery-after.json`, `upload-interruption.json`, `filing-recovery-before.json`, `filing-recovery-after.json`, `completed-reopen.log`, `live-readback-after.json`, `historical-preservation-after.json`, `final-preservation.json`, and capability/installation receipts in `/Users/frank/Library/Caches/Joey-Native-Build/routing-release-20261102`. Runtime media, transcripts, account evidence and OAuth remain outside Git.
+
+**Unverified gate:** a new DUB production upload and Master Link List write/readback needs an authorized undelivered DUB source. Current account/profile evidence and the existing 20-column schema are verified; all 35 historical DUB clips have exactly one existing register row. Those reads are not a new register-write acceptance. Taxstone correctly writes no DUB rows. No credential outage, platform ingestion, publication, historical migration or live production delivery in every category is claimed. Overall task is PARTIAL despite verified implementation, integration, deployment and Taxstone production acceptance.
+
+The sections below retain earlier release checkpoints. Their pending statements are superseded by this final evidence.
+
+---
+
+## Verified integration and native installation — 2026-11-02
+
+Implementation commit `1457f581a7979c173ad4f4dbc45bdb15c8443b7f` was pushed on `codex/drive-routing` and merged through [PR #4](https://github.com/franklinburrus/Joey/pull/4) using the repository's normal merge-commit strategy. GitHub confirmed merged/closed state and merge SHA `4bc576d26d3526c6fe6c12ee1964a799d99c5de2`; fetched local/remote `main` agree. The remote PR diff matched the complete reviewed staged diff exactly. No branch protections/rules, required check runs, commit statuses or submitted reviews were configured. No protection was bypassed. The merged tree equals the tested implementation tree.
+
+The native build command below was rerun against merged `main` and returned exit 0. The entire candidate app bundle, including its debug dylib, matched the tested build's SHA-256 map. The existing protected installer was adapted with fresh staging/rollback paths and run through `Tools/run-local.py`, exit 0. It held all four existing processing/storage/library/mail locks, preserved checkpoint backups, verified candidate/staged/installed signatures and hashes, and retained the prior bundle at `/Users/frank/Applications/Joey Rollbacks/2026-11-02-before-drive-routing/Joey Native.app`.
+
+Installation preserved **422 protected files**, including **255 accepted MP4s**: inode, nanosecond mtime/ctime and sizes unchanged; JSON/text/CSV/Markdown contents hash-checked. Installed application: `/Users/frank/Applications/Joey Native.app`. Normal `open` launch from Applications and native window observation passed. Quit/reopen produced a new process and restored existing jobs. Executable/bundle hashes matched; all 255 accepted files and settings remained unchanged across restart. The only pre-existing protected JSON change was Joe's ordinary `lastCheckedAt`; Joe and Taxstone enabled flags remained false. The initial computer-tool lock error cleared on retry; native access is verified. Historical jobs correctly display Delivery incomplete while retaining their passed QA counts and records.
+
+```sh
+python3 Tools/run-local.py python3 /Users/frank/Library/Caches/Joey-Native-Build/routing-release-20261102/installation/install.py
+python3 Tools/run-local.py /usr/bin/open '/Users/frank/Applications/Joey Native.app'
+python3 Tools/run-local.py python3 /Users/frank/Library/Caches/Joey-Native-Build/routing-release-20261102/installation/check-launch.py
+python3 Tools/run-local.py python3 /Users/frank/Library/Caches/Joey-Native-Build/routing-release-20261102/installation/check-launch.py post-restart.json
+python3 Tools/run-local.py .build/debug/joey-run check-drive --root '/Users/frank/Library/Application Support/Joey Native'
+```
+
+All commands returned exit 0. Exact source/PR/bundle receipts are in `integration.json`, `verification.json`, `installation/installation.json`, `installation/post-launch.json` and `installation/post-restart.json` within the evidence directory below. `provider-preflight.log` verifies all eight roots and the unchanged 20-column Master Link List schema. Independent read-only provider acceptance also found exactly one existing register row for each of the 35 historical DUB clips. No new register write is claimed.
+
+Production acceptance is still in progress. The unfinished authorized Taxstone job resumed from its existing source, transcript, artwork and 23-clip plan. Only current Taxstone capability evidence was renewed from authenticated channels and official documentation; immutable limits, accounts and surfaces did not change. Native cancellation after the first accepted clip, application restart and explicit Resume preserved that clip's SHA-256, mtime and QA receipt and continued at clip 2. This establishes real processing recovery, not interrupted-upload recovery. Final filing/readback results will be added before closeout.
+
+---
+
 ## Routing release verification — 2026-11-02
 
 Current integration branch: `codex/drive-routing`, based on `c10d1215e84d39d065f6b461805477617656da94` (merged PR #3). The earlier routing report below is historical evidence, not the current release state. Evidence directory: `/Users/frank/Library/Caches/Joey-Native-Build/routing-release-20261102`.
