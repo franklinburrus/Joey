@@ -16,12 +16,13 @@ Use the existing combined Swift/SwiftUI application and preserve all prior origi
 - [x] Cover accepted clips without companion receipts, legacy receipt hydration, interrupted writes and repeated recovery; reuse the existing correct delivery implementation.
 - [x] Reproduce and repair unbounded autoreleased read-buffer retention in source/scratch hashing while preserving hashes and secure descriptor checks.
 - [x] Correct premature aggregate storage admission before source selection; retain stage-specific budgets, reserve and live monitoring, with local/reuse and insufficient-render-capacity regressions.
+- [x] Repair completed own-job original reuse before redundant download admission, preserving source/provenance/duration checks; verify interrupted-remux, ambiguity and partial-download behavior. Correct source-kind export dimensions in the recap. The reviewed native candidate is built but not yet installed while acceptance processing continues.
 - [x] Verify bounded real transcript recovery, representative DUB/Taxstone audio renderer QA and read-only live routing.
 - [x] Complete final combined checks and install the matching signed build with rollback and runtime preservation. Final follow-up affected tests and native cancellation/accessibility checks are recorded in STATUS.
 - [ ] Exercise the approved source through installed native intake, complete source/transcript/planning/QA/delivery/records and recap; verify cancellation/restart/reuse without duplicate work.
-- [x] Independently review available acceptance evidence and reconcile verified, failed, blocked and unverified functions in the existing matrix. The incomplete native demonstration is recorded as blocked, not passed.
+- [ ] Independently review final native/provider acceptance evidence and reconcile verified, failed, blocked and unverified functions in the existing matrix. Focused code and currently available evidence have been independently reviewed; the native demonstration is still processing.
 
-Current boundary: the stage-admission repair is installed and independently reviewed. Current free capacity exceeds the existing acquisition-stage requirement; eventual source bytes and full-job capacity remain unproven. Native control remains unavailable after a reset; Frank identifies its locked-Mac indication as a false positive. Resume the existing `CANCELLED` acceptance job through restored control or a direct native Resume click. No required success criterion is marked complete from historical deliveries or the separate renderer diagnostics.
+Current boundary: the stage-admission repair is installed and independently reviewed. Frank explicitly authorized Resume. After native controls remained unavailable, the existing app launch-recovery path resumed only the selected job; its native coordinator and supervised downloader are active. Source completeness and downstream acceptance remain pending. Native Resume-button behavior is unverified. No required success criterion is marked complete from historical deliveries or the separate renderer diagnostics.
 
 
 ## Joe Budden full-episode retention and naming — 2026-11-02

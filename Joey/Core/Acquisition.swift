@@ -36,6 +36,87 @@ public enum Acquisition {
         }
         return u
     }
+    /// A downloader can finish before the Coordinator's full source inspection
+    /// is checkpointed. Reuse only its source-bound canonical file; inspection,
+    /// source hashing and classification still run in the Coordinator.
+    static func completedOriginal(_ request: JobRequest, directory: URL) async throws -> URL? {
+        let files = try FileManager.default.contentsOfDirectory(at:directory,includingPropertiesForKeys:nil)
+            .filter { $0.deletingPathExtension().lastPathComponent == "original" && ["mp4","mkv","webm","m4a","mp3","opus"].contains($0.pathExtension) }
+        // Partial-only downloads retain the normal guarded --continue path.
+        guard !files.isEmpty else {return nil}
+        guard files.count == 1 else {throw JoeyError.failed("Multiple canonical originals exist; all files preserved. Reconcile the source files before retrying.")}
+        let original = files[0]
+        do {
+            try Task.checkCancellation()
+            try StorageManager.noLinks(original)
+            let attributes = try FileManager.default.attributesOfItem(atPath:original.path)
+            guard attributes[.type] as? FileAttributeType == .typeRegular,
+                  (attributes[.size] as? NSNumber)?.int64Value ?? 0 > 0 else {
+                throw JoeyError.invalid("Canonical original is not a nonempty regular file")
+            }
+            guard let raw = request.originalURL, let identity = SourceIdentitySuggestion.from(try validateOriginalURL(raw).absoluteString) else {
+                throw JoeyError.invalid("Original source identity is unavailable")
+            }
+            var expected: [Double] = []
+            if let duration = request.expectedDuration {
+                guard duration.isFinite,duration > 0,duration < 1_000_000 else {throw JoeyError.invalid("Invalid expected original duration")}
+                expected.append(duration)
+            }
+            var retained: [Data] = []
+            for name in ["acquisition.json","original.info.json"] {
+                let path = directory.appendingPathComponent(name)
+                guard FileManager.default.fileExists(atPath:path.path) else {
+                    throw JoeyError.dependency("Acquisition metadata \(name) is missing; restore the matching source metadata")
+                }
+                try StorageManager.noLinks(path)
+                let data = try Data(contentsOf:path)
+                guard let object = try? JSONSerialization.jsonObject(with:data) as? [String:Any] else {
+                    throw JoeyError.invalid("Acquisition metadata \(name) is malformed")
+                }
+                guard let id = object["id"] as? String,identity.hasSuffix(":"+id),
+                      request.sourceID == id || request.sourceID.hasSuffix("-"+id) || request.sourceID.hasSuffix(":"+id),
+                      let title = object["title"] as? String,!title.isEmpty,
+                      object["is_live"] as? Bool != true,
+                      !["is_live","is_upcoming","post_live"].contains(object["live_status"] as? String ?? "") else {
+                    throw JoeyError.invalid("Acquisition metadata \(name) has conflicting or unfinished source identity")
+                }
+                var recordedURLs = 0
+                for key in ["original_url","webpage_url"] where object[key] != nil && !(object[key] is NSNull) {
+                    guard let value = object[key] as? String,let url = try? validateOriginalURL(value),
+                          SourceIdentitySuggestion.from(url.absoluteString) == identity else {
+                        throw JoeyError.invalid("Acquisition metadata \(name) has a conflicting source URL")
+                    }
+                    recordedURLs += 1
+                }
+                guard recordedURLs > 0 else {throw JoeyError.invalid("Acquisition metadata \(name) lacks source URL evidence")}
+                if object["duration"] == nil || object["duration"] is NSNull {
+                    guard identity.hasPrefix("x:broadcast:") || identity.hasPrefix("x:space:"),
+                          object["is_live"] as? Bool == false,object["live_status"] as? String == "was_live" else {
+                        throw JoeyError.invalid("Acquisition metadata \(name) lacks an authoritative complete duration")
+                    }
+                } else {
+                    // The existing parser validates provider duration types,
+                    // identity and completion without using the measured file.
+                    expected.append(try await sourceMetadata(data,request:request).duration)
+                }
+                retained.append(data)
+            }
+            if expected.isEmpty {
+                // Legacy X requests without a saved duration still require the
+                // existing authoritative ended-replay parser, never self-proof.
+                expected.append(try await sourceMetadata(retained[0],request:request).duration)
+            }
+            let probe = try await Media.probe(original)
+            if ["mp4","m4a"].contains(original.pathExtension),probe.format.format_name?.split(separator:",").contains("mpegts") == true {
+                throw JoeyError.failed("Original has an unfinished MPEG-TS remux; reconcile acquisition before retrying")
+            }
+            for duration in expected {try validateDownloadedDuration(probe.duration,expected:duration)}
+            return original
+        } catch {
+            if error is CancellationError {throw error}
+            throw JoeyError.failed("Existing original preserved; completed-download reuse failed: "+error.localizedDescription)
+        }
+    }
     public static func acquire(_ request: JobRequest, directory: URL) async throws -> URL {
         if let path = request.localPath {
             let url = URL(fileURLWithPath:(path as NSString).expandingTildeInPath).standardizedFileURL
@@ -44,6 +125,7 @@ public enum Acquisition {
         }
         guard let raw = request.originalURL else { throw JoeyError.dependency("No original source") }
         let url = try validateOriginalURL(raw)
+        if let original = try await completedOriginal(request,directory:directory) {return original}
         let metadataURL = directory.appendingPathComponent("acquisition.json")
         let metadata = try await Processes.retry {
             try await Processes.run("yt-dlp",metadataArguments(for:url))

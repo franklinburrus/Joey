@@ -100,10 +100,16 @@ struct JobDetailView: View {
                 VStack(alignment:.leading,spacing:10) {
                     Text(job.request.sourceID)
                     Text("Saved state: \(job.state.rawValue) · \(job.stage)")
-                    Text("Export: \(job.request.profile.width) × \(job.request.profile.height)")
                     if let source = job.source {
+                        if let output = try? job.request.profile.outputProfile(for:source.kind) {
+                            Text("Export: \(output.width) × \(output.height)")
+                        } else {
+                            Text("Export: unavailable for the saved source and capability profile")
+                        }
                         Text("SHA-256: \(source.sha256)")
                         Text(source.authorizationBasis)
+                    } else {
+                        Text("Export: pending source inspection")
                     }
                     if !job.unavailableTranscriptFeatures.isEmpty {
                         Text("Unavailable: " + job.unavailableTranscriptFeatures.joined(separator:"; "))
