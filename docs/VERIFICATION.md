@@ -1,3 +1,23 @@
+## Combined source integration and installed-bundle verification (2026-11-03)
+
+Frank authorized push, merge and installation after implementation verification. Branch `codex/source-integrity-fixes` at `eb735f516d22bf3463828f135d2747f0983c6709` was pushed and independently read back. PR #12 merged as `6474bc4d45f52f1d35ba82a467c719d63831ceb2`; freshly fetched `origin/main` has the exact tested tree. PR #11 was closed as superseded by its already-included dimension repair.
+
+| Check | Actual result |
+| --- | --- |
+| Source/build evidence binding | All 108 test/build inputs, ten candidate bundle files and eight evidence files matched their recorded SHA-256 values. |
+| Existing full/focused Swift evidence | Reused unchanged: 294 passed / four skipped / zero failures from 298 executed; focused 19 passed; both exit 0. No new test run claimed. |
+| Remote integration | Push and merge succeeded; branch, PR and remote main readbacks matched expected commits; merged tree diff empty. |
+| Installation | Staged replacement completed under exclusive worker/store locks after graceful app shutdown; ten installed files match the tested bundle. |
+| Signature | Fresh candidate, staged, installed and rollback strict deep checks passed, exit 0. |
+| Runtime preservation | 30 jobs, 461 accepted local outputs, 27 existing local originals and 745 protected identities preserved; only Joe monitoring's `lastCheckedAt` changed after launch. |
+| Settings and queues | Settings bytes unchanged, 1920-wide native limits retained, all automations still disabled, no new job or queue start. |
+| Launch and native UI | Installed executable relaunched through the minimal-environment launcher; native window showed Ready and the existing job list. |
+| Existing worktrees | Original, main-review and previous-install heads unchanged; 22 original untracked files retained; no tracked changes in those worktrees. |
+
+Installed app: `/Users/frank/Applications/Joey Native.app`. Rollback: `/Users/frank/Applications/Joey Rollbacks/2026-11-03-before-source-integrity/Joey Native.app`. Detailed evidence and recoverable metadata snapshots: `/Users/frank/Library/Caches/Joey-Native-Build/source-integrity-install-20261103/`. Metadata/companion content hashes and media filesystem identities establish installation preservation; this was not a new full-media hash audit. Existing storage-blocked jobs remain paused, capability evidence was not extended, and no production, provider-delivery or platform-ingestion acceptance is claimed.
+
+---
+
 ## Cached duration and native-picture preservation (2026-11-03)
 
 Implemented on isolated `codex/source-integrity-fixes` from combined `2b1600075defaadecfde1e637616574ca598c503`. The common Coordinator source boundary now validates finite positive duration against the immutable request, source hash and optional expected hash before transcript adoption or downstream work. Hash/duration conflicts fail without a replacement download. Legacy video-bearing audio classifications require complete source-bound proof; disproven accepted work is preserved and the unfinished job fails without rewriting companions or contacting providers. Completed historical jobs retain their existing reopen behavior.
