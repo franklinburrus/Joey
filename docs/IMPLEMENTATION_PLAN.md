@@ -8,7 +8,17 @@
 **Spec:** REQUIREMENTS.md, sole current requirements document.
 
 
-## Authoritative filing correction — 2026-11-02
+## Joe Budden full-episode retention and naming — 2026-11-02
+
+Frank's latest request supersedes Joe's archive retirement below. Keep complete originals in `1KJ0-sjGWNxwIuis_faA5z_FbPUcbjEDD` as `<episode number> — <episode title>.<original extension>`; preserve existing source bytes, job identity, accepted clips, other creators and permissions. Use the existing resolver, source discovery/parser, Drive archive adapter, coordinator and storage manager. Keep progress and operational evidence in STATUS and VERIFICATION rather than a second task tracker.
+
+- [x] Add and execute failing regressions for the restored full-episode route, exact archive filenames (including punctuation and original extensions), archival before transcription/clipping, conflicting saved selections, completed-job retention and obsolete cleanup receipts.
+- [x] Restore the verified Joe full-episode destination, extend existing archive naming, archive Joe originals before clipping, and remove obsolete source deletion without altering clip plans or request identities. Reconcile REQUIREMENTS and the operating/storage guides.
+- [x] Run the affected Swift tests, native Xcode build and proportional final regression checks. Preserve live media and avoid production rerendering.
+- [x] Read all 16 existing originals by exact ID, prepare collision-free names, rename metadata only, and independently verify IDs, hashes, sizes, parents, links and permissions. Record implementation, Drive outcome and installation status separately.
+- [x] After Frank's explicit follow-up authorization, push the source branch, install the tested signed bundle with rollback and verify process relaunch, bundle hashes, protected runtime/media preservation and unchanged automation settings. Record the computer tool's unavailable visual observation without converting it into a new gate.
+
+## Authoritative filing correction — 2026-11-02 (historical)
 
 Final closeout verification (2026-11-02): the seven active creator-based destinations, all 16 historical packages/262 clips/64 companions and existing 35 DUB register identities now reconcile. Frank authorized the remaining historical DUB companion edits; the three existing record IDs were updated with conditional writes, independently downloaded, and matched to current media/coverage/access and persisted receipts. Media, Taxstone packages, sharing, register data and unrelated files remain preserved. Installed routing and completed-job reopening pass without new production, migration or application changes. This routing/migration project closes on the verified merge of the final STATUS/VERIFICATION record; the containing PR and external integration receipt establish Git closure. Unrelated whole-product/new-DUB/social-ingestion acceptance remains separate. Details below retain the earlier implementation sequence and release history.
 

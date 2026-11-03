@@ -1,3 +1,142 @@
+## Cached duration and native-picture preservation (2026-11-03)
+
+Implemented on isolated `codex/source-integrity-fixes` from combined `2b1600075defaadecfde1e637616574ca598c503`. The common Coordinator source boundary now validates finite positive duration against the immutable request, source hash and optional expected hash before transcript adoption or downstream work. Hash/duration conflicts fail without a replacement download. Legacy video-bearing audio classifications require complete source-bound proof; disproven accepted work is preserved and the unfinished job fails without rewriting companions or contacting providers. Completed historical jobs retain their existing reopen behavior.
+
+Inspection hashes every full-resolution decoded video frame with SHA-256 and passthrough timing, decoding audio in the same supervised FFmpeg invocation. Any picture/size difference retains native video. Only identical-picture candidates with audio receive structured FFprobe dimension/pixel-format inspection; all frame counts must agree before audio presentation is permitted. Audio-only files remain audio; silent video remains native. Temporary text evidence is removed on completion, error or cancellation. Optional versioned proof preserves old-record decoding and request identities. Render, audio-reference generation, QA and cached Taxstone reuse enforce the proof boundary.
+
+| Check | Actual result |
+| --- | --- |
+| Initial regression run against combined base | Exit 1: six tests, 14 expected failures/errors reproducing both defects and unsafe companion rewriting. |
+| Additional cached-hash and Taxstone-reuse controls | Exit 1: two tests, three expected failures showing both bypasses. |
+| Structured frame parser red control | Exit 1: structured geometry evidence was rejected before the parser change. |
+| Final focused checks | Exit 0: 19 passed, zero failures, 15.870 seconds. |
+| First full Swift suite | Exit 1: 298 executed, four skipped, five failed assertions in two capability-renewal tests; snapshot placement and stage reporting corrected. |
+| Final full Swift suite | Exit 0: 298 executed, 294 passed, four skipped, zero failures, 218.201 seconds. |
+| Final native Debug Xcode build | Exit 0, BUILD SUCCEEDED. |
+| Strict deep candidate signature verification | Exit 0, valid on disk and designated requirement satisfied. |
+| Independent code review | No Critical or Important findings; one optional test-isolation improvement deferred in STATUS. |
+
+Every executable used `Tools/run-local.py`. Commands:
+
+```sh
+python3 Tools/run-local.py /usr/bin/env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /usr/bin/swift test
+python3 Tools/run-local.py /usr/bin/env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /usr/bin/xcodebuild -project Joey.xcodeproj -scheme Joey -configuration Debug -destination platform=macOS -derivedDataPath /Users/frank/Library/Caches/Joey-Native-Build/source-integrity-20261103/DerivedData -jobs 2 CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual build
+python3 Tools/run-local.py /usr/bin/codesign --verify --deep --strict --verbose=2 /Users/frank/Library/Caches/Joey-Native-Build/source-integrity-20261103/DerivedData/Build/Products/Debug/Joey.app
+```
+
+An initial showinfo-based geometry parser had one intermittent malformed-log rejection, not reproduced by 300 supervised repetitions. Diagnostic logs are no longer acceptance inputs. Structured frame metadata removes that dependency; a real resolution-changing fixture also reproduced FFprobe's trailing delimiter for excluded side-data sections, now explicitly covered. A temporary process API was removed; an incremental stale-symbol link failure required a clean rebuild of this worktree's disposable Swift products. None of those failed attempts is reported as successful verification.
+
+Evidence: `/Users/frank/Library/Caches/Joey-Native-Build/source-integrity-20261103/verification.json`, `swift-final.log`, `focused-final-v2.log`, `native-build-final.log`, `signature.log` and `REVIEW.md`. Four opt-in skips remain live Drive routing, two offline-assistant checks and real-media acceptance. Python was unchanged and not rerun. No merge, push, installation, production processing or provider operation occurred. Runtime profile corrections remain outside Git. Strict equality intentionally keeps noisy apparently-static video native; static candidates incur a second decode for reliable geometry verification.
+
+---
+
+## Ended X replay with missing metadata duration (2026-11-03)
+
+The bounded repair accepts complete original X replays whose yt-dlp metadata omits duration. Source lookup and acquisition now use the same source identity, live-state and duration resolver. An explicitly ended broadcast or Space may derive duration from a finalized provider HLS media playlist. The native HTTPS loader uses no cookies, stored credentials or inherited headers, validates provider hosts and redirects, caps response size at 4 MiB and applies finite request/resource timeouts. The parser requires ENDLIST and complete positive finite segment durations, and rejects nonzero media sequence, gaps, partial playlists, master playlists and malformed/empty responses. Known valid metadata durations avoid the additional request. Explicitly invalid durations remain errors.
+
+Acquisition preserves the previous bare, hyphen-prefixed and colon-prefixed provider-ID conventions while verifying the provider identity against the original URL. Raw `acquisition.json` metadata remains unchanged. The downloader aborts on unavailable fragments rather than silently skipping them; measured duration must still match the resolved expectation, and the existing inspection/decoding stages remain in place. The new playlist request reuses `Processes.retry` for at most three transient attempts and preserves cancellation.
+
+Baseline: verified original checkout and origin `https://github.com/franklinburrus/Joey.git`, original branch and live remote `codex/joe-full-episodes` at `57f2eff080c0263f01f267f929c5035355de4344`; main `e9278d0cc497a3e2bb9fe87b1dacbaba7409083b`. Repair branch: `codex/x-replay-duration`. All 22 unrelated untracked files remain untouched. No dependencies, credentials, production media, installed bundles or provider records were changed.
+
+### Executed checks
+
+Every build, test and diagnostic executable used `python3 Tools/run-local.py`. Swift/Xcode invocations selected the installed toolchain with per-process `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`; no global configuration changed.
+
+| Check | Direct result |
+| --- | --- |
+| Pre-fix `swift test --filter SourceDurationTests` | Exit 1; the single reproducing test failed at the existing missing-duration guard. |
+| Initial focused regression suite | Exit 0; 12 tests passed, zero failures. |
+| Initial `swift test` | Exit 0; 277 executed, 273 passed, four intentional skips, zero failures. |
+| Legacy-prefix and transient-retry negative checks | Exit 1; 14 executed, two expected failures. Both checks exposed gaps in the initial implementation before closeout. |
+| Final `swift test --filter SourceDurationTests` | Exit 0; 14 passed, zero failures, 3.616 seconds. |
+| Final `swift test` | Exit 0; 279 executed, 275 passed, four intentional skips, zero failures, 234.598 seconds. |
+| Existing native Xcode project | `BUILD SUCCEEDED`, exit 0. |
+| `codesign --verify --deep --strict --verbose=2` on the candidate | Exit 0; valid on disk and satisfies its designated requirement. |
+| Final read-only diagnostic linked to the tested JoeyCore | Exit 0; both live lookup and acquisition metadata resolution returned source `x:broadcast:2rJapEXbVkKRAR`, duration 6,573.349 seconds. No media segments downloaded or jobs created. |
+| Installed bundle preservation | All ten installed file paths and SHA-256 values match the pre-task snapshot. |
+| `git diff --check` | Exit 0. |
+
+The four skips are the explicit live Drive readback, two opt-in installed-model assistant checks and the authorized real-media renderer. They are unrelated downstream acceptances. Existing warnings concern the preserved duplicate runner/icon files, unchanged JobModel captures, unchanged AudioPresentation APIs deprecated by the installed macOS SDK, a SwiftUI state access in an existing test and absent optional AppIntents metadata. No warning points to a modified source file.
+
+Exact native command:
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer python3 Tools/run-local.py /usr/bin/xcodebuild -project Joey.xcodeproj -scheme Joey -configuration Debug -destination 'platform=macOS' -derivedDataPath /Users/frank/Library/Caches/Joey-Native-Build/x-replay-duration-20261103/DerivedData -jobs 2 CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual build
+```
+
+The diagnostic's initial standalone launch exited 133 because its separate executable could not locate the existing `Joey_JoeyCore.bundle`. A task-cache reference to that existing build bundle fixed the harness resource lookup; recompilation and both subsequent live diagnostic runs exited 0. No production code or environment allowlist was changed for the harness. Failed and successful logs are retained.
+
+### Live source evidence and limits
+
+Fresh yt-dlp metadata returned exit 0, matching broadcast ID, `is_live: false`, `live_status: was_live`, and `duration: null`. Its direct replay playlist returned HTTP 200, 331,018 bytes, VOD, media sequence 0, ENDLIST and 3,287 segments totaling 1:49:33.349. The final repaired code independently resolved both entry points to the same duration; ordinary floating-point representation is `6573.349000000002` seconds. This verifies metadata/playlist duration resolution only. Original-media bytes were not acquired or decoded, and no production clipping, filing, register write or social acceptance is claimed.
+
+Evidence root: `/Users/frank/Library/Caches/Joey-Native-Build/x-replay-duration-20261103/`. The existing checkpoint contains the task mission and closeout. `verification.json` binds the final source hashes, ten candidate bundle files, ten preserved installed files, test/build/signature results and final live readback. Logs include `regression-red.log`, `compatibility-red.log`, `regression-final.log`, `full-suite-final.log`, `native-build.log`, `signature.log` and `live-duration-final.log`; raw provider metadata and playlist remain outside Git.
+
+### Authorized commit, push and installation
+
+At the end of source verification, the repair remained uncommitted and the installed app retained the previous duration behavior. Frank then explicitly requested “push, commit, install and update.” Pre-integration readback verified that every tested source/test hash and all ten candidate hashes were unchanged. The full suite, focused regressions and native build were therefore reused without repeating unchanged-input checks. Only the six scoped source/test/documentation files were committed; all 22 unrelated untracked files remain excluded.
+
+Source commit `35b0ab757ccd9a010dd70b1e96447c687e66790d` was committed on `codex/x-replay-duration`, pushed successfully and independently matched by `git ls-remote origin refs/heads/codex/x-replay-duration`. Native UI observation showed Joey idle with Ready status before the controlled quit. Live state confirmed Joe, Taxstone and email automation disabled, with no unowned automatic-resume candidate. The current runtime had thirty saved jobs; old historical installation counts were not reused.
+
+The existing protected installer was adapted to this candidate and receipt schema, without adding an application dependency. It verified the candidate/source hashes, required the old app stopped, acquired existing processing/storage/library/email locks, captured protected checkpoints and file identities, staged with `ditto`, checked staged/old bundle signatures and hashes, retained the original app as rollback, renamed the stage into place and rechecked everything. The operation exited 0 at `2026-11-03T12:02:17Z`. Installed location: `/Users/frank/Applications/Joey Native.app`. Rollback: `/Users/frank/Applications/Joey Rollbacks/2026-11-03-before-x-replay-duration/Joey Native.app`. The rollback's exact hashes match the old installed bundle; all ten installed hashes match the tested candidate.
+
+Installation preserved 712 protected files, 461 accepted outputs and thirty saved job identities. Media preservation used unchanged inode, nanosecond mtime/ctime and byte-size identities; JSON/text/Markdown/CSV and bundle contents additionally used SHA-256. Protected JSON checkpoints were copied into the private task evidence directory before replacement. No accepted media, original source, job, setting, transcript, manifest or companion was deleted or reprocessed.
+
+The installed executable was relaunched directly through the minimal-environment launcher. Direct post-launch readback exited 0, confirmed running PID/executable identity, current signature, all ten tested bundle hashes, thirty unchanged job identities, zero new jobs and disabled automations. The only control-file update was Joe monitoring's `lastCheckedAt`; comparing parsed JSON after removing that field confirmed every other value unchanged. All remaining protected files retained their exact saved identities.
+
+Native UI readback confirmed the new process opened with Ready status, Jobs navigation worked, saved completed episodes displayed their existing QA counts, and the two unrelated Taxstone jobs retained their storage-blocked/no-clips and 11-of-26 QA states. No Start Processing or Resume button was invoked. The native import action combines source lookup and job creation, so UI-only replay lookup was deliberately excluded from this installation check; the passed read-only lookup/acquisition diagnostic and exact installed-candidate hashes bind the verified repair without starting production. A first native quit action required refreshing the computer-use state; the subsequent quit succeeded. No force termination was used.
+
+Final evidence: `x-replay-duration-20261103/installation/{installation.json,before.json,relaunch-readback.json,ui-readback.json}` and `x-replay-duration-20261103/integration.json`. The latter binds the source commit, this documentation closeout commit and final independent remote readback. All installation/relaunch tools exited 0. No dependency upgrade, credential change, new production job, source-media acquisition, Drive/register write, publication, scheduling or main-branch merge occurred.
+
+---
+
+## Joe Budden full-episode retention and naming (2026-11-02)
+
+Frank restored permanent Joe episode retention and supplied the exact full-episode destination `1KJ0-sjGWNxwIuis_faA5z_FbPUcbjEDD` and naming example `945 — Maximum Punishment`. This supersedes the earlier same-day Joe archive-retirement rule; historical evidence below is retained as history. Baseline local/live main: `e9278d0cc497a3e2bb9fe87b1dacbaba7409083b`; branch `codex/joe-full-episodes`. Origin remains `https://github.com/franklinburrus/Joey.git`; all 22 unrelated untracked files are preserved.
+
+The existing destination resolver now activates Joe Budden Full Episodes directly under the Joe Budden creator folder, preserving all other routes. The sole known retired saved Joe selection migrates to this explicit destination without changing immutable request identity; unknown conflicts still fail. New Joe processing archives original bytes before transcription/clipping and names files from the verified numbered source title while preserving its container extension. Existing verified archives are reused without moving or duplicating them. Source titles, clip plans, QA and separate Joe records remain unchanged. The coordinator no longer registers or removes temporary Joe originals; the obsolete deletion implementation was removed. Completed reopening and scratch cleanup preserve historical deletion receipts and original files, including interrupted-removal-intent fixtures. Branding validation is deferred until an actual render requires it so full-original archival and accepted-file recovery do not depend on render-only assets.
+
+### Executed verification
+
+All project executable invocations used `python3 Tools/run-local.py` and direct arguments. Build/test invocations selected the existing Xcode toolchain with `/usr/bin/env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`; no global developer selection, credential change, dependency installation or model startup occurred.
+
+| Check | Result |
+| --- | --- |
+| Initial launcher-only `swift test` | Failed before tests because CommandLineTools could not load `SwiftUIMacros.StateMacro`. Selecting the installed Xcode toolchain resolved the environment issue; application code was not changed to accommodate it. |
+| Red routing/naming/retention regressions | Seven tests executed and failed on the retired route, seven-root catalog and actual deletion of the isolated original. The separate order regression failed because branding lookup prevented archival/transcription. These establish that the changed behavior was absent before implementation. |
+| Focused `swift test --filter 'DestinationRoutingTests\|DriveFilingTests\|RecoveryRegressionTests\|ProductionIntakeTests\|StorageTests'` | 52 passed, zero failed/skipped; direct exit 0. |
+| Full `swift test` | 265 executed: 261 passed, four intentional skips, zero failures; direct exit 0; 245.708 seconds. |
+| `xcodebuild -project Joey.xcodeproj -scheme Joey -configuration Debug -destination platform=macOS -derivedDataPath .../DerivedData build` | `BUILD SUCCEEDED`, direct exit 0. |
+| `codesign --verify --deep --strict --verbose=2 .../DerivedData/Build/Products/Debug/Joey.app` | Valid on disk and satisfies its designated requirement; direct exit 0. All ten bundle files are hashed in `tested-bundle.json`. |
+| Independent read-only code review | No Critical/Important issues. Corrected one stale assertion explanation about archive retention; no runtime behavior changed after review. |
+| `git diff --check` | Passed. |
+
+The four skipped tests are the explicit live routing/old-package audit, two opt-in installed Ollama smoke checks and the authorized real-media renderer. Those unrelated gated acceptances were not reclassified as production evidence. Existing warnings concern the preserved two untracked runner duplicates and a SwiftUI state access in an existing intake test; no test failed. Synthetic archive/retention tests do not claim a new production render or upload. The one-off ordering test compares round-tripped checkpoints to avoid treating the existing ISO-8601 timestamp precision as a media change.
+
+### Existing Drive originals: complete name-only correction
+
+The supplied folder already contained 16 complete episodes, including existing Joey Episode 977 archive ID `1AHG-OWWOjfYoND2Remz2dCHu18MADSbO`. No new media acquisition or upload was necessary. Before mutation, the direct folder/creator/Content/root chain, all exact file IDs, old names, sizes, MD5 hashes, current links and permissions were checked; new names were unique and collision-free. The first connector rename attempt returned `403 appNotAuthorizedToFile` without modifying a file. The established rclone OAuth connection, already used by Joey, supplied the authorized Drive access for the successful correction. Tokens stayed in process memory and existing configuration and were never written to evidence or Git.
+
+The successful path sent exactly 16 conditional Drive v2 `files.patch` requests, each containing only `title`, addressed to the original file ID with its current provider `If-Match` ETag. Each write was followed by a separate Drive v3 metadata read; a final exact-ID pass and independent rclone hash listing confirmed all results. Name-only updates do not change the binary media. Authorization-relevant permission IDs/types/roles/discovery/inheritance were preserved; volatile profile-photo URLs were excluded from permission identity. Early preparation attempts stopped before writes when full permission presentation metadata varied or v3 omitted ETags. The final path reused the already established v2 ETag pattern rather than relaxing concurrency checks.
+
+All 16 final files preserve their IDs, immediate parents, links, sizes, hashes and permissions; the inventory still contains exactly 44,644,561,243 bytes. Names include `945 — Maximum Punishment.mp4`, `976 — A Great Plus 1.webm` and `977 — Who Gon Tell’em.mp4`. Extensions and source bytes are unchanged. There were zero media transfers, file moves/deletions, sharing changes, content replacements, new jobs, rerenders or companion/register writes. Original names and metadata are retained for reversible restoration.
+
+Evidence directory: `/Users/frank/Library/Caches/Joey-Native-Build/joe-full-episodes-20261102/`. Files: `rename-plan.json`, `raw-before.json`, `raw-rename-results.json`, `raw-final.json`, `drive-before.json`, `drive-final.json`, `drive-verification.json`, `swift-tests.log`, `native-build.log` and `tested-bundle.json`. The unchanged Episode 977 archive URL remains valid in existing job/companion records; no name is embedded in that source archive reference.
+
+### Authorized branch push and protected installation
+
+Frank's follow-up explicitly authorized committing, pushing and installing this update. The already-tested source commit `a3a8ba9b63a93370374c32a80205bf34e28933f9` was pushed to `origin/codex/joe-full-episodes`; separate `git ls-remote origin refs/heads/codex/joe-full-episodes` returned that exact SHA. Application/test code remained unchanged, so the preceding green suite and native build were reused rather than rerun. No pull request, main-branch merge or public release was inferred.
+
+The tested candidate was rehashed against all ten entries in `tested-bundle.json` and revalidated with `codesign --verify --deep --strict`. The installed app was not running and both show automations were paused. The existing protected installer was reused with this candidate's exact manifest and unique stage/rollback paths. It acquired the processing, exclusive worker, Taxstone and email-store locks, captured and backed up runtime checkpoints, copied the candidate into staging with `ditto --rsrc --extattr --acl`, checked staging hashes/signature, then renamed the previous installation into rollback and staging into the installed location. Signature, installed/rollback bundle hashes and every protected-file identity were checked immediately after replacement. The installer includes recovery to the preceding bundle if the swap/readback fails; no rollback was needed.
+
+Installation completed at `2026-11-02T21:25:18.398417Z` at `/Users/frank/Applications/Joey Native.app`; rollback is `/Users/frank/Applications/Joey Rollbacks/2026-11-02-before-joe-full-episodes/Joey Native.app`. All 446 protected files and 278 accepted outputs retained their inode, nanosecond modification/change times and size through installation; JSON/text/Markdown/CSV bytes were also hash-checked. Direct app launch used the minimal-environment launcher. A separate post-launch readback verified the live installed process, matching installed/tested bundle hashes and strict signature, unchanged 20 job identities, zero new jobs and disabled show automations. The sole protected JSON change was the expected Joe monitor `lastCheckedAt` timestamp; excluding that timestamp, its saved queue/settings/state match the backup. All other captured protected file identities/content remain unchanged.
+
+The computer tool reported that the Mac was locked and could not provide a native UI observation. No visual reopening or UI acceptance is claimed. The verified process launch and unchanged runtime state establish the bounded installation outcome without requiring a new human QA gate. No production media, source, companion, register or provider write occurred during installation or reopening.
+
+Installation evidence is under `joe-full-episodes-20261102/installation/`: `install.py`, `before.json`, checkpoint backups, `installation.json`, `launch.json`, `relaunch-readback.json` and `relaunch_readback.py`. Source commit, final closeout commit and independently read remote branch identity are recorded in the evidence directory's `integration.json`. The requested source implementation, 16 existing Drive names, authorized branch push and installation are verified; unrelated native UI/product acceptance remains outside this task.
+
+---
+
 ## Historical DUB companion reconciliation — final routing-project closeout (2026-11-02)
 
 Scope: Frank authorized in-place correction of existing historical DUB companions and consistent local receipts. This resolves the prior outstanding record-upload authority. No media, production, migration, register mutation, sharing change, application change or requirements change was authorized or performed. Baseline main/origin/main is `b30f3ddfc8038738a71b601354a62f4c8427ee43`; branch `codex/historical-dub-records`. Origin and Xcode project were verified. AGENTS, Ultracave, current requirements, roadmap, STATUS and prior VERIFICATION were reviewed. The existing 22 unrelated untracked files were preserved.

@@ -68,6 +68,7 @@ public enum TaxstoneReuse {
     }
     static func plan(request: JobRequest, source: SourceRecord, transcript: Transcript,
                      exclusions: [AdExclusion], provider: any TaxstoneReuseProvider, directory: URL) async throws -> [ClipRecord] {
+        try Media.validateAudioClassification(source)
         guard let artwork = request.artwork else {throw JoeyError.dependency("Taxstone reuse requires episode artwork")}
         let candidates = request.taxstoneReuse ?? []
         // Imported provider IDs are identities, never relative filesystem paths.

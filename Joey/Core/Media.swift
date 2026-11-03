@@ -63,6 +63,7 @@ public enum Media {
         let file = try FileHandle(forReadingFrom:url);defer {try? file.close()}
         var pending = Data()
         while let chunk = try file.read(upToCount:64*1024), !chunk.isEmpty {
+            try Task.checkCancellation()
             pending.append(chunk)
             while let end = pending.firstIndex(of:10) {
                 try visit(String(decoding:pending[..<end],as:UTF8.self))
@@ -118,37 +119,140 @@ public enum Media {
             throw JoeyError.dependency("Multiple source video tracks require an explicit preservation mapping")
         }
     }
+    static func validateSourceDuration(_ actual: Double, expected: Double?) throws {
+        guard actual.isFinite, actual > 0 else {throw JoeyError.invalid("Source duration must be finite and positive")}
+        if let expected {
+            guard expected.isFinite, expected > 0, abs(actual-expected) <= max(0.1,expected*0.001) else {
+                throw JoeyError.invalid("Incomplete source: duration conflicts with source evidence")
+            }
+        }
+    }
+
+    /// Hash every decoded picture without scaling, grayscale conversion or frame
+    /// rate conversion. Audio is fully decoded in the same supervised process.
+    /// Only identical-picture candidates need a second, structured geometry pass:
+    /// rawvideo's stream header alone cannot prove that frame geometry stayed
+    /// constant, and diagnostic logs are not a reliable machine-readable format.
+    static func classificationProof(_ url: URL, hasAudio: Bool, sha256: String) async throws -> SourceClassificationProof {
+        let work = FileManager.default.temporaryDirectory.appendingPathComponent("joey-classification-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:work,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+        defer {try? FileManager.default.removeItem(at:work)}
+        let hashes = work.appendingPathComponent("frames.sha256"), frames = work.appendingPathComponent("frames.txt")
+        var args = ["-nostdin","-v","error","-xerror","-err_detect","explode","-noautorotate","-reinit_filter","0","-i",url.path,
+                    "-map","0:v:0","-an","-c:v","rawvideo","-pix_fmt","+","-noautoscale",
+                    "-fps_mode","passthrough","-f","framehash","-hash","sha256","-"]
+        if hasAudio {args += ["-map","0:a:0","-vn","-f","null","/dev/null"]}
+        _ = try await Processes.run("ffmpeg",args,output:hashes)
+        let pictures = try classificationHashes(hashes)
+        var proof = SourceClassificationProof(version:1,sourceSHA256:sha256,decodedFrameCount:pictures.count,uniformFrameSHA256:nil)
+        if hasAudio,pictures.uniformHash != nil {
+            _ = try await Processes.run("ffprobe",["-v","error","-err_detect","explode","-select_streams","v:0","-show_frames",
+                "-show_entries","frame=width,height,pix_fmt:frame_side_data=","-of","compact=p=0:nk=0",url.path],output:frames)
+            proof = try parseClassificationProof(hashes:hashes,frames:frames,sha256:sha256)
+        }
+        try Task.checkCancellation()
+        guard try Integrity.sha256(url) == sha256 else {throw JoeyError.failed("Original source changed during classification")}
+        return proof
+    }
+
+    static func parseClassificationProof(hashes: URL, frames: URL, sha256: String) throws -> SourceClassificationProof {
+        let pictures = try classificationHashes(hashes)
+        var frameCount = 0, uniform = true
+        var firstGeometry: String?
+        try lines(in:frames) {line in
+            guard !line.isEmpty else {return}
+            var fields: [String:String] = [:]
+            // FFprobe can leave a trailing delimiter for an excluded empty
+            // side-data section; it is not a missing geometry field.
+            for part in line.split(separator:"|") {
+                let pair = part.split(separator:"=",maxSplits:1,omittingEmptySubsequences:false)
+                guard pair.count == 2,fields.updateValue(String(pair[1]),forKey:String(pair[0])) == nil else {
+                    throw JoeyError.failed("Malformed source classification frame evidence")
+                }
+            }
+            guard fields.count == 3,let width = Int(fields["width"] ?? ""),let height = Int(fields["height"] ?? ""),width > 0,height > 0,
+                  let format = fields["pix_fmt"],!format.isEmpty,!["unknown","none","N/A"].contains(format) else {
+                throw JoeyError.failed("Incomplete or malformed source classification frame evidence")
+            }
+            let value = "\(format):\(width)x\(height)"
+            if let firstGeometry {uniform = uniform && firstGeometry == value} else {firstGeometry = value}
+            frameCount += 1
+        }
+        guard frameCount > 0,frameCount == pictures.count else {throw JoeyError.failed("Incomplete source classification evidence")}
+        return SourceClassificationProof(version:1,sourceSHA256:sha256,decodedFrameCount:frameCount,uniformFrameSHA256:uniform ? pictures.uniformHash : nil)
+    }
+
+    private static func classificationHashes(_ hashes: URL) throws -> (count: Int, uniformHash: String?) {
+        var hashCount = 0, uniform = true
+        var firstHash: String?, firstSize: Int?
+        var headers: Set<String> = []
+        try lines(in:hashes) {line in
+            if line.hasPrefix("#") {headers.insert(line);return}
+            guard !line.isEmpty else {return}
+            let fields = line.split(separator:",",omittingEmptySubsequences:false).map {$0.trimmingCharacters(in:.whitespaces)}
+            guard fields.count == 6,fields[0] == "0",Int64(fields[1]) != nil,Int64(fields[2]) != nil,
+                  let duration = Int64(fields[3]),duration >= 0,let size = Int(fields[4]),size > 0,
+                  fields[5].count == 64,fields[5].allSatisfy({"0123456789abcdef".contains($0)}) else {
+                throw JoeyError.failed("Incomplete or malformed source classification hash evidence")
+            }
+            if let firstHash,let firstSize {uniform = uniform && firstHash == fields[5] && firstSize == size}
+            else {firstHash = fields[5];firstSize = size}
+            hashCount += 1
+        }
+        guard headers.isSuperset(of:["#format: frame checksums","#version: 2","#hash: SHA256","#media_type 0: video","#codec_id 0: rawvideo"]),
+              hashCount > 0 else {throw JoeyError.failed("Incomplete source classification evidence")}
+        return (hashCount,uniform ? firstHash : nil)
+    }
+
+    static func validateAudioClassification(_ source: SourceRecord) throws {
+        try Task.checkCancellation()
+        guard source.kind == .audio,source.streams.contains(where:{$0.codec_type == "video"}) else {return}
+        guard source.hasAudio,source.classificationProof?.provesStaticVideo(sha256:source.sha256) == true else {
+            throw JoeyError.failed("Audio presentation requires complete source-bound static-video classification proof")
+        }
+        guard try Integrity.sha256(URL(fileURLWithPath:source.path)) == source.sha256 else {
+            throw JoeyError.failed("Original source changed; audio classification proof no longer applies")
+        }
+    }
+
+    static func revalidatingClassification(_ source: SourceRecord, request: JobRequest) async throws -> SourceRecord {
+        guard source.kind == .audio,source.streams.contains(where:{$0.codec_type == "video"}),
+              source.classificationProof?.provesStaticVideo(sha256:source.sha256) != true else {return source}
+        let inspected = try await inspect(URL(fileURLWithPath:source.path),request:request)
+        guard inspected.sha256 == source.sha256 else {throw JoeyError.failed("Original source changed during classification")}
+        var checked = source
+        checked.kind = inspected.kind;checked.classificationEvidence = inspected.classificationEvidence
+        checked.classificationProof = inspected.classificationProof
+        return checked
+    }
+
     public static func inspect(_ url: URL, request: JobRequest) async throws -> SourceRecord {
+        try Task.checkCancellation()
+        let sha256 = try Integrity.sha256(url)
         let p = try await probe(url)
         let timeline = try await sourceTimeline(url,probe:p)
-        if let expected = request.expectedDuration {
-            guard expected.isFinite, abs(timeline.duration-expected) <= max(0.1,expected*0.001) else { throw JoeyError.invalid("Incomplete source: duration conflicts with source evidence") }
-        }
+        try validateSourceDuration(timeline.duration,expected:request.expectedDuration)
         guard p.streams.filter({$0.codec_type == "audio"}).count <= 1 else { throw JoeyError.dependency("Multiple source audio tracks require an explicit preservation mapping") }
         try validateVideoMapping(p.streams)
         guard p.streams.allSatisfy({$0.codec_type != "subtitle"}) else { throw JoeyError.dependency("Separate subtitle stream needs a preservation mapping; source has not been changed") }
-        try await decode(url)
-        let attrs = try FileManager.default.attributesOfItem(atPath:url.path)
         var kind: MediaKind = .audio
         var evidence = "No video stream"
+        var proof: SourceClassificationProof?
         if p.video != nil {
-            var frames: [Data] = []
-            for i in 0..<8 {
-                let at = min(max(0,timeline.duration-0.05),Double(i)*timeline.duration/8)
-                let result = try await Processes.run("ffmpeg",["-nostdin","-v","error","-ss",String(at),"-i",url.path,"-frames:v","1","-vf","scale=64:64,format=gray","-f","rawvideo","-"])
-                if result.stdout.count == 4096 { frames.append(result.stdout) }
-            }
-            let differences = zip(frames,frames.dropFirst()).map { a,b in zip(a,b).reduce(0.0) {$0+abs(Double($1.0)-Double($1.1))}/4096 }
-            let moving = differences.filter {$0 > 1}.count
-            kind = moving >= 2 ? .nativeVideo : .audio
-            evidence = "Eight distributed 64x64 grayscale samples; \(moving) changes above mean absolute pixel difference 1. Static presentation treated as audio; sampling is not semantic certainty."
-            if kind == .audio, p.audio == nil { throw JoeyError.invalid("Static visual source has no audio program") }
-        }
+            let checked = try await classificationProof(url,hasAudio:p.audio != nil,sha256:sha256)
+            proof = checked
+            kind = p.audio != nil && checked.uniformFrameSHA256 != nil ? .audio : .nativeVideo
+            evidence = "All \(checked.decodedFrameCount) decoded frames checked at original resolution and pixel format using SHA-256; " +
+                (kind == .audio ? "identical geometry, format, byte size and picture hashes; static presentation with audio." : "native picture retained; differing frames or no audio program.")
+        } else {try await decode(url)}
+        try Task.checkCancellation()
+        guard try Integrity.sha256(url) == sha256 else {throw JoeyError.failed("Original source changed during inspection")}
+        let attrs = try FileManager.default.attributesOfItem(atPath:url.path)
         return SourceRecord(id:request.sourceID,owner:request.owner,title:request.title,episodeDate:request.episodeDate,
             originalURL:request.originalURL,path:url.path,bytes:(attrs[.size] as? NSNumber)?.int64Value ?? 0,
-            sha256:try Integrity.sha256(url),duration:timeline.duration,width:p.video?.width ?? 0,height:p.video?.height ?? 0,
+            sha256:sha256,duration:timeline.duration,width:p.video?.width ?? 0,height:p.video?.height ?? 0,
             fps:p.video?.fps ?? 0,hasAudio:p.audio != nil,kind:kind,streams:timeline.streams,
-            authorizationBasis:request.authorizationBasis,archiveReference:request.archiveReference,classificationEvidence:evidence)
+            authorizationBasis:request.authorizationBasis,archiveReference:request.archiveReference,classificationEvidence:evidence,classificationProof:proof)
     }
     static func intervalInputs(source: SourceRecord, intervals: [Interval]) -> [String] {
         let origin = source.streams.compactMap {Double($0.start_time ?? "")}.min() ?? 0
@@ -252,7 +356,8 @@ public enum Media {
     public static func render(source: SourceRecord, clip: ClipRecord, profile: SharedProfile, artwork: Artwork?, work: URL, output: URL, branding: JoeBranding? = nil) async throws -> RenderReceipt {
         try Task.checkCancellation()
         try validateVideoMapping(source.streams)
-        let outputProfile = profile.outputProfile(for:source.kind)
+        try validateAudioClassification(source)
+        let outputProfile = try profile.outputProfile(for:source.kind)
         try FileManager.default.createDirectory(at:work,withIntermediateDirectories:true)
         try Persistence.checkDisk(at:work,requiredBytes:StorageManager.peakBytes(duration:clip.expectedDuration,sourceBytes:0,clipDuration:clip.expectedDuration+(branding?.outroDuration ?? 0),audio:source.kind == .audio))
         var receipt = RenderReceipt(pictureWidth:0,pictureHeight:0)
@@ -316,6 +421,7 @@ public enum Media {
         return receipt
     }
     static func audioReference(source: SourceRecord, clip: ClipRecord, profile: SharedProfile, artwork: Artwork, output: URL, work: URL) async throws -> RenderReceipt {
+        try validateAudioClassification(source)
         let selected = work.appendingPathComponent("expected-source.wav")
         _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-y"]+intervalInputs(source:source,intervals:clip.intervals)+["-filter_complex",audioFilter(source,clip.intervals),"-map","[a]","-c:a","pcm_s16le",selected.path])
         let pcm = work.appendingPathComponent("final-waveform.f32")
@@ -459,7 +565,8 @@ public enum Media {
     }
     public static func validate(output: URL, source: SourceRecord, clip: ClipRecord, profile: SharedProfile, render: RenderReceipt, work: URL) async throws -> QAReport {
         try validateVideoMapping(source.streams)
-        let outputProfile = profile.outputProfile(for:source.kind)
+        try validateAudioClassification(source)
+        let outputProfile = try profile.outputProfile(for:source.kind)
         try await decode(output)
         let p = try await probe(output)
         let branding = render.joeBranding

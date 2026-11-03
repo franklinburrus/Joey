@@ -93,11 +93,21 @@ public struct SharedProfile: Codable, Equatable, Sendable {
     }
     public var maxDuration: Double { driveOnlyJoe == true ? 607.3 : min(x?.maxDuration ?? 0, instagram?.maxDuration ?? 0) }
     public var maxBytes: Int64 { driveOnlyJoe == true ? 2_000_000_000 : min(x?.maxBytes ?? 0, instagram?.maxBytes ?? 0) }
-    func outputProfile(for kind: MediaKind) -> SharedProfile {
-        guard kind == .nativeVideo, driveOnlyJoe != true else {return self}
-        var landscape = self
-        landscape.width = 1920;landscape.height = 1080
-        return landscape
+    func outputProfile(for kind: MediaKind) throws -> SharedProfile {
+        var output = self
+        if kind == .nativeVideo, driveOnlyJoe != true {
+            output.width = 1920;output.height = 1080
+        }
+        // Validate the resolved canvas, not only the portrait selection stored
+        // in the request. A native-video override cannot expand account limits.
+        if driveOnlyJoe != true {
+            guard let x, let instagram,
+                  output.width <= min(x.maxWidth,instagram.maxWidth),
+                  output.height <= min(x.maxHeight,instagram.maxHeight) else {
+                throw JoeyError.dependency("Shared capability evidence does not support \(output.width)×\(output.height) output; existing media preserved")
+            }
+        }
+        return output
     }
     public func validate(now: Date = Date(), requireCurrentEvidence: Bool = true) throws {
         if driveOnlyJoe == true {
@@ -246,13 +256,25 @@ public struct JobRequest: Codable, Equatable, Sendable {
     func identityData(ignoringProfile: Bool = false) throws -> Data {
         var copy = self
         copy.profile = ignoringProfile ? .joeBuddenDrive : profile.identityContract
-        // Retiring Joe's archive must not create a second job for an existing
+        // Changing Joe's archive must not create a second job for an existing
         // immutable source request. The saved job ID remains authoritative.
         if copy.productionWorkflow == .joeBudden {copy.archiveRootID = nil}
         return try Persistence.encoder.encode(copy)
     }
     func stableID() throws -> String {
         owner.rawValue + "-" + String(Integrity.textHash(String(decoding:try identityData(),as:UTF8.self)).prefix(24))
+    }
+}
+
+public struct SourceClassificationProof: Codable, Equatable, Sendable {
+    public var version: Int
+    public var sourceSHA256: String
+    public var decodedFrameCount: Int
+    public var uniformFrameSHA256: String?
+
+    func provesStaticVideo(sha256: String) -> Bool {
+        version == 1 && sourceSHA256 == sha256 && decodedFrameCount > 0 &&
+            uniformFrameSHA256?.count == 64 && uniformFrameSHA256!.allSatisfy {"0123456789abcdef".contains($0)}
     }
 }
 
@@ -275,6 +297,7 @@ public struct SourceRecord: Codable, Equatable, Sendable {
     public var authorizationBasis: String
     public var archiveReference: String?
     public var classificationEvidence: String
+    public var classificationProof: SourceClassificationProof? = nil
 }
 
 public struct ResolvedClipFailure: Codable, Equatable, Sendable {

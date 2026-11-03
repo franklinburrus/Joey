@@ -51,12 +51,7 @@ public enum BufferPreflight {
               bytes == clip.drive?.bytes, sha == clip.drive?.sha256 else {
             throw JoeyError.failed("Buffer preflight: accepted file, QA and Drive receipt identities disagree")
         }
-        let outputProfile = profile.outputProfile(for:source.kind)
-        guard let x = profile.x, let instagram = profile.instagram,
-              outputProfile.width <= min(x.maxWidth,instagram.maxWidth),
-              outputProfile.height <= min(x.maxHeight,instagram.maxHeight) else {
-            throw JoeyError.dependency("Buffer preflight: current shared capability evidence does not support \(outputProfile.width)×\(outputProfile.height)")
-        }
+        let outputProfile = try profile.outputProfile(for:source.kind)
         let (probe,mediaChecks) = try await inspectMedia(output,expectedDuration:clip.expectedDuration,hasAudio:source.hasAudio,profile:outputProfile)
         var checks = mediaChecks
         checks["production_qa"] = "Accepted QA output SHA-256 matches current complete local file"

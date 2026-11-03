@@ -9,9 +9,7 @@ public enum DriveDestination: String, Codable, CaseIterable, Sendable {
     case dubAudioClips, dubVideoClips, taxstoneClips, joeBuddenClips
     case dubAudioEpisodes, dubVideoEpisodes, taxstoneEpisodes, joeBuddenEpisodes
 
-    /// Keep the retired Joe archive case decodable for historical receipts.
-    /// New Joe jobs retain clips only, so provider preflight must not require it.
-    public static var active: [DriveDestination] { allCases.filter { $0 != .joeBuddenEpisodes } }
+    public static var active: [DriveDestination] { allCases }
 
     public var id: String {
         switch self {
@@ -22,7 +20,7 @@ public enum DriveDestination: String, Codable, CaseIterable, Sendable {
         case .dubAudioEpisodes: return "109_QzHpF0Bi-OG6-AxuTDw1uHG4zeop3"
         case .dubVideoEpisodes: return "1GpuGWGIbSt3afwsi9L782soT9WJKOHS9"
         case .taxstoneEpisodes: return "1wQMwzUconRC3UCvH2jpL1kD__ctBv29p"
-        case .joeBuddenEpisodes: return "1IIYLVDhCvwf5ZoMb0aM5vpSCe-eMCmyK"
+        case .joeBuddenEpisodes: return "1KJ0-sjGWNxwIuis_faA5z_FbPUcbjEDD"
         }
     }
     public var name: String {
@@ -34,7 +32,7 @@ public enum DriveDestination: String, Codable, CaseIterable, Sendable {
         case .joeBuddenClips: return "Joe Budden Clips"
         case .dubAudioEpisodes: return "Full X Audio Spaces"
         case .dubVideoEpisodes: return "Full X Broadcasts"
-        case .joeBuddenEpisodes: return "Joe"
+        case .joeBuddenEpisodes: return "Joe Budden Full Episodes"
         }
     }
     public var ancestorIDs: [String] {
@@ -42,12 +40,10 @@ public enum DriveDestination: String, Codable, CaseIterable, Sendable {
         switch self {
         case .dubAudioClips, .dubVideoClips, .dubAudioEpisodes, .dubVideoEpisodes:
             return ["1JQH012UFDeHukvigMf4dGxCoUgWvMc4U"] + content
-        case .joeBuddenClips:
+        case .joeBuddenClips, .joeBuddenEpisodes:
             return ["1-HjL5kpENfWQm5jwshAhU3QM-THI6u53"] + content
         case .taxstoneClips, .taxstoneEpisodes:
             return ["1kxv3bbnPPRt914npHFUI51jrbCY0atyU"] + content
-        case .joeBuddenEpisodes:
-            return ["1tTuXCzAOYASK5S-KKuYrFzYQRVjQebx4","1pV7ztF72nRMJoVe44EQvsijvGqNt5AeN"] + content
         }
     }
 }
@@ -106,11 +102,11 @@ public enum DestinationResolver {
         case (.taxstone,_,.clip): destination = .taxstoneClips
         case (.taxstone,_,.fullEpisode): destination = .taxstoneEpisodes
         case (.joeBudden,_,.clip): destination = .joeBuddenClips
-        case (.joeBudden,_,.fullEpisode):
-            throw JoeyError.invalid("Joe Budden full episodes are temporary processing sources, not Drive archive deliveries")
+        case (.joeBudden,_,.fullEpisode): destination = .joeBuddenEpisodes
         }
         if asset == .fullEpisode, source.archiveReference == nil, let oldSelection = request.archiveRootID,
-           oldSelection != destination.id {
+           oldSelection != destination.id,
+           !(owner == .joeBudden && oldSelection == "1IIYLVDhCvwf5ZoMb0aM5vpSCe-eMCmyK") {
             throw JoeyError.invalid("Saved archive destination \(oldSelection) conflicts with authoritative \(destination.id); no file moved or uploaded")
         }
         return FilingDestination(destination:destination,asset:asset,owner:owner,sourceID:source.id,sourceSHA256:source.sha256)

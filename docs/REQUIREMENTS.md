@@ -75,7 +75,7 @@ Acquire the complete original. Resume interrupted downloads. Reject incomplete s
 
 Full-length originals remain where they are currently stored. Preserve and reference verified existing archives. Do not move or duplicate full-length files solely because Joey has dedicated clip folders. For a new source requiring archival, use its established full-length destination; preserve source bytes.
 
-2026-11-02 explicit creator-retention amendment: preserve the entire Taxstone full-episode library and DUB originals. Joe Budden keeps delivered clips and delivery records, with no permanent full-episode Drive archive. Newly acquired Joe source media is temporary: remove only the exact application-owned source after all required clips, QA, companions and provider delivery are verified and completion is durably recorded. Preserve incomplete jobs, shared recovery dependencies, imported/reused sources, unregistered historical originals and all accepted clips/records. Record source ownership and removal evidence; recover interrupted cleanup without deleting a replacement file. Frank is separately handling stray historical Joe originals himself; this is not authority for a broad archive purge.
+2026-11-02 latest explicit creator-retention amendment: preserve the entire Taxstone full-episode library, DUB originals and complete Joe Budden episodes. Frank restored permanent Joe archival in `1KJ0-sjGWNxwIuis_faA5z_FbPUcbjEDD`, superseding the earlier same-day archive-retirement and temporary-source-deletion instruction. File complete Joe source bytes before transcription/clipping, naming full-episode files `<episode number> — <episode title>.<original extension>`, for example `945 — Maximum Punishment.mp4`. Preserve the source's original title and provenance in records and its original container/extension. Do not delete Joe originals on completion, reopening or scratch cleanup, even when a historical `source-retention.json` removal receipt exists. Preserve those historical receipts unchanged. Reuse existing verified originals without relocation, duplication or rerendering. Existing full-episode files in the named folder may be renamed in place to the requested pattern, preserving IDs, bytes, parents, permissions and links; this is not authority for a catalog download or archive purge.
 
 6. COVERAGE AND BOUNDARIES
 
@@ -138,6 +138,8 @@ If an expected asset cannot be retrieved, automatically inspect established asse
 
 10. SHARED TECHNICAL EXPORT
 
+2026-11-03 explicit width correction: native video has no fixed 1080-pixel width requirement or ceiling. A portrait recommendation must not be encoded as a landscape width limit. Preserve the existing source-only landscape workflow and actual picture proportions, and use documented support for the selected upload surface; Buffer documents a 1920-pixel longest side. The approved audio artwork canvas and geometry remain unchanged. This removes the erroneous conservative width setting, not actual provider limits, integrity checks or source-bound acceptance requirements. Existing accepted outputs and immutable job requests are preserved.
+
 Export MP4 with H.264, yuv420p, progressive scan, square pixels, 30 fps, AAC-LC audio where present and web playback support.
 
 Use a portrait 1080×1920 canvas when verified for both upload destinations. Use 720×1280 for both when the verified common profile requires it. Never produce a second platform version.
@@ -150,20 +152,20 @@ Automatically select a compliant shared profile or report the exact incompatibil
 
 11. AUTHORITATIVE DUB FILING DESTINATIONS — 2026-11-02 CORRECTION
 
-Frank explicitly confirmed the earlier eight mappings, then reorganized the same Drive tree by creator and retired Joe's full-episode archive. The following seven active destinations reflect his final 2026-11-02 structure. They supersede the former Media/Clips hierarchy, intermediate platform folders, and retired Joey Video Clips/Joey Audio Clips roots. The authoritative tree is https://drive.google.com/drive/folders/1owpGIsjztPdlIIVb7DaszgtlbgEwrJ0Q, with creator folders directly inside Content. Never recreate retired wrappers or require another approval of the settled creator layout.
+Frank reorganized the Drive tree by creator, then explicitly restored Joe's permanent full-episode archive at the new folder below. The following eight active destinations reflect his latest 2026-11-02 instructions. They supersede the former Media/Clips hierarchy, intermediate platform folders, the earlier same-day Joe archive retirement, and retired Joey Video Clips/Joey Audio Clips roots. The authoritative tree is https://drive.google.com/drive/folders/1owpGIsjztPdlIIVb7DaszgtlbgEwrJ0Q, with creator folders directly inside Content. Never recreate retired wrappers or require another approval of the settled creator layout.
 
 | Content | Clip root | New full-episode root |
 | --- | --- | --- |
 | DUB X audio | `1FRi-yy2D9yenjQRailTA2iAbPaqAEPXm` | `109_QzHpF0Bi-OG6-AxuTDw1uHG4zeop3` |
 | DUB X video | `1380CHJ3a3kl7fXNIKWqUM7_DeTZUwxsy` | `1GpuGWGIbSt3afwsi9L782soT9WJKOHS9` |
 | Taxstone | `1bpHEdKPXQjjtoKp-L13KdITOT8Ep7JH8` | `1wQMwzUconRC3UCvH2jpL1kD__ctBv29p` |
-| Joe Budden | `1X5VNP6fo3VpZPu4ZW4p7Ggk2o_IAVGSI` | None; temporary sources only |
+| Joe Budden | `1X5VNP6fo3VpZPu4ZW4p7Ggk2o_IAVGSI` | `1KJ0-sjGWNxwIuis_faA5z_FbPUcbjEDD` |
 
-Use one deterministic resolver for source ownership (DUB, Taxstone or Joe Budden), inspected source format, asset classification (clip or full episode), and verified source identity. Never route by MP4 extension. Joe Budden retains its historical serialized DUB owner and explicit joeBudden workflow for existing request identity compatibility; that combination routes to Joe Budden's destinations and separate records. No manual Drive destination selection is required. A saved explicit archive selection conflicting with the authoritative route must fail with the exact conflict rather than silently override it.
+Use one deterministic resolver for source ownership (DUB, Taxstone or Joe Budden), inspected source format, asset classification (clip or full episode), and verified source identity. Never route by MP4 extension. Joe Budden retains its historical serialized DUB owner and explicit joeBudden workflow for existing request identity compatibility; that combination routes to Joe Budden's destinations and separate records. No manual Drive destination selection is required. A saved explicit archive selection conflicting with the authoritative route must fail with the exact conflict rather than silently override it. The known retired Joe selection `1IIYLVDhCvwf5ZoMb0aM5vpSCe-eMCmyK` is the sole migration exception: resolve it to Frank's newly specified Joe full-episode root without changing saved job identity. Reject arbitrary conflicting selections.
 
-Google Drive IDs, folder names, exact parents, ancestry and existing permissions must be verified before filing. DUB clip packages are directly below Content/Dub/X Audio Clips or Content/Dub/X Video Clips; its originals are under Content/Dub/Full X Audio Spaces and Content/Dub/Full X Broadcasts. Taxstone packages are directly below Content/Taxstone/Taxstone Clips; retain all originals under Content/Taxstone/Taxstone Full Episodes. Joe packages are directly below Content/Joe Budden/Joe Budden Clips, whose current name has no trailing space. Creator parent IDs are Dub `1JQH012UFDeHukvigMf4dGxCoUgWvMc4U`, Taxstone `1kxv3bbnPPRt914npHFUI51jrbCY0atyU`, and Joe Budden `1-HjL5kpENfWQm5jwshAhU3QM-THI6u53`; Content is `18Ix3mVu8gCFSa-EGGpzQsh03SajrZvKm`. These are existing branches, not instructions to recreate Media or platform wrappers.
+Google Drive IDs, folder names, exact parents, ancestry and existing permissions must be verified before filing. DUB clip packages are directly below Content/Dub/X Audio Clips or Content/Dub/X Video Clips; its originals are under Content/Dub/Full X Audio Spaces and Content/Dub/Full X Broadcasts. Taxstone packages are directly below Content/Taxstone/Taxstone Clips; retain all originals under Content/Taxstone/Taxstone Full Episodes. Joe packages are directly below Content/Joe Budden/Joe Budden Clips, whose current name has no trailing space; full originals are directly below Content/Joe Budden/Joe Budden Full Episodes. Creator parent IDs are Dub `1JQH012UFDeHukvigMf4dGxCoUgWvMc4U`, Taxstone `1kxv3bbnPPRt914npHFUI51jrbCY0atyU`, and Joe Budden `1-HjL5kpENfWQm5jwshAhU3QM-THI6u53`; Content is `18Ix3mVu8gCFSa-EGGpzQsh03SajrZvKm`. These are existing branches, not instructions to recreate Media or platform wrappers.
 
-New DUB and Taxstone full-length sources requiring archival use the corresponding full-episode root. Existing byte-equivalent originals remain in their current verified archives, including historical Taxstone archives; never silently relocate or duplicate them. Incorrectly routed existing clip packages must be identified and reported without automatic relocation, deletion, or copying to a second root. Ambiguous source identity, ownership, destination, or folder identity stops the affected filing operation while preserving accepted work.
+New DUB, Taxstone and Joe Budden full-length sources requiring archival use the corresponding full-episode root. Existing byte-equivalent originals remain in their current verified archives, including historical Taxstone archives; never silently relocate or duplicate them. Incorrectly routed existing clip packages must be identified and reported without automatic relocation, deletion, or copying to a second root. Ambiguous source identity, ownership, destination, or folder identity stops the affected filing operation while preserving accepted work.
 
 12. EPISODE FILING STRUCTURE
 
@@ -238,8 +240,8 @@ https://docs.google.com/document/d/1uzCYO0canF-N9Lfy0iZpJzevT2f1uafdCfbVk2yRNPQ/
 Taxstone previous landscape audio instructions: retain compatible artwork/soundwave guidance; separate landscape export is superseded:
 https://docs.google.com/document/d/1E3ELBN7gX-uFSmqAx-SjQWeJEIaQauJ3LUEcQHzLF6c/edit
 
-Joe Budden retired full-length archive (historical reference only; do not restore or use for new delivery):
-https://drive.google.com/drive/folders/1IIYLVDhCvwf5ZoMb0aM5vpSCe-eMCmyK
+Joe Budden current full-length archive (complete originals named `945 — Maximum Punishment` with their original extensions):
+https://drive.google.com/drive/folders/1KJ0-sjGWNxwIuis_faA5z_FbPUcbjEDD
 
 DUB existing full X-broadcast archive:
 https://drive.google.com/drive/folders/1GpuGWGIbSt3afwsi9L782soT9WJKOHS9
