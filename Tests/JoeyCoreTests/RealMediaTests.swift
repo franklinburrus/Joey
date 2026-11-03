@@ -15,7 +15,6 @@ final class RealMediaTests: XCTestCase {
             try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
             let sourceURL = URL(fileURLWithPath:fixture["path"] as! String)
             if let hash = fixture["sha256"] as? String {XCTAssertEqual(try Integrity.sha256(sourceURL),hash)}
-            let profile = try Fixtures.profile(dir:dir)
             let owner = Owner(rawValue:fixture["owner"] as! String)!
             var request = try Fixtures.request(dir:dir,path:sourceURL.path)
             request.owner = owner; request.sourceID = fixture["sourceID"] as! String
@@ -26,6 +25,9 @@ final class RealMediaTests: XCTestCase {
             if let previous: SourceRecord = try? Persistence.load(sourceFile), previous.sha256 == (try Integrity.sha256(sourceURL)) {source = previous}
             else {source = try await Media.inspect(sourceURL,request:request);try Persistence.save(source,to:sourceFile)}
             XCTAssertEqual(source.kind.rawValue,fixture["kind"] as? String)
+            // Renderer-only native fixtures must permit the actual landscape
+            // canvas; these synthetic limits do not establish account access.
+            let profile = try source.kind == .nativeVideo ? Fixtures.landscapeProfile(dir:dir) : Fixtures.profile(dir:dir)
             var artwork: Artwork?
             if let art = fixture["artwork"] as? String {
                 artwork = Artwork(owner:owner,sourceID:owner == .taxstone ? source.id:nil,driveID:fixture["artworkID"] as! String,

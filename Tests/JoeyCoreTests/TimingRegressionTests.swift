@@ -212,7 +212,7 @@ final class TimingRegressionTests: XCTestCase {
         let (dir,source,profile) = try await fixture(videoDelay:1,audioDelay:0)
         defer {try? FileManager.default.removeItem(at:dir)}
         let (output,clip,receipt) = try await render(source,dir,profile,intervals:[Interval(0,4)])
-        let outputProfile = profile.outputProfile(for:.nativeVideo)
+        let outputProfile = try profile.outputProfile(for:.nativeVideo)
         let shifted = dir.appendingPathComponent("shifted-picture.mp4")
         _ = try await Processes.run("ffmpeg",["-v","error","-i",output.path,"-i",source.path,"-filter_complex",
             "[1:v]setpts=PTS-STARTPTS,fps=30,pad=\(outputProfile.width):\(outputProfile.height):(ow-iw)/2:(oh-ih)/2:black,setsar=1,tpad=stop_mode=clone:stop_duration=1[v]",

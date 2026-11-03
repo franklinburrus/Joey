@@ -2,6 +2,38 @@ import XCTest
 @testable import JoeyCore
 
 final class MediaTests: XCTestCase {
+    func testNativeExportAndQARejectDimensionsOutsideEitherSharedCapability() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:dir)}
+        let sourceURL = dir.appendingPathComponent("source.mp4")
+        _ = try await Processes.run("ffmpeg",["-v","error","-f","lavfi","-i","testsrc2=s=160x90:r=30:d=1",
+            "-c:v","libx264","-pix_fmt","yuv420p",sourceURL.path])
+        let source = try await Media.inspect(sourceURL,request:Fixtures.request(dir:dir,path:sourceURL.path))
+        XCTAssertEqual(source.kind,.nativeVideo)
+        let clip = ClipRecord(id:1,title:"Synthetic dimensions",intervals:[Interval(0,1)],filename:"clip.mp4")
+        let compatible = try Fixtures.landscapeProfile(dir:dir)
+        let output = dir.appendingPathComponent(clip.filename)
+        let receipt = try await Media.render(source:source,clip:clip,profile:compatible,artwork:nil,work:dir,output:output)
+        let before = try Integrity.sha256(output)
+        for platform in ["X","Instagram"] {
+            var narrow = compatible
+            if platform == "X" {narrow.x!.maxWidth = 720} else {narrow.instagram!.maxWidth = 720}
+            try narrow.validate() // The selected portrait profile itself is valid.
+            do {
+                _ = try await Media.validate(output:output,source:source,clip:clip,profile:narrow,render:receipt,work:dir)
+                XCTFail("QA accepted native output wider than the verified \(platform) capability")
+            } catch {XCTAssertTrue(error.localizedDescription.contains("1920×1080"),error.localizedDescription)}
+            let rejected = dir.appendingPathComponent("rejected-\(platform).mp4")
+            do {
+                _ = try await Media.render(source:source,clip:clip,profile:narrow,artwork:nil,work:dir,output:rejected)
+                XCTFail("Rendered native output wider than the verified \(platform) capability")
+            } catch {XCTAssertTrue(error.localizedDescription.contains("1920×1080"),error.localizedDescription)}
+            XCTAssertFalse(FileManager.default.fileExists(atPath:rejected.path))
+        }
+        XCTAssertEqual(try Integrity.sha256(output),before,"Rejected QA must preserve accepted bytes")
+    }
+
     private func assertDisplayGeometry(sampleAspect: String, rotation: Int?, width: Int, height: Int) async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("joey-geometry-"+UUID().uuidString)
         try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
@@ -192,6 +224,8 @@ enum Fixtures {
         return profile
     }
     static func request(dir: URL, path: String) throws -> JobRequest {
-        JobRequest(owner:.dub,sourceID:"fixture-source",title:"Fixture",localPath:path,authorizationBasis:"Generated test media",profile:try profile(dir:dir),fileToDrive:false)
+        // Successful native-job fixtures need capability for their actual
+        // landscape canvas. profile(dir:) remains the narrow portrait fixture.
+        JobRequest(owner:.dub,sourceID:"fixture-source",title:"Fixture",localPath:path,authorizationBasis:"Generated test media",profile:try landscapeProfile(dir:dir),fileToDrive:false)
     }
 }

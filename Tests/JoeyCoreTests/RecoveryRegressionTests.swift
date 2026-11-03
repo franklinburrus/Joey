@@ -2,6 +2,29 @@ import XCTest
 @testable import JoeyCore
 
 final class RecoveryRegressionTests: XCTestCase {
+    func testIncompleteNativeJobWithUnsupportedDimensionsCannotResumeProviderWrites() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.profile = try Fixtures.profile(dir:root) // X permits only 720 pixels wide.
+        request.fileToDrive = true
+        var (saved,directory) = try completed(request,root:root)
+        saved.state = .qaPassed;saved.clips[0].drive = nil;saved.companions = [:];saved.registerRows = []
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let persisted: JobRecord = try Persistence.load(directory.appendingPathComponent("job.json"))
+        let output = directory.appendingPathComponent(saved.clips[0].filename)
+        let before = try Integrity.sha256(output)
+        let provider = RecoveryDelivery()
+        let coordinator = try Coordinator(root:root)
+        let result = try await Coordinator.$deliveryOverride.withValue(provider) {try await coordinator.run(request)}
+        XCTAssertTrue(result.error?.contains("1920×1080") == true,result.error ?? "Missing capability rejection")
+        let calls = await provider.calls
+        XCTAssertEqual(calls,0,"Accepted legacy QA cannot authorize an out-of-contract archive or upload")
+        XCTAssertEqual(result.state,.qaPassed)
+        XCTAssertEqual(result.clips[0].qa,persisted.clips[0].qa)
+        XCTAssertEqual(try Integrity.sha256(output),before)
+        XCTAssertTrue(result.companions.isEmpty)
+    }
+
     private func workspace() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
