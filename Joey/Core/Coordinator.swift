@@ -55,6 +55,7 @@ public actor Coordinator {
                         var current: JobRecord = try Persistence.load(checkpoint)
                         if current.storageRequiredBytes != nil,try Persistence.encoder.encode(current) == Persistence.encoder.encode(job) {
                             current.state = .cancelled;current.storageRequiredBytes = nil
+                            current.stage = "Paused while storage blocked"
                             current.error = "Paused while storage blocked; progress preserved"
                             try Persistence.save(current,to:checkpoint)
                             try await progress(current)
@@ -119,6 +120,7 @@ public actor Coordinator {
                 if job.request != previous {try await save()}
                 try await progress(job); return job
             }
+            job.stage = "capability verification"
             try renewCapabilityEvidence(requireCurrent:true)
             sourceValidationSnapshot = job
             let delivery: any CoordinatorDelivery = try Self.deliveryOverride ?? DriveDelivery(remote:config.rcloneRemote)
@@ -383,7 +385,7 @@ public actor Coordinator {
             if let blocked = error as? StorageBlocked {
                 job.state = .processing;job.stage = "Storage blocked — capacity recheck in 60 seconds"
                 job.storageRequiredBytes = blocked.required
-            }
+            } else {job.storageRequiredBytes = nil}
             job.error = error is CancellationError ? "Cancelled; progress preserved for resume" : error.localizedDescription
             try await save()
             if job.source != nil {_ = try? Records.write(job:job,directory:dir)}

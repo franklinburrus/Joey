@@ -168,9 +168,17 @@ public struct Transcript: Codable, Equatable, Sendable {
         guard self.sourceID == sourceID, sourceSHA256 == sha256, abs(self.duration-duration) < 0.1,
               !engine.isEmpty, !segments.isEmpty else { throw JoeyError.invalid("Transcript is not bound to this complete source") }
         var previous = 0.0
-        for s in segments {
-            guard s.start.isFinite, s.end.isFinite, s.start >= previous, s.end >= s.start,
-                  s.end <= duration + 0.1, !s.text.isEmpty else { throw JoeyError.invalid("Invalid timestamped transcript") }
+        for (index, s) in segments.enumerated() {
+            let reason: String?
+            if !s.start.isFinite || !s.end.isFinite { reason = "non-finite timestamp" }
+            else if s.start < previous { reason = "start precedes the previous segment start" }
+            else if s.end < s.start { reason = "end precedes start" }
+            else if s.end > duration + 0.1 { reason = "end exceeds source duration" }
+            else if s.text.isEmpty { reason = "empty text" }
+            else { reason = nil }
+            if let reason {
+                throw JoeyError.invalid("Invalid timestamped transcript at segment \(index + 1) (\(s.start)–\(s.end)s; source \(duration)s): \(reason)")
+            }
             previous = s.start
         }
     }

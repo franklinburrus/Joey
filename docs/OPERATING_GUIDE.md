@@ -20,7 +20,11 @@ The app displays stage, errors, clip titles, exact fractional intervals, measure
 
 Unchanged accepted outputs are hash-checked and reused. Complete timestamped transcripts are source-bound and reused after later failures. Disposable scratch from a successfully validated attempt is removed only after output/evidence persistence. Unrelated files, retained originals and accepted outputs remain protected. Joe originals remain protected after completion, including historical sources with obsolete deletion receipts.
 
+An eligible locally generated ASR overrun confined to the final 30 seconds is recovered from that actual audio interval using the configured offline helper. Joey preserves the original `asr-source.json` and unchanged prefix, validates regenerated segment/word timings and saves `transcript-repair.json` with the retained excerpt and helper output. It never clamps timestamps. Invalid imported transcripts, mismatched sources and earlier/order defects fail with the exact segment or binding issue. Failed recovery remains available for diagnosis; restarting reuses valid evidence and does not repeatedly invoke inference on the same invalid result. A supplied complete source-bound transcript can provide explicit recovery. Do not delete or edit repair evidence to force acceptance.
+
 A completed job with current routing evidence reopens from local evidence without contacting GitHub, Codex or cloud build services. A legacy completion record without authoritative destination evidence cannot receive a current Completed badge; its accepted files and receipts remain preserved for reconciliation. This does not claim a new provider readback while offline. Filing failures retain accepted media as `QA_PASSED — NOT FILED`. Errors identify the affected stage/clip; independent clips continue. Ordinary transient operations are bounded to three attempts, with uncertain external writes reconciled before repetition.
+
+Missing companion receipts do not invalidate accepted clips or authorize rerendering. Resume verifies existing files and folder bindings, reuses valid provider identities, reconciles the four required companions and then performs required register readback. An incomplete receipt or missing companion prevents completion; repeated recovery must retain the same accepted media and provider identities.
 
 ## Filing and completion
 

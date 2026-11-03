@@ -126,7 +126,16 @@ public final class StorageManager {
         guard fstat(fd,&st) == 0,(st.st_mode & S_IFMT) == S_IFREG,st.st_nlink == 1,
               UInt64(st.st_ino) == file.inode,st.st_dev == file.device,st.st_size == file.bytes else {return false}
         var hash = SHA256()
-        while let data = try handle.read(upToCount:1024*1024),!data.isEmpty {hash.update(data:data)}
+        while true {
+            // Keep the verified descriptor open while releasing each read
+            // buffer before the next chunk; never reopen by an unchecked path.
+            let finished = try autoreleasepool {
+                guard let data = try handle.read(upToCount:1024*1024), !data.isEmpty else {return true}
+                hash.update(data:data)
+                return false
+            }
+            if finished {break}
+        }
         return hash.finalize().map {String(format:"%02x",$0)}.joined() == file.sha256
     }
     public static func capacity(at url: URL) throws -> (free: Int64, reserve: Int64) {

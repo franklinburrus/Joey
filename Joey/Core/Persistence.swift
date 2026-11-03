@@ -8,8 +8,15 @@ public enum Integrity {
     private static func digest(_ url: URL, md5: Bool) throws -> String {
         let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }
         var sha = SHA256(); var md = Insecure.MD5()
-        while let data = try handle.read(upToCount: 1024*1024), !data.isEmpty {
-            if md5 { md.update(data: data) } else { sha.update(data: data) }
+        while true {
+            // FileHandle can autorelease each read buffer. Drain it per chunk
+            // so hashing an original does not retain the whole file in memory.
+            let finished = try autoreleasepool {
+                guard let data = try handle.read(upToCount:1024*1024), !data.isEmpty else {return true}
+                if md5 {md.update(data:data)} else {sha.update(data:data)}
+                return false
+            }
+            if finished {break}
         }
         return (md5 ? Array(md.finalize()) : Array(sha.finalize())).map { String(format:"%02x",$0) }.joined()
     }

@@ -1,11 +1,26 @@
 # Joey Native Implementation Plan
 
-> Existing implementation roadmap. Current task state and evidence are recorded in STATUS.md. Historical handoff limitations below are superseded by Frank’s subsequent explicit implementation and installation instructions. First production delivery and the approved UI/final branding milestone are complete; Taxstone Library Mode is installed and running; initial real deliveries are verified, with native UI acceptance pending.
+> Existing implementation roadmap. Current task state and evidence are recorded in STATUS.md and the requirements-to-evidence matrix in VERIFICATION.md. The milestones below are historical; they do not establish current queue state or acceptance. Frank's current task is native functional completion with one explicitly authorized end-to-end acceptance source. Production backlogs and optional automations remain outside that task.
 
 **Goal:** Implement the standalone local media workflow in REQUIREMENTS.md.
 **Architecture:** SwiftUI calls a serial actor coordinator with atomic JSON checkpoints and cross-process locking. Foundation Process invokes installed media tools without a shell; Swift owns planning, state, hashes and provider readback. Existing Xcode folder membership compiles the shared core; Swift Package Manager provides a dependency-free test/runner harness using the same files and Xcode toolchain.
 **Tech Stack:** Swift, SwiftUI, Foundation, CryptoKit, AppKit/CoreGraphics, FFmpeg/FFprobe, existing yt-dlp/rclone/local ASR.
 **Spec:** REQUIREMENTS.md, sole current requirements document.
+
+## Native functional completion — 2026-11-03
+
+Use the existing combined Swift/SwiftUI application and preserve all prior original-retention, replay-duration, dimension and source-classification repairs. Frank approved `x:broadcast:2rJapEXbVkKRAR` for the selected native full-show acceptance through required Drive and register readback. The exact current task, exclusions, evidence and dependencies are maintained in STATUS and VERIFICATION.
+
+- [x] Verify actual source, installed build, account evidence, exact destinations, existing record schema and selected-source duplication constraints.
+- [x] Reproduce and repair local transcript-tail recovery and stale capacity-wait state without weakening validation or changing immutable contracts.
+- [x] Cover accepted clips without companion receipts, legacy receipt hydration, interrupted writes and repeated recovery; reuse the existing correct delivery implementation.
+- [x] Reproduce and repair unbounded autoreleased read-buffer retention in source/scratch hashing while preserving hashes and secure descriptor checks.
+- [x] Verify bounded real transcript recovery, representative DUB/Taxstone audio renderer QA and read-only live routing.
+- [x] Complete final combined checks and install the matching signed build with rollback and runtime preservation. Final follow-up affected tests and native cancellation/accessibility checks are recorded in STATUS.
+- [ ] Exercise the approved source through installed native intake, complete source/transcript/planning/QA/delivery/records and recap; verify cancellation/restart/reuse without duplicate work.
+- [x] Independently review available acceptance evidence and reconcile verified, failed, blocked and unverified functions in the existing matrix. The incomplete native demonstration is recorded as blocked, not passed.
+
+Current boundary: independent review and the matrix are updated, but the complete native demonstration remains blocked before acquisition by working-volume capacity. The approved job is saved as `CANCELLED` for explicit Resume after sufficient space is available. No required success criterion is marked complete from historical deliveries or the separate renderer diagnostics.
 
 
 ## Joe Budden full-episode retention and naming — 2026-11-02

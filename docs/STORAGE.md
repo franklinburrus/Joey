@@ -28,6 +28,10 @@ Capacity uses actual free filesystem bytes, excluding assumed purgeable space. T
 
 Media-writing helpers and native waveform rendering check free capacity every five seconds. A low-capacity interruption drains supervised workers, retains durable job/attempt state, and stops further renders. Already accepted outputs can finish Drive reconciliation without another large local render. Storage-blocked jobs poll capacity every 60 seconds; they do not repeatedly render or upload during the wait. Safe automatic cleanup runs before rechecks if enabled. Resume revalidates the unchanged request and all production gates, including capability expiry. Pause cancels the wait; restarting recovers from the existing job and library records. Joe discovery retains its original 30-minute interval and episode 976 baseline.
 
+A later non-storage failure clears the historical capacity-wait marker. For example, expired capability evidence after capacity improves is reported at capability verification rather than repeatedly waiting for storage or overwriting the useful failure. Transcript tail recovery preserves typed low-storage errors so the same coordinator wait/resume mechanism applies.
+
+File hashing consumes and releases each 1 MiB read buffer before the next read, including verified scratch-file hashing through the already-validated descriptor. This bounds buffer retention independently of source size while preserving SHA-256/MD5 results and all existing identity, no-follow and cleanup checks. It does not reclaim protected media or count assumed purgeable capacity.
+
 ## Limits
 
 Storage management cannot make the entire 106-episode library fit by deleting accepted content: that deletion is explicitly outside its authority. If protected retained media exhausts available capacity, Joey blocks new media work and requires more working-volume space. Historical scratch, legacy-reuse media/evidence and unregistered process remnants remain untouched unless a future explicitly authorized reconciliation establishes safe disposal. No general-purpose cleanup or permanent background service is installed.

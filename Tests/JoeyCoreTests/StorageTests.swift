@@ -57,6 +57,32 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(try f.manager.clean().removedBytes,0)
         XCTAssertTrue(FileManager.default.fileExists(atPath:f.work.path))
     }
+    func testMultiChunkScratchHashMatchesReceiptBeforeVerifiedCleanup() throws {
+        let f = try fixture()
+        try Data(repeating:7,count:2*1024*1024+17).write(to:f.work.appendingPathComponent("selected.wav"))
+        try f.manager.closeAttempt(f.work,jobID:f.job.id)
+        let receipt = f.root.appendingPathComponent("jobs/\(f.job.id)/storage-attempts/\(f.work.lastPathComponent).json")
+        let attempt: ScratchAttempt = try Persistence.load(receipt)
+        XCTAssertEqual(attempt.files.first(where:{$0.name == "selected.wav"})?.sha256,
+            "f5930b95a132f0f0667e382a76ba676d79f48281e1336d74321d0c5f42b7e0b6")
+        let result = try f.manager.clean()
+        XCTAssertEqual(result.removedFiles,2)
+        XCTAssertEqual(result.removedBytes,2*1024*1024+17+Int64(Data("{\"diagnostic\":true}".utf8).count))
+        XCTAssertFalse(FileManager.default.fileExists(atPath:f.work.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath:f.root.appendingPathComponent("jobs/\(f.job.id)/accepted.mp4").path))
+    }
+    func testChangedByteBeyondFirstScratchChunkPreventsCleanup() throws {
+        let f = try fixture()
+        let scratch = f.work.appendingPathComponent("selected.wav")
+        try Data(repeating:7,count:2*1024*1024+17).write(to:scratch)
+        try f.manager.closeAttempt(f.work,jobID:f.job.id)
+        let handle = try FileHandle(forWritingTo:scratch)
+        try handle.seek(toOffset:1024*1024+11)
+        try handle.write(contentsOf:Data([8]))
+        try handle.close()
+        XCTAssertEqual(try f.manager.clean().removedFiles,0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath:scratch.path))
+    }
     func testLiveAttemptAndConcurrentWorkerAreNeverReclaimed() throws {
         let f = try fixture()
         XCTAssertEqual(try f.manager.clean().removedBytes,0)
@@ -157,6 +183,64 @@ final class StorageTests: XCTestCase {
             XCTAssertTrue(error is StorageBlocked)
         }
         XCTAssertNoThrow(try StorageManager.checkCapacity(at:f.root,requiredBytes:small,available:small+100,reserve:100))
+    }
+    func testExpiredCapabilityReplacesStoredCapacityWaitWithTerminalFailure() async throws {
+        try await assertCapabilityFailureEndsStoredCapacityWait(changedContract:false)
+    }
+    func testChangedCapabilityContractReplacesStoredCapacityWaitWithTerminalFailure() async throws {
+        try await assertCapabilityFailureEndsStoredCapacityWait(changedContract:true)
+    }
+    private func assertCapabilityFailureEndsStoredCapacityWait(changedContract: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:root.appendingPathComponent("unused-source.mp4").path)
+        request.transcriptPolicy = .modelIndependent
+        var config = Configuration();config.automaticCleanup = false
+        if changedContract {
+            var proposed = request.profile
+            proposed.x!.account = "different-fixture-account"
+            config.profile = proposed
+        } else {
+            request.profile.x!.checkedAt = Date().addingTimeInterval(-7200)
+            request.profile.x!.validUntil = Date().addingTimeInterval(-3600)
+        }
+        try Persistence.save(config,to:root.appendingPathComponent("settings.json"))
+        var saved = JobRecord(id:try request.stableID(),request:request)
+        saved.state = .processing
+        saved.stage = "Storage blocked — capacity recheck in 60 seconds"
+        saved.storageRequiredBytes = 1
+        saved.error = "Synthetic prior capacity shortage"
+        let checkpoint = root.appendingPathComponent("jobs/\(saved.id)/job.json")
+        try Persistence.save(saved,to:checkpoint)
+        let expectedError = changedContract ? "saved account" : "expired"
+        let running = Task {
+            try await StorageManager.$capacityOverride.withValue({100_000_000_000}) {
+                try await Coordinator(root:root).run(request) {job in
+                    if job.error?.contains(expectedError) == true,job.storageRequiredBytes != nil {
+                        // Bound the pre-fix regression: cancellation exposes the
+                        // erroneous capacity wait without sleeping for a minute.
+                        withUnsafeCurrentTask {$0?.cancel()}
+                    }
+                }
+            }
+        }
+        do {
+            let result = try await running.value
+            XCTAssertEqual(result.state,.failed)
+            XCTAssertEqual(result.stage,"capability verification")
+            XCTAssertNil(result.storageRequiredBytes)
+            XCTAssertTrue(result.error?.contains(expectedError) == true,result.error ?? "")
+            XCTAssertEqual(result.id,saved.id)
+            XCTAssertEqual(try result.request.identityData(),try saved.request.identityData())
+        } catch {
+            XCTFail("Capability rejection must return its failure, not enter a capacity wait: \(error)")
+        }
+        let persisted: JobRecord = try Persistence.load(checkpoint)
+        XCTAssertEqual(persisted.state,.failed)
+        XCTAssertEqual(persisted.stage,"capability verification")
+        XCTAssertNil(persisted.storageRequiredBytes)
+        XCTAssertTrue(persisted.error?.contains(expectedError) == true,persisted.error ?? "")
     }
     func testSupervisedWorkerKeepsCleanupLeaseUntilDrained() async throws {
         let f = try fixture()

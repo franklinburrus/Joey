@@ -181,6 +181,83 @@ final class RecoveryRegressionTests: XCTestCase {
         }
     }
 
+    func testAcceptedClipsWithoutCompanionReceiptsRecoverInterruptedCompanionsAndReopenSafely() async throws {
+        for companionIndex in 0..<4 {
+            for afterCommit in [false,true] {
+                let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+                var request = try Fixtures.request(dir:root,path:"unused");request.owner = .taxstone;request.fileToDrive = true
+                var (saved,directory) = try completed(request,root:root)
+                saved.state = .qaPassed;saved.stage = "companion records";saved.companions = [:]
+                try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+                let persisted: JobRecord = try Persistence.load(directory.appendingPathComponent("job.json"))
+                let acceptedReceipt = try XCTUnwrap(persisted.clips[0].drive)
+                let output = directory.appendingPathComponent(saved.clips[0].filename)
+                let original = URL(fileURLWithPath:saved.source!.path)
+                let identity = try FileManager.default.attributesOfItem(atPath:output.path)
+                let names = Records.companionNames(source:saved.source!)
+                let failedName = names[companionIndex]
+                let provider = RecoveryDelivery(companionFailureName:failedName,companionFailureAfterCommit:afterCommit)
+                await provider.seed(acceptedReceipt)
+                let checkStages: @Sendable (JobRecord) async throws -> Void = {job in
+                    if job.stage.hasPrefix("render clip") || job.stage.hasPrefix("QA clip") {
+                        throw JoeyError.failed("Companion recovery must preserve accepted clips without rendering or QA")
+                    }
+                    if job.stage == "companion records",job.error == nil {XCTAssertEqual(job.state,.filed)}
+                }
+                let interrupted = try await Coordinator.$deliveryOverride.withValue(provider) {
+                    try await Coordinator(root:root).run(request,progress:checkStages)
+                }
+                XCTAssertEqual(interrupted.state,.qaPassed)
+                XCTAssertEqual(interrupted.error,"Synthetic interrupted companion: "+failedName)
+                XCTAssertNil(interrupted.companions[failedName],"A lost response cannot fabricate a saved receipt")
+                XCTAssertFalse(interrupted.hasRequiredCompletionEvidence)
+                XCTAssertEqual(interrupted.clips,persisted.clips)
+                let firstCommitted = await provider.committed
+                XCTAssertEqual(firstCommitted[failedName] != nil,afterCommit)
+
+                let recovered = try await Coordinator.$deliveryOverride.withValue(provider) {
+                    try await Coordinator(root:root).run(request,progress:checkStages)
+                }
+                XCTAssertEqual(recovered.state,.completed,recovered.error ?? failedName)
+                XCTAssertTrue(recovered.hasRequiredCompletionEvidence)
+                XCTAssertEqual(recovered.id,persisted.id);XCTAssertEqual(recovered.folderID,persisted.folderID)
+                XCTAssertEqual(recovered.clips,persisted.clips)
+                XCTAssertEqual(Set(recovered.companions.keys),Set(names))
+                let committed = await provider.committed
+                for name in names {
+                    let receipt = try XCTUnwrap(recovered.companions[name])
+                    XCTAssertEqual(receipt,committed[name])
+                    XCTAssertEqual(receipt.sha256,try Integrity.sha256(directory.appendingPathComponent(name)))
+                    XCTAssertEqual(receipt.parent,recovered.folderID)
+                }
+                if afterCommit {XCTAssertEqual(recovered.companions[failedName]?.id,firstCommitted[failedName]?.id)}
+                let creations = await provider.clipCreations, attempts = await provider.clipAttempts
+                let companionCreations = await provider.companionCreations
+                XCTAssertEqual(creations,0,"Existing accepted media cannot be uploaded again to recover companions")
+                XCTAssertEqual(attempts,2,"Each retry reconciles the accepted provider object")
+                XCTAssertEqual(companionCreations,Dictionary(uniqueKeysWithValues:names.map {($0,1)}))
+                XCTAssertEqual(Set(committed.values.map(\.id)).count,5,"Exactly one clip and four canonical companions")
+                let calls = await provider.calls
+                let finalCheckpoint: JobRecord = try Persistence.load(directory.appendingPathComponent("job.json"))
+                let recordBytes = try Dictionary(uniqueKeysWithValues:names.map {($0,try Data(contentsOf:directory.appendingPathComponent($0)))})
+                for _ in 0..<2 {
+                    let reopened = try await Coordinator.$deliveryOverride.withValue(provider) {
+                        try await Coordinator(root:root).run(request,progress:checkStages)
+                    }
+                    XCTAssertEqual(reopened.state,.completed);XCTAssertEqual(reopened.companions,finalCheckpoint.companions)
+                    XCTAssertEqual(reopened.clips,persisted.clips)
+                    for (name,bytes) in recordBytes {XCTAssertEqual(try Data(contentsOf:directory.appendingPathComponent(name)),bytes)}
+                }
+                let finalCalls = await provider.calls;XCTAssertEqual(finalCalls,calls,"Completed reopen cannot repeat provider work")
+                XCTAssertEqual(try Integrity.sha256(output),persisted.clips[0].sha256)
+                XCTAssertEqual(try Integrity.sha256(original),persisted.source?.sha256)
+                let after = try FileManager.default.attributesOfItem(atPath:output.path)
+                XCTAssertEqual(after[.modificationDate] as? Date,identity[.modificationDate] as? Date)
+                XCTAssertEqual(after[.systemFileNumber] as? NSNumber,identity[.systemFileNumber] as? NSNumber)
+            }
+        }
+    }
+
     func testTaxstonePreplanningCheckpointsRetainOriginalJobIdentity() throws {
         let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
         var request = try Fixtures.request(dir:root,path:"unused")
@@ -502,10 +579,19 @@ private actor RecoveryDelivery: CoordinatorDelivery {
     var clipCreations = 0
     var clipAttempts = 0
     var committed: [String:DriveReceipt] = [:]
+    var companionCreations: [String:Int] = [:]
+    private var companionFailureTriggered = false
     let suspendAfterCommit: Bool
     let original: URL?
     let filingFault: String
-    init(suspendAfterCommit: Bool = false, original: URL? = nil, filingFault: String = "none") {self.suspendAfterCommit = suspendAfterCommit;self.original = original;self.filingFault = filingFault}
+    let companionFailureName: String?
+    let companionFailureAfterCommit: Bool
+    init(suspendAfterCommit: Bool = false, original: URL? = nil, filingFault: String = "none",
+         companionFailureName: String? = nil, companionFailureAfterCommit: Bool = true) {
+        self.suspendAfterCommit = suspendAfterCommit;self.original = original;self.filingFault = filingFault
+        self.companionFailureName = companionFailureName;self.companionFailureAfterCommit = companionFailureAfterCommit
+    }
+    func seed(_ receipt: DriveReceipt) {committed[receipt.name] = receipt}
     func metadata(_ id: String) async throws -> [String:Any] {throw JoeyError.failed("Unexpected metadata lookup in synthetic recovery")}
     func downloadOriginal(reference: String, directory: URL) async throws -> URL {
         downloads += 1
@@ -524,6 +610,14 @@ private actor RecoveryDelivery: CoordinatorDelivery {
     func verifyPackage(job: JobRecord, directory: URL) async throws {
         guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Synthetic package incomplete")}
         if filingFault == "final-readback" {throw JoeyError.failed("Synthetic final parent readback failure")}
+        if companionFailureName != nil {
+            for receipt in job.clips.compactMap(\.drive) + Array(job.companions.values) {
+                guard committed[receipt.name] == receipt,
+                      try Integrity.sha256(directory.appendingPathComponent(receipt.name)) == receipt.sha256 else {
+                    throw JoeyError.failed("Synthetic provider bytes differ from current package")
+                }
+            }
+        }
     }
     func reconcileRegister(job: JobRecord, tab: String) async throws -> [String] {
         calls += 1;return DestinationResolver.requiresDUBRegister(job.request) && filingFault != "register" ? ["fixture-row"] : []
@@ -532,6 +626,11 @@ private actor RecoveryDelivery: CoordinatorDelivery {
         calls += 1
         let filename = name ?? local.lastPathComponent
         let bytes = Int64(try Data(contentsOf:local).count), hash = try Integrity.sha256(local)
+        let interruptCompanion = filename == companionFailureName && !companionFailureTriggered
+        if interruptCompanion {
+            companionFailureTriggered = true
+            if !companionFailureAfterCommit {throw JoeyError.failed("Synthetic interrupted companion: "+filename)}
+        }
         if local.pathExtension == "mp4" {
             clipAttempts += 1
             if let existing = committed[filename] {
@@ -540,10 +639,13 @@ private actor RecoveryDelivery: CoordinatorDelivery {
                 return existing
             }
             clipCreations += 1
+        } else if committed[filename] == nil {
+            companionCreations[filename,default:0] += 1
         }
         let receipt = DriveReceipt(id:"synthetic_"+Integrity.textHash(filename),name:filename,parent:parent,bytes:bytes,
             md5:try Integrity.md5(local),sha256:hash,url:"https://example.invalid/synthetic",permissions:["user:owner"],verifiedAt:Date(),destination:destination,permissionFingerprint:String(repeating:"a",count:64))
         committed[filename] = receipt
+        if interruptCompanion {throw JoeyError.failed("Synthetic interrupted companion: "+filename)}
         if local.pathExtension == "mp4",suspendAfterCommit {try await Task.sleep(nanoseconds:60_000_000_000)}
         if local.pathExtension == "mp4" {throw JoeyError.failed("Synthetic uncertain upload response")}
         return receipt
