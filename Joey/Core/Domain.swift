@@ -93,11 +93,21 @@ public struct SharedProfile: Codable, Equatable, Sendable {
     }
     public var maxDuration: Double { driveOnlyJoe == true ? 607.3 : min(x?.maxDuration ?? 0, instagram?.maxDuration ?? 0) }
     public var maxBytes: Int64 { driveOnlyJoe == true ? 2_000_000_000 : min(x?.maxBytes ?? 0, instagram?.maxBytes ?? 0) }
-    func outputProfile(for kind: MediaKind) -> SharedProfile {
-        guard kind == .nativeVideo, driveOnlyJoe != true else {return self}
-        var landscape = self
-        landscape.width = 1920;landscape.height = 1080
-        return landscape
+    func outputProfile(for kind: MediaKind) throws -> SharedProfile {
+        var output = self
+        if kind == .nativeVideo, driveOnlyJoe != true {
+            output.width = 1920;output.height = 1080
+        }
+        // Validate the resolved canvas, not only the portrait selection stored
+        // in the request. A native-video override cannot expand account limits.
+        if driveOnlyJoe != true {
+            guard let x, let instagram,
+                  output.width <= min(x.maxWidth,instagram.maxWidth),
+                  output.height <= min(x.maxHeight,instagram.maxHeight) else {
+                throw JoeyError.dependency("Shared capability evidence does not support \(output.width)×\(output.height) output; existing media preserved")
+            }
+        }
+        return output
     }
     public func validate(now: Date = Date(), requireCurrentEvidence: Bool = true) throws {
         if driveOnlyJoe == true {

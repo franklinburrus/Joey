@@ -252,7 +252,7 @@ public enum Media {
     public static func render(source: SourceRecord, clip: ClipRecord, profile: SharedProfile, artwork: Artwork?, work: URL, output: URL, branding: JoeBranding? = nil) async throws -> RenderReceipt {
         try Task.checkCancellation()
         try validateVideoMapping(source.streams)
-        let outputProfile = profile.outputProfile(for:source.kind)
+        let outputProfile = try profile.outputProfile(for:source.kind)
         try FileManager.default.createDirectory(at:work,withIntermediateDirectories:true)
         try Persistence.checkDisk(at:work,requiredBytes:StorageManager.peakBytes(duration:clip.expectedDuration,sourceBytes:0,clipDuration:clip.expectedDuration+(branding?.outroDuration ?? 0),audio:source.kind == .audio))
         var receipt = RenderReceipt(pictureWidth:0,pictureHeight:0)
@@ -459,7 +459,7 @@ public enum Media {
     }
     public static func validate(output: URL, source: SourceRecord, clip: ClipRecord, profile: SharedProfile, render: RenderReceipt, work: URL) async throws -> QAReport {
         try validateVideoMapping(source.streams)
-        let outputProfile = profile.outputProfile(for:source.kind)
+        let outputProfile = try profile.outputProfile(for:source.kind)
         try await decode(output)
         let p = try await probe(output)
         let branding = render.joeBranding

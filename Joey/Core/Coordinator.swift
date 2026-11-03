@@ -162,6 +162,9 @@ public actor Coordinator {
                 try await save()
             }
             guard var source = job.source else {throw JoeyError.failed("Missing inspected source")}
+            // Accepted local QA from an older build does not authorize a new
+            // provider operation outside the actual source-kind export limits.
+            _ = try request.profile.outputProfile(for:source.kind)
             let remaining = job.clips.isEmpty ? source.duration : job.clips.filter {$0.qa?.passed != true}.reduce(0) {$0+$1.expectedDuration}
             if remaining > 0 {
                 try Persistence.checkDisk(at:root,requiredBytes:StorageManager.peakBytes(duration:remaining,sourceBytes:0,clipDuration:min(remaining,request.profile.maxDuration),audio:source.kind == .audio))
