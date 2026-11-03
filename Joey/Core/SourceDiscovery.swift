@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 
 public struct DiscoveredSource: Codable, Equatable, Sendable {
     public var id: String
@@ -51,19 +52,42 @@ public enum SourceDiscovery {
     public static func lookup(_ raw: String) async throws -> DiscoveredSource {
         let url = try Acquisition.validateOriginalURL(raw)
         let data = try await command(["--no-playlist","--skip-download","--dump-single-json",url.absoluteString])
-        return try parseSource(data,url:url.absoluteString)
+        return try await parseSource(data,url:url.absoluteString)
     }
-    static func parseSource(_ data: Data, url: String) throws -> DiscoveredSource {
+    static func parseSource(_ data: Data, url: String,
+                            loadPlaylist: (URL) async throws -> Data = {try await ReplayPlaylist.load($0)}) async throws -> DiscoveredSource {
         guard let object = try JSONSerialization.jsonObject(with:data) as? [String:Any],
               let id = object["id"] as? String, !id.isEmpty,
               let title = object["title"] as? String, !title.isEmpty,
-              let duration = object["duration"] as? Double, duration.isFinite, duration > 0,
               object["is_live"] as? Bool != true,
               !["is_live","is_upcoming","post_live"].contains(object["live_status"] as? String ?? "") else {
             throw JoeyError.dependency("The source is unfinished, unavailable, or lacks a complete duration and identity")
         }
         guard let sourceID = SourceIdentitySuggestion.from(url), sourceID.hasSuffix(":"+id) else {
             throw JoeyError.invalid("Source link and provider identity do not match")
+        }
+        let duration: Double
+        if object["duration"] == nil || object["duration"] is NSNull {
+            guard sourceID.hasPrefix("x:broadcast:") || sourceID.hasPrefix("x:space:"),
+                  object["is_live"] as? Bool == false, object["live_status"] as? String == "was_live",
+                  let formats = object["formats"] as? [[String:Any]],
+                  let format = formats.reversed().first(where: {
+                      ["m3u8","m3u8_native"].contains($0["protocol"] as? String ?? "")
+                  }), let raw = format["url"] as? String, let playlistURL = URL(string:raw),
+                  ReplayPlaylist.allowedURL(playlistURL) else {
+                throw JoeyError.dependency("The source lacks a complete duration or a supported ended X replay playlist")
+            }
+            let playlist = try await Processes.retry {try await loadPlaylist(playlistURL)}
+            duration = try ReplayPlaylist.duration(playlist)
+        } else {
+            guard let number = object["duration"] as? NSNumber,
+                  CFGetTypeID(number) != CFBooleanGetTypeID() else {
+                throw JoeyError.dependency("The source has an invalid duration")
+            }
+            duration = number.doubleValue
+        }
+        guard duration.isFinite, duration > 0, duration < 1_000_000 else {
+            throw JoeyError.dependency("The source has an invalid or unsupported duration")
         }
         let rawDate = object["upload_date"] as? String
         let date: String?

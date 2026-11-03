@@ -6,7 +6,22 @@ public enum Acquisition {
     }
     static func downloadArguments(for url: URL, directory: URL) -> [String] {
         ["--ignore-config","--no-playlist","--continue","--no-overwrites","--retries","3","--fragment-retries","3",
-         "--write-info-json","--merge-output-format","mp4","-o",directory.appendingPathComponent("original.%(ext)s").path,url.absoluteString]
+         "--abort-on-unavailable-fragments","--write-info-json","--merge-output-format","mp4","-o",directory.appendingPathComponent("original.%(ext)s").path,url.absoluteString]
+    }
+    static func sourceMetadata(_ data: Data, request: JobRequest,
+                               loadPlaylist: (URL) async throws -> Data = {try await ReplayPlaylist.load($0)}) async throws -> DiscoveredSource {
+        guard let raw = request.originalURL, let identity = SourceIdentitySuggestion.from(raw),
+              let id = identity.split(separator:":").last,
+              request.sourceID == String(id) || request.sourceID.hasSuffix("-"+id) || request.sourceID.hasSuffix(":"+id) else {
+            throw JoeyError.invalid("Original identity mismatch")
+        }
+        return try await SourceDiscovery.parseSource(data,url:raw,loadPlaylist:loadPlaylist)
+    }
+    static func validateDownloadedDuration(_ measured: Double, expected: Double) throws {
+        guard measured.isFinite, expected.isFinite, measured > 0, expected > 0,
+              abs(measured-expected) <= max(1,expected*0.001) else {
+            throw JoeyError.failed("Incomplete original: measured \(measured), expected \(expected)")
+        }
     }
     public static func validateOriginalURL(_ raw: String) throws -> URL {
         guard let u = URL(string:raw), u.scheme == "https", u.user == nil, u.password == nil,
@@ -33,12 +48,7 @@ public enum Acquisition {
         let metadata = try await Processes.retry {
             try await Processes.run("yt-dlp",metadataArguments(for:url))
         }
-        let object = try JSONSerialization.jsonObject(with:metadata.stdout) as? [String:Any]
-        guard let expected = object?["duration"] as? Double, expected > 0,
-              object?["is_live"] as? Bool != true, let id = object?["id"] as? String,
-              request.sourceID == id || request.sourceID.hasSuffix("-"+id) || request.sourceID.hasSuffix(":"+id) else {
-            throw JoeyError.invalid("Original identity mismatch, unfinished live source, or missing expected duration")
-        }
+        let expected = try await sourceMetadata(metadata.stdout,request:request).duration
         try metadata.stdout.write(to: metadataURL, options:.atomic)
         try Persistence.checkDisk(at:directory,requiredBytes:Int64(expected*1_500_000))
         _ = try await Processes.retry {
@@ -48,7 +58,7 @@ public enum Acquisition {
             .filter { $0.deletingPathExtension().lastPathComponent == "original" && ["mp4","mkv","webm","m4a","mp3","opus"].contains($0.pathExtension) }
         guard files.count == 1 else { throw JoeyError.failed("Acquisition did not produce one complete original") }
         let probe = try await Media.probe(files[0])
-        guard abs(probe.duration-expected) <= max(1,expected*0.001) else { throw JoeyError.failed("Incomplete original: measured \(probe.duration), expected \(expected)") }
+        try validateDownloadedDuration(probe.duration,expected:expected)
         return files[0]
     }
     public static func transcript(source: SourceRecord, request: JobRequest, configuration: Configuration, directory: URL) async throws -> Transcript? {

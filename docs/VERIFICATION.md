@@ -1,3 +1,49 @@
+## Ended X replay with missing metadata duration (2026-11-03)
+
+The bounded repair accepts complete original X replays whose yt-dlp metadata omits duration. Source lookup and acquisition now use the same source identity, live-state and duration resolver. An explicitly ended broadcast or Space may derive duration from a finalized provider HLS media playlist. The native HTTPS loader uses no cookies, stored credentials or inherited headers, validates provider hosts and redirects, caps response size at 4 MiB and applies finite request/resource timeouts. The parser requires ENDLIST and complete positive finite segment durations, and rejects nonzero media sequence, gaps, partial playlists, master playlists and malformed/empty responses. Known valid metadata durations avoid the additional request. Explicitly invalid durations remain errors.
+
+Acquisition preserves the previous bare, hyphen-prefixed and colon-prefixed provider-ID conventions while verifying the provider identity against the original URL. Raw `acquisition.json` metadata remains unchanged. The downloader aborts on unavailable fragments rather than silently skipping them; measured duration must still match the resolved expectation, and the existing inspection/decoding stages remain in place. The new playlist request reuses `Processes.retry` for at most three transient attempts and preserves cancellation.
+
+Baseline: verified original checkout and origin `https://github.com/franklinburrus/Joey.git`, original branch and live remote `codex/joe-full-episodes` at `57f2eff080c0263f01f267f929c5035355de4344`; main `e9278d0cc497a3e2bb9fe87b1dacbaba7409083b`. Repair branch: `codex/x-replay-duration`. All 22 unrelated untracked files remain untouched. No dependencies, credentials, production media, installed bundles or provider records were changed.
+
+### Executed checks
+
+Every build, test and diagnostic executable used `python3 Tools/run-local.py`. Swift/Xcode invocations selected the installed toolchain with per-process `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`; no global configuration changed.
+
+| Check | Direct result |
+| --- | --- |
+| Pre-fix `swift test --filter SourceDurationTests` | Exit 1; the single reproducing test failed at the existing missing-duration guard. |
+| Initial focused regression suite | Exit 0; 12 tests passed, zero failures. |
+| Initial `swift test` | Exit 0; 277 executed, 273 passed, four intentional skips, zero failures. |
+| Legacy-prefix and transient-retry negative checks | Exit 1; 14 executed, two expected failures. Both checks exposed gaps in the initial implementation before closeout. |
+| Final `swift test --filter SourceDurationTests` | Exit 0; 14 passed, zero failures, 3.616 seconds. |
+| Final `swift test` | Exit 0; 279 executed, 275 passed, four intentional skips, zero failures, 234.598 seconds. |
+| Existing native Xcode project | `BUILD SUCCEEDED`, exit 0. |
+| `codesign --verify --deep --strict --verbose=2` on the candidate | Exit 0; valid on disk and satisfies its designated requirement. |
+| Final read-only diagnostic linked to the tested JoeyCore | Exit 0; both live lookup and acquisition metadata resolution returned source `x:broadcast:2rJapEXbVkKRAR`, duration 6,573.349 seconds. No media segments downloaded or jobs created. |
+| Installed bundle preservation | All ten installed file paths and SHA-256 values match the pre-task snapshot. |
+| `git diff --check` | Exit 0. |
+
+The four skips are the explicit live Drive readback, two opt-in installed-model assistant checks and the authorized real-media renderer. They are unrelated downstream acceptances. Existing warnings concern the preserved duplicate runner/icon files, unchanged JobModel captures, unchanged AudioPresentation APIs deprecated by the installed macOS SDK, a SwiftUI state access in an existing test and absent optional AppIntents metadata. No warning points to a modified source file.
+
+Exact native command:
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer python3 Tools/run-local.py /usr/bin/xcodebuild -project Joey.xcodeproj -scheme Joey -configuration Debug -destination 'platform=macOS' -derivedDataPath /Users/frank/Library/Caches/Joey-Native-Build/x-replay-duration-20261103/DerivedData -jobs 2 CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual build
+```
+
+The diagnostic's initial standalone launch exited 133 because its separate executable could not locate the existing `Joey_JoeyCore.bundle`. A task-cache reference to that existing build bundle fixed the harness resource lookup; recompilation and both subsequent live diagnostic runs exited 0. No production code or environment allowlist was changed for the harness. Failed and successful logs are retained.
+
+### Live source evidence and limits
+
+Fresh yt-dlp metadata returned exit 0, matching broadcast ID, `is_live: false`, `live_status: was_live`, and `duration: null`. Its direct replay playlist returned HTTP 200, 331,018 bytes, VOD, media sequence 0, ENDLIST and 3,287 segments totaling 1:49:33.349. The final repaired code independently resolved both entry points to the same duration; ordinary floating-point representation is `6573.349000000002` seconds. This verifies metadata/playlist duration resolution only. Original-media bytes were not acquired or decoded, and no production clipping, filing, register write or social acceptance is claimed.
+
+Evidence root: `/Users/frank/Library/Caches/Joey-Native-Build/x-replay-duration-20261103/`. The existing checkpoint contains the task mission and closeout. `verification.json` binds the final source hashes, ten candidate bundle files, ten preserved installed files, test/build/signature results and final live readback. Logs include `regression-red.log`, `compatibility-red.log`, `regression-final.log`, `full-suite-final.log`, `native-build.log`, `signature.log` and `live-duration-final.log`; raw provider metadata and playlist remain outside Git.
+
+At the end of source verification, the repair remained uncommitted on `codex/x-replay-duration` and the installed app retained the previous duration behavior. Frank subsequently explicitly requested “push, commit, install and update.” Fresh pre-integration readback confirms all four tested source/test hashes and all ten candidate hashes still match the successful evidence, so those unchanged-input test/build results remain valid. The authorized follow-up will commit/push this branch, install the same candidate with rollback, verify protected runtime state and native relaunch/lookup, then record the final result. Production processing and merging to main remain excluded. Candidate: `/Users/frank/Library/Caches/Joey-Native-Build/x-replay-duration-20261103/DerivedData/Build/Products/Debug/Joey.app`.
+
+---
+
 ## Joe Budden full-episode retention and naming (2026-11-02)
 
 Frank restored permanent Joe episode retention and supplied the exact full-episode destination `1KJ0-sjGWNxwIuis_faA5z_FbPUcbjEDD` and naming example `945 — Maximum Punishment`. This supersedes the earlier same-day Joe archive-retirement rule; historical evidence below is retained as history. Baseline local/live main: `e9278d0cc497a3e2bb9fe87b1dacbaba7409083b`; branch `codex/joe-full-episodes`. Origin remains `https://github.com/franklinburrus/Joey.git`; all 22 unrelated untracked files are preserved.
