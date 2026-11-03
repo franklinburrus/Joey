@@ -1,3 +1,35 @@
+## Cached duration and native-picture preservation (2026-11-03)
+
+Implemented on isolated `codex/source-integrity-fixes` from combined `2b1600075defaadecfde1e637616574ca598c503`. The common Coordinator source boundary now validates finite positive duration against the immutable request, source hash and optional expected hash before transcript adoption or downstream work. Hash/duration conflicts fail without a replacement download. Legacy video-bearing audio classifications require complete source-bound proof; disproven accepted work is preserved and the unfinished job fails without rewriting companions or contacting providers. Completed historical jobs retain their existing reopen behavior.
+
+Inspection hashes every full-resolution decoded video frame with SHA-256 and passthrough timing, decoding audio in the same supervised FFmpeg invocation. Any picture/size difference retains native video. Only identical-picture candidates with audio receive structured FFprobe dimension/pixel-format inspection; all frame counts must agree before audio presentation is permitted. Audio-only files remain audio; silent video remains native. Temporary text evidence is removed on completion, error or cancellation. Optional versioned proof preserves old-record decoding and request identities. Render, audio-reference generation, QA and cached Taxstone reuse enforce the proof boundary.
+
+| Check | Actual result |
+| --- | --- |
+| Initial regression run against combined base | Exit 1: six tests, 14 expected failures/errors reproducing both defects and unsafe companion rewriting. |
+| Additional cached-hash and Taxstone-reuse controls | Exit 1: two tests, three expected failures showing both bypasses. |
+| Structured frame parser red control | Exit 1: structured geometry evidence was rejected before the parser change. |
+| Final focused checks | Exit 0: 19 passed, zero failures, 15.870 seconds. |
+| First full Swift suite | Exit 1: 298 executed, four skipped, five failed assertions in two capability-renewal tests; snapshot placement and stage reporting corrected. |
+| Final full Swift suite | Exit 0: 298 executed, 294 passed, four skipped, zero failures, 218.201 seconds. |
+| Final native Debug Xcode build | Exit 0, BUILD SUCCEEDED. |
+| Strict deep candidate signature verification | Exit 0, valid on disk and designated requirement satisfied. |
+| Independent code review | No Critical or Important findings; one optional test-isolation improvement deferred in STATUS. |
+
+Every executable used `Tools/run-local.py`. Commands:
+
+```sh
+python3 Tools/run-local.py /usr/bin/env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /usr/bin/swift test
+python3 Tools/run-local.py /usr/bin/env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /usr/bin/xcodebuild -project Joey.xcodeproj -scheme Joey -configuration Debug -destination platform=macOS -derivedDataPath /Users/frank/Library/Caches/Joey-Native-Build/source-integrity-20261103/DerivedData -jobs 2 CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual build
+python3 Tools/run-local.py /usr/bin/codesign --verify --deep --strict --verbose=2 /Users/frank/Library/Caches/Joey-Native-Build/source-integrity-20261103/DerivedData/Build/Products/Debug/Joey.app
+```
+
+An initial showinfo-based geometry parser had one intermittent malformed-log rejection, not reproduced by 300 supervised repetitions. Diagnostic logs are no longer acceptance inputs. Structured frame metadata removes that dependency; a real resolution-changing fixture also reproduced FFprobe's trailing delimiter for excluded side-data sections, now explicitly covered. A temporary process API was removed; an incremental stale-symbol link failure required a clean rebuild of this worktree's disposable Swift products. None of those failed attempts is reported as successful verification.
+
+Evidence: `/Users/frank/Library/Caches/Joey-Native-Build/source-integrity-20261103/verification.json`, `swift-final.log`, `focused-final-v2.log`, `native-build-final.log`, `signature.log` and `REVIEW.md`. Four opt-in skips remain live Drive routing, two offline-assistant checks and real-media acceptance. Python was unchanged and not rerun. No merge, push, installation, production processing or provider operation occurred. Runtime profile corrections remain outside Git. Strict equality intentionally keeps noisy apparently-static video native; static candidates incur a second decode for reliable geometry verification.
+
+---
+
 ## Ended X replay with missing metadata duration (2026-11-03)
 
 The bounded repair accepts complete original X replays whose yt-dlp metadata omits duration. Source lookup and acquisition now use the same source identity, live-state and duration resolver. An explicitly ended broadcast or Space may derive duration from a finalized provider HLS media playlist. The native HTTPS loader uses no cookies, stored credentials or inherited headers, validates provider hosts and redirects, caps response size at 4 MiB and applies finite request/resource timeouts. The parser requires ENDLIST and complete positive finite segment durations, and rejects nonzero media sequence, gaps, partial playlists, master playlists and malformed/empty responses. Known valid metadata durations avoid the additional request. Explicitly invalid durations remain errors.

@@ -266,6 +266,18 @@ public struct JobRequest: Codable, Equatable, Sendable {
     }
 }
 
+public struct SourceClassificationProof: Codable, Equatable, Sendable {
+    public var version: Int
+    public var sourceSHA256: String
+    public var decodedFrameCount: Int
+    public var uniformFrameSHA256: String?
+
+    func provesStaticVideo(sha256: String) -> Bool {
+        version == 1 && sourceSHA256 == sha256 && decodedFrameCount > 0 &&
+            uniformFrameSHA256?.count == 64 && uniformFrameSHA256!.allSatisfy {"0123456789abcdef".contains($0)}
+    }
+}
+
 public struct SourceRecord: Codable, Equatable, Sendable {
     public var id: String
     public var owner: Owner
@@ -285,6 +297,7 @@ public struct SourceRecord: Codable, Equatable, Sendable {
     public var authorizationBasis: String
     public var archiveReference: String?
     public var classificationEvidence: String
+    public var classificationProof: SourceClassificationProof? = nil
 }
 
 public struct ResolvedClipFailure: Codable, Equatable, Sendable {

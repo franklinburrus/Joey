@@ -103,6 +103,8 @@ public actor Coordinator {
             try request.profile.validate()
         }
         var completedReadbackPassed = false
+        var sourceValidationSnapshot = job
+        var validatingSource = false
         do {
             if job.state == .completed {
                 guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Completed checkpoint lacks required delivery evidence")}
@@ -118,6 +120,7 @@ public actor Coordinator {
                 try await progress(job); return job
             }
             try renewCapabilityEvidence(requireCurrent:true)
+            sourceValidationSnapshot = job
             let delivery: any CoordinatorDelivery = try Self.deliveryOverride ?? DriveDelivery(remote:config.rcloneRemote)
             job.error = nil; job.storageRequiredBytes = nil;job.state = .processing; job.stage = "source"; try await save()
             try authorizeNewOperation()
@@ -135,21 +138,19 @@ public actor Coordinator {
                     throw JoeyError.invalid("Joe Budden requires a numbered full episode from Joe Budden TV on YouTube")
                 }
             }
+            validatingSource = true
             let reusable = try jobs().first {candidate in
                 candidate.source?.id == request.sourceID && candidate.source?.owner == request.owner &&
                 candidate.source?.originalURL == request.originalURL && candidate.source != nil
             }
             let sourceURL: URL
+            var reusableTranscript: Transcript?
             if let prior = job.source {sourceURL = URL(fileURLWithPath:prior.path)}
-            else if request.localPath == nil, let prior = reusable?.source,
-                    (try? Integrity.sha256(URL(fileURLWithPath:prior.path))) == prior.sha256 {
+            else if request.localPath == nil, let prior = reusable?.source {
                 sourceURL = URL(fileURLWithPath:prior.path)
                 var copy = prior; copy.title = request.title; copy.episodeDate = request.episodeDate
                 copy.authorizationBasis = request.authorizationBasis; job.source = copy
-                if let transcript = reusable?.transcript {
-                    try transcript.validate(sourceID:prior.id,sha256:prior.sha256,duration:prior.duration)
-                    try Persistence.save(transcript,to:dir.appendingPathComponent("transcript.json"))
-                }
+                reusableTranscript = reusable?.transcript
             } else if request.localPath == nil, let archive = request.archiveReference {
                 sourceURL = try await delivery.downloadOriginal(reference:archive,directory:dir)
             } else {
@@ -159,18 +160,31 @@ public actor Coordinator {
                 guard source.path == sourceURL.path, try Integrity.sha256(sourceURL) == source.sha256 else {throw JoeyError.failed("Original source changed; preserved job cannot silently switch inputs")}
             } else {
                 job.source = try await Media.inspect(sourceURL,request:request)
-                try await save()
             }
             guard var source = job.source else {throw JoeyError.failed("Missing inspected source")}
+            try Media.validateSourceDuration(source.duration,expected:request.expectedDuration)
+            if let expected = request.expectedSourceSHA256, source.sha256 != expected {
+                throw JoeyError.failed("Archived original differs from inventory source SHA-256")
+            }
+            let checked = try await Media.revalidatingClassification(source,request:request)
+            if checked.kind != source.kind,
+               job.clips.contains(where:{$0.qa?.passed == true || $0.drive != nil}) || job.folderID != nil ||
+                !job.companions.isEmpty || !job.registerRows.isEmpty {
+                throw JoeyError.failed("Source classification conflicts with accepted audio presentation or delivery evidence; original metadata, clips, QA, receipts and companion files preserved. This job cannot resume filing.")
+            }
+            source = checked;job.source = source
+            try await save()
+            validatingSource = false
+            if let transcript = reusableTranscript {
+                try transcript.validate(sourceID:source.id,sha256:source.sha256,duration:source.duration)
+                try Persistence.save(transcript,to:dir.appendingPathComponent("transcript.json"))
+            }
             // Accepted local QA from an older build does not authorize a new
             // provider operation outside the actual source-kind export limits.
             _ = try request.profile.outputProfile(for:source.kind)
             let remaining = job.clips.isEmpty ? source.duration : job.clips.filter {$0.qa?.passed != true}.reduce(0) {$0+$1.expectedDuration}
             if remaining > 0 {
                 try Persistence.checkDisk(at:root,requiredBytes:StorageManager.peakBytes(duration:remaining,sourceBytes:0,clipDuration:min(remaining,request.profile.maxDuration),audio:source.kind == .audio))
-            }
-            if let expected = request.expectedSourceSHA256, source.sha256 != expected {
-                throw JoeyError.failed("Archived original differs from inventory source SHA-256")
             }
             if request.productionWorkflow != nil {
                 job.stage = "original archive verification";try await save()
@@ -350,6 +364,20 @@ public actor Coordinator {
             // A rejected renewal must not downgrade a verified completed job or
             // replace its evidence. Only new operations require fresh authority.
             if completedReadbackPassed {throw error}
+            if validatingSource {
+                // Source rejection is not a filing outage. Never grandfather
+                // old QA or overwrite companions to describe contradictory input.
+                job = sourceValidationSnapshot
+                job.state = error is CancellationError ? .cancelled : .failed
+                job.stage = "source"
+                job.error = error is CancellationError ? "Cancelled; source evidence preserved for resume" : error.localizedDescription
+                if let blocked = error as? StorageBlocked {
+                    job.state = .processing;job.stage = "Storage blocked — capacity recheck in 60 seconds"
+                    job.storageRequiredBytes = blocked.required
+                } else {job.storageRequiredBytes = nil}
+                try await save()
+                return job
+            }
             let hasAccepted = !job.clips.isEmpty && job.clips.allSatisfy {$0.qa?.passed == true}
             job.state = error is CancellationError ? .cancelled : (hasAccepted ? .qaPassed : .failed)
             if let blocked = error as? StorageBlocked {
