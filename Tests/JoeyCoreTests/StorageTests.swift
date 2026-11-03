@@ -184,6 +184,90 @@ final class StorageTests: XCTestCase {
         }
         XCTAssertNoThrow(try StorageManager.checkCapacity(at:f.root,requiredBytes:small,available:small+100,reserve:100))
     }
+    func testLocalSourceAdmissionDoesNotReserveAnotherOriginal() async throws {
+        try await assertExistingSourceAdmission(reuse:false)
+    }
+    func testCrossJobSourceAdmissionDoesNotReserveAnotherOriginal() async throws {
+        try await assertExistingSourceAdmission(reuse:true)
+    }
+    private func assertExistingSourceAdmission(reuse: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:root)}
+        let source = root.appendingPathComponent("source.mp4")
+        _ = try await Processes.run("ffmpeg",["-v","error","-f","lavfi","-i","testsrc2=s=320x180:r=30:d=2","-f","lavfi","-i","sine=frequency=440:duration=2","-c:v","libx264","-c:a","aac","-shortest",source.path])
+        var request = try Fixtures.request(dir:root,path:source.path)
+        request.expectedDuration = 2
+        request.transcriptPolicy = reuse ? .assisted : .modelIndependent
+        if reuse {
+            request.localPath = nil
+            request.originalURL = "https://x.com/i/broadcasts/synthetic"
+        }
+        let original = try await Media.inspect(source,request:request)
+        if reuse {
+            var priorRequest = request;priorRequest.title = "Previous request using the same original"
+            var prior = JobRecord(id:try priorRequest.stableID(),request:priorRequest)
+            prior.source = original
+            prior.transcript = Transcript(sourceID:original.id,sourceSHA256:original.sha256,duration:original.duration,engine:"Synthetic fixture",
+                segments:[TranscriptSegment(start:0,end:original.duration,text:"Complete synthetic source.")])
+            try Persistence.save(prior,to:root.appendingPathComponent("jobs/\(prior.id)/job.json"))
+        }
+        let reserve = try StorageManager.capacity(at:root).reserve
+        let renderPeak = try StorageManager.peakBytes(duration:original.duration,sourceBytes:0,clipDuration:original.duration,audio:false)
+        // This is enough for all remaining output and scratch, but not an
+        // additional copy of the already-present original. No disk is filled.
+        let available = reserve + renderPeak + 1
+        let coordinator = try Coordinator(root:root)
+        do {
+            let result = try await Task {
+                try await StorageManager.$capacityOverride.withValue({available}) {
+                    try await coordinator.run(request,estimatedDuration:2) {job in
+                        if job.storageRequiredBytes != nil {withUnsafeCurrentTask {$0?.cancel()}}
+                    }
+                }
+            }.value
+            XCTAssertEqual(result.state,.qaPassed,result.error ?? "")
+            XCTAssertEqual(result.source?.path,source.path)
+            XCTAssertEqual(result.source?.sha256,original.sha256)
+            XCTAssertEqual(result.clips.count,1)
+            XCTAssertTrue(result.clips.allSatisfy {$0.qa?.passed == true})
+            XCTAssertEqual(try result.request.identityData(),try request.identityData())
+        } catch {
+            XCTFail("Existing original was incorrectly charged as a new acquisition: \(error)")
+        }
+        XCTAssertEqual(try Integrity.sha256(source),original.sha256)
+    }
+    func testStageAdmissionStillBlocksInsufficientRenderCapacityAfterSourceInspection() async throws {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:root)}
+        let source = root.appendingPathComponent("source.mp4")
+        _ = try await Processes.run("ffmpeg",["-v","error","-f","lavfi","-i","testsrc2=s=320x180:r=30:d=2","-c:v","libx264",source.path])
+        var request = try Fixtures.request(dir:root,path:source.path)
+        request.expectedDuration = 2;request.transcriptPolicy = .modelIndependent
+        let originalHash = try Integrity.sha256(source)
+        let required = try StorageManager.peakBytes(duration:2,sourceBytes:0,clipDuration:2,audio:false) + StorageManager.capacity(at:root).reserve
+        let coordinator = try Coordinator(root:root)
+        do {
+            _ = try await Task {
+                try await StorageManager.$capacityOverride.withValue({required-1}) {
+                    try await coordinator.run(request,estimatedDuration:2) {job in
+                        if let needed = job.storageRequiredBytes {
+                            XCTAssertEqual(needed,required)
+                            withUnsafeCurrentTask {$0?.cancel()}
+                        }
+                    }
+                }
+            }.value
+            XCTFail("Expected a capacity pause")
+        } catch {XCTAssertTrue(error is CancellationError)}
+        let jobs = try await coordinator.jobs()
+        XCTAssertEqual(jobs.count,1)
+        XCTAssertEqual(jobs[0].state,.cancelled)
+        XCTAssertEqual(jobs[0].source?.sha256,originalHash,"Inspection and source checkpoint must precede render admission")
+        XCTAssertTrue(jobs[0].clips.isEmpty)
+        XCTAssertEqual(try Integrity.sha256(source),originalHash)
+    }
     func testExpiredCapabilityReplacesStoredCapacityWaitWithTerminalFailure() async throws {
         try await assertCapabilityFailureEndsStoredCapacityWait(changedContract:false)
     }

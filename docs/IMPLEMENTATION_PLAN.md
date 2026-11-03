@@ -15,12 +15,13 @@ Use the existing combined Swift/SwiftUI application and preserve all prior origi
 - [x] Reproduce and repair local transcript-tail recovery and stale capacity-wait state without weakening validation or changing immutable contracts.
 - [x] Cover accepted clips without companion receipts, legacy receipt hydration, interrupted writes and repeated recovery; reuse the existing correct delivery implementation.
 - [x] Reproduce and repair unbounded autoreleased read-buffer retention in source/scratch hashing while preserving hashes and secure descriptor checks.
+- [x] Correct premature aggregate storage admission before source selection; retain stage-specific budgets, reserve and live monitoring, with local/reuse and insufficient-render-capacity regressions.
 - [x] Verify bounded real transcript recovery, representative DUB/Taxstone audio renderer QA and read-only live routing.
 - [x] Complete final combined checks and install the matching signed build with rollback and runtime preservation. Final follow-up affected tests and native cancellation/accessibility checks are recorded in STATUS.
 - [ ] Exercise the approved source through installed native intake, complete source/transcript/planning/QA/delivery/records and recap; verify cancellation/restart/reuse without duplicate work.
 - [x] Independently review available acceptance evidence and reconcile verified, failed, blocked and unverified functions in the existing matrix. The incomplete native demonstration is recorded as blocked, not passed.
 
-Current boundary: independent review and the matrix are updated, but the complete native demonstration remains blocked before acquisition by working-volume capacity. The approved job is saved as `CANCELLED` for explicit Resume after sufficient space is available. No required success criterion is marked complete from historical deliveries or the separate renderer diagnostics.
+Current boundary: the stage-admission repair is installed and independently reviewed. Current free capacity exceeds the existing acquisition-stage requirement; eventual source bytes and full-job capacity remain unproven. The Mac is locked, preventing native Resume of the existing `CANCELLED` acceptance job. Resume that same job after unlock. No required success criterion is marked complete from historical deliveries or the separate renderer diagnostics.
 
 
 ## Joe Budden full-episode retention and naming — 2026-11-02
