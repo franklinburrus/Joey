@@ -138,6 +138,8 @@ If an expected asset cannot be retrieved, automatically inspect established asse
 
 10. SHARED TECHNICAL EXPORT
 
+2026-11-03 explicit width correction: native video has no fixed 1080-pixel width requirement or ceiling. A portrait recommendation must not be encoded as a landscape width limit. Preserve the existing source-only landscape workflow and actual picture proportions, and use documented support for the selected upload surface; Buffer documents a 1920-pixel longest side. The approved audio artwork canvas and geometry remain unchanged. This removes the erroneous conservative width setting, not actual provider limits, integrity checks or source-bound acceptance requirements. Existing accepted outputs and immutable job requests are preserved.
+
 Export MP4 with H.264, yuv420p, progressive scan, square pixels, 30 fps, AAC-LC audio where present and web playback support.
 
 Use a portrait 1080×1920 canvas when verified for both upload destinations. Use 720×1280 for both when the verified common profile requires it. Never produce a second platform version.
