@@ -21,7 +21,7 @@ Use the existing combined Swift/SwiftUI application and preserve all prior origi
 - [ ] Exercise the approved source through installed native intake, complete source/transcript/planning/QA/delivery/records and recap; verify cancellation/restart/reuse without duplicate work.
 - [x] Independently review available acceptance evidence and reconcile verified, failed, blocked and unverified functions in the existing matrix. The incomplete native demonstration is recorded as blocked, not passed.
 
-Current boundary: the stage-admission repair is installed and independently reviewed. Current free capacity exceeds the existing acquisition-stage requirement; eventual source bytes and full-job capacity remain unproven. The Mac is locked, preventing native Resume of the existing `CANCELLED` acceptance job. Resume that same job after unlock. No required success criterion is marked complete from historical deliveries or the separate renderer diagnostics.
+Current boundary: the stage-admission repair is installed and independently reviewed. Current free capacity exceeds the existing acquisition-stage requirement; eventual source bytes and full-job capacity remain unproven. Native control remains unavailable after a reset; Frank identifies its locked-Mac indication as a false positive. Resume the existing `CANCELLED` acceptance job through restored control or a direct native Resume click. No required success criterion is marked complete from historical deliveries or the separate renderer diagnostics.
 
 
 ## Joe Budden full-episode retention and naming — 2026-11-02
