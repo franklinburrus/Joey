@@ -9,6 +9,9 @@ struct JobDetailView: View {
     var onPrepare: (() -> Void)? = nil
     @Environment(\.colorScheme) private var scheme
     private var presentation: JobPresentation {JobPresentation(job:job)}
+    private var sourceLabel: String {
+        job.source.map {URL(fileURLWithPath:$0.path).lastPathComponent} ?? job.request.originalURL ?? job.request.sourceID
+    }
     private var previewURL: URL? {
         // An accepted audio MP4 already contains its real waveform. Never draw
         // a synthetic waveform over native video or pretend artwork is playback.
@@ -26,7 +29,9 @@ struct JobDetailView: View {
                 VStack(alignment:.leading,spacing:7) {
                     Text(job.request.productionWorkflow == .joeBudden ? "Joe Budden" : job.request.owner == .dub ? "DUB" : "Taxstone")
                         .font(JoeyTheme.font(30,weight:.bold)).tracking(-0.8)
-                    Text(job.request.title).font(JoeyTheme.font(16)).textSelection(.enabled)
+                    // Selectable Text can retain an older native accessibility
+                    // value. Recreate only changed text, preserving the preview.
+                    Text(job.request.title).font(JoeyTheme.font(16)).textSelection(.enabled).id(job.request.title)
                     Text(presentation.status).font(JoeyTheme.font(12)).foregroundStyle(presentation.completed ? JoeyTheme.verified : .secondary)
                 }
                 JobPreview(url:previewURL,isAudio:job.source?.kind == .audio)
@@ -52,7 +57,7 @@ struct JobDetailView: View {
                     VStack(alignment:.leading,spacing:8) {
                         Label(job.state == .cancelled ? "Progress saved" : "Needs attention",systemImage:"exclamationmark.circle")
                             .font(JoeyTheme.font(13,weight:.medium))
-                        Text(error).textSelection(.enabled)
+                        Text(error).textSelection(.enabled).id(error)
                         Text(presentation.recovery).foregroundStyle(.secondary)
                     }.font(JoeyTheme.font(12))
                 }
@@ -82,8 +87,9 @@ struct JobDetailView: View {
     private var metadata: some View {
         VStack(alignment:.leading,spacing:12) {
             Text("Source").font(JoeyTheme.font(13,weight:.medium))
-            Text(job.source.map {URL(fileURLWithPath:$0.path).lastPathComponent} ?? job.request.originalURL ?? job.request.sourceID)
-                .font(JoeyTheme.font(12)).textSelection(.enabled).lineLimit(3)
+            Text(sourceLabel)
+                .font(JoeyTheme.font(12)).textSelection(.enabled).lineLimit(3).id(sourceLabel)
+            LabeledContent("Workflow",value:job.request.mode == .fullShow ? "Clip Entire Show" : "Highlights")
             if let source = job.source {
                 LabeledContent("Duration",value:Duration.seconds(source.duration).formatted(.time(pattern:.hourMinuteSecond)))
                 LabeledContent("Media",value:source.kind == .audio ? "Audio · waveform MP4" : "Native video")
@@ -95,10 +101,16 @@ struct JobDetailView: View {
                 VStack(alignment:.leading,spacing:10) {
                     Text(job.request.sourceID)
                     Text("Saved state: \(job.state.rawValue) · \(job.stage)")
-                    Text("Export: \(job.request.profile.width) × \(job.request.profile.height)")
                     if let source = job.source {
+                        if let output = try? job.request.profile.outputProfile(for:source.kind) {
+                            Text("Export: \(output.width) × \(output.height)")
+                        } else {
+                            Text("Export: unavailable for the saved source and capability profile")
+                        }
                         Text("SHA-256: \(source.sha256)")
                         Text(source.authorizationBasis)
+                    } else {
+                        Text("Export: pending source inspection")
                     }
                     if !job.unavailableTranscriptFeatures.isEmpty {
                         Text("Unavailable: " + job.unavailableTranscriptFeatures.joined(separator:"; "))

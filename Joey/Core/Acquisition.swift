@@ -36,6 +36,87 @@ public enum Acquisition {
         }
         return u
     }
+    /// A downloader can finish before the Coordinator's full source inspection
+    /// is checkpointed. Reuse only its source-bound canonical file; inspection,
+    /// source hashing and classification still run in the Coordinator.
+    static func completedOriginal(_ request: JobRequest, directory: URL) async throws -> URL? {
+        let files = try FileManager.default.contentsOfDirectory(at:directory,includingPropertiesForKeys:nil)
+            .filter { $0.deletingPathExtension().lastPathComponent == "original" && ["mp4","mkv","webm","m4a","mp3","opus"].contains($0.pathExtension) }
+        // Partial-only downloads retain the normal guarded --continue path.
+        guard !files.isEmpty else {return nil}
+        guard files.count == 1 else {throw JoeyError.failed("Multiple canonical originals exist; all files preserved. Reconcile the source files before retrying.")}
+        let original = files[0]
+        do {
+            try Task.checkCancellation()
+            try StorageManager.noLinks(original)
+            let attributes = try FileManager.default.attributesOfItem(atPath:original.path)
+            guard attributes[.type] as? FileAttributeType == .typeRegular,
+                  (attributes[.size] as? NSNumber)?.int64Value ?? 0 > 0 else {
+                throw JoeyError.invalid("Canonical original is not a nonempty regular file")
+            }
+            guard let raw = request.originalURL, let identity = SourceIdentitySuggestion.from(try validateOriginalURL(raw).absoluteString) else {
+                throw JoeyError.invalid("Original source identity is unavailable")
+            }
+            var expected: [Double] = []
+            if let duration = request.expectedDuration {
+                guard duration.isFinite,duration > 0,duration < 1_000_000 else {throw JoeyError.invalid("Invalid expected original duration")}
+                expected.append(duration)
+            }
+            var retained: [Data] = []
+            for name in ["acquisition.json","original.info.json"] {
+                let path = directory.appendingPathComponent(name)
+                guard FileManager.default.fileExists(atPath:path.path) else {
+                    throw JoeyError.dependency("Acquisition metadata \(name) is missing; restore the matching source metadata")
+                }
+                try StorageManager.noLinks(path)
+                let data = try Data(contentsOf:path)
+                guard let object = try? JSONSerialization.jsonObject(with:data) as? [String:Any] else {
+                    throw JoeyError.invalid("Acquisition metadata \(name) is malformed")
+                }
+                guard let id = object["id"] as? String,identity.hasSuffix(":"+id),
+                      request.sourceID == id || request.sourceID.hasSuffix("-"+id) || request.sourceID.hasSuffix(":"+id),
+                      let title = object["title"] as? String,!title.isEmpty,
+                      object["is_live"] as? Bool != true,
+                      !["is_live","is_upcoming","post_live"].contains(object["live_status"] as? String ?? "") else {
+                    throw JoeyError.invalid("Acquisition metadata \(name) has conflicting or unfinished source identity")
+                }
+                var recordedURLs = 0
+                for key in ["original_url","webpage_url"] where object[key] != nil && !(object[key] is NSNull) {
+                    guard let value = object[key] as? String,let url = try? validateOriginalURL(value),
+                          SourceIdentitySuggestion.from(url.absoluteString) == identity else {
+                        throw JoeyError.invalid("Acquisition metadata \(name) has a conflicting source URL")
+                    }
+                    recordedURLs += 1
+                }
+                guard recordedURLs > 0 else {throw JoeyError.invalid("Acquisition metadata \(name) lacks source URL evidence")}
+                if object["duration"] == nil || object["duration"] is NSNull {
+                    guard identity.hasPrefix("x:broadcast:") || identity.hasPrefix("x:space:"),
+                          object["is_live"] as? Bool == false,object["live_status"] as? String == "was_live" else {
+                        throw JoeyError.invalid("Acquisition metadata \(name) lacks an authoritative complete duration")
+                    }
+                } else {
+                    // The existing parser validates provider duration types,
+                    // identity and completion without using the measured file.
+                    expected.append(try await sourceMetadata(data,request:request).duration)
+                }
+                retained.append(data)
+            }
+            if expected.isEmpty {
+                // Legacy X requests without a saved duration still require the
+                // existing authoritative ended-replay parser, never self-proof.
+                expected.append(try await sourceMetadata(retained[0],request:request).duration)
+            }
+            let probe = try await Media.probe(original)
+            if ["mp4","m4a"].contains(original.pathExtension),probe.format.format_name?.split(separator:",").contains("mpegts") == true {
+                throw JoeyError.failed("Original has an unfinished MPEG-TS remux; reconcile acquisition before retrying")
+            }
+            for duration in expected {try validateDownloadedDuration(probe.duration,expected:duration)}
+            return original
+        } catch {
+            if error is CancellationError {throw error}
+            throw JoeyError.failed("Existing original preserved; completed-download reuse failed: "+error.localizedDescription)
+        }
+    }
     public static func acquire(_ request: JobRequest, directory: URL) async throws -> URL {
         if let path = request.localPath {
             let url = URL(fileURLWithPath:(path as NSString).expandingTildeInPath).standardizedFileURL
@@ -44,6 +125,7 @@ public enum Acquisition {
         }
         guard let raw = request.originalURL else { throw JoeyError.dependency("No original source") }
         let url = try validateOriginalURL(raw)
+        if let original = try await completedOriginal(request,directory:directory) {return original}
         let metadataURL = directory.appendingPathComponent("acquisition.json")
         let metadata = try await Processes.retry {
             try await Processes.run("yt-dlp",metadataArguments(for:url))
@@ -63,7 +145,20 @@ public enum Acquisition {
     }
     public static func transcript(source: SourceRecord, request: JobRequest, configuration: Configuration, directory: URL) async throws -> Transcript? {
         let canonical = directory.appendingPathComponent("transcript.json")
+        let repairReceipt = directory.appendingPathComponent("transcript-repair.json")
+        if FileManager.default.fileExists(atPath: repairReceipt.path) {
+            let proof: TranscriptRepair = try Persistence.load(repairReceipt)
+            // A failed attempt does not own an explicitly supplied correction.
+            // Accepted repaired transcripts still require their complete proof.
+            if proof.transcriptSHA256 != nil || request.transcriptPath == nil {
+                try validateTranscriptRepair(proof, source: source, directory: directory)
+            }
+        }
         if FileManager.default.fileExists(atPath:canonical.path) {
+            if FileManager.default.fileExists(atPath: directory.appendingPathComponent("transcript-repair").path),
+               !FileManager.default.fileExists(atPath: repairReceipt.path), request.transcriptPath == nil {
+                throw JoeyError.invalid("Transcript repair receipt is missing; canonical transcript and retained repair files preserved")
+            }
             let old: Transcript = try Persistence.load(canonical)
             try old.validate(sourceID:source.id,sha256:source.sha256,duration:source.duration)
             return old
@@ -74,12 +169,42 @@ public enum Acquisition {
             // A missing optional transcript is not permission to invoke ASR.
             // Malformed/mismatched supplied or cached transcripts still fail.
             if request.transcriptPolicy == .modelIndependent {return nil}
-            guard let python = configuration.pythonPath, let script = configuration.transcriptionScript,
-                  let model = configuration.modelPath else { throw JoeyError.dependency("Local transcript unavailable: configure existing Python ASR helper and installed model, or supply source-bound full transcript") }
             input = directory.appendingPathComponent("asr-source.json")
-            _ = try await Processes.run(python,[script,"--source",source.path,"--source-id",source.id,"--output",input.path,"--model-dir",model,"--cpu-threads","2"])
+            if !FileManager.default.fileExists(atPath: input.path) {
+                let (python, script, model) = try transcriptionTools(configuration)
+                _ = try await Processes.run(python,[script,"--source",source.path,"--source-id",source.id,"--output",input.path,"--model-dir",model,"--cpu-threads","2"])
+            }
         }
         let data = try Data(contentsOf:input)
+        var value = try decodeTranscript(data, source: source)
+        do { try value.validate(sourceID:source.id,sha256:source.sha256,duration:source.duration) }
+        catch {
+            guard request.transcriptPath == nil else { throw error }
+            guard let window = repairableTranscriptWindow(value, data: data, source: source) else {
+                throw JoeyError.invalid("\(error.localizedDescription). Original ASR is preserved at \(input.path). Supply a valid full source-bound transcript; this defect cannot be repaired by a bounded local retry.")
+            }
+            do {
+                value = try await repairTranscriptWindow(value, window: window, source: source,
+                    configuration: configuration, directory: directory)
+            } catch is CancellationError { throw CancellationError() }
+            catch let blocked as StorageBlocked { throw blocked }
+            catch {
+                throw JoeyError.failed("Bounded transcript recovery failed: \(error.localizedDescription). Original ASR and repair evidence are preserved in \(directory.path). Supply a valid full source-bound transcript or inspect the retained ASR output.")
+            }
+        }
+        try Persistence.save(value,to:canonical)
+        return value
+    }
+
+    private static func transcriptionTools(_ configuration: Configuration) throws -> (String, String, String) {
+        guard let python = configuration.pythonPath, let script = configuration.transcriptionScript,
+              let model = configuration.modelPath else {
+            throw JoeyError.dependency("Local transcript unavailable: configure existing Python ASR helper and installed model, or supply source-bound full transcript")
+        }
+        return (python, script, model)
+    }
+
+    private static func decodeTranscript(_ data: Data, source: SourceRecord) throws -> Transcript {
         let value: Transcript
         if let typed = try? Persistence.decoder.decode(Transcript.self,from:data) { value = typed }
         else {
@@ -94,8 +219,277 @@ public enum Acquisition {
             }
             value = Transcript(sourceID:source.id,sourceSHA256:source.sha256,duration:source.duration,engine:engine,segments:parts)
         }
-        try value.validate(sourceID:source.id,sha256:source.sha256,duration:source.duration)
-        try Persistence.save(value,to:canonical)
         return value
+    }
+
+    /// Only a local engine's out-of-range final timestamps qualify. Imported
+    /// transcripts, ordering defects and uncertain prefix boundaries stay strict.
+    private static func repairableTailStart(_ value: Transcript, data: Data, source: SourceRecord) -> Double? {
+        guard let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              value.sourceID == source.id, value.sourceSHA256 == source.sha256,
+              abs(value.duration - source.duration) < 0.1, !value.engine.isEmpty, !value.segments.isEmpty,
+              raw["source_id"] as? String == source.id, raw["source_sha256"] as? String == source.sha256,
+              ["mlx-whisper", "faster-whisper"].contains(raw["model"] as? String ?? ""),
+              raw["word_timestamps"] as? Bool == true,
+              (raw["transcription_status"] as? String)?.hasPrefix("completed") == true,
+              raw["source_file"] as? String == URL(fileURLWithPath: source.path).lastPathComponent,
+              source.duration.isFinite, source.duration > 0 else { return nil }
+        let earliest = max(0, source.duration - 30)
+        var previous = 0.0, damaged = false
+        for part in value.segments {
+            guard part.start.isFinite, part.end.isFinite, part.start >= previous,
+                  part.end >= part.start, !part.text.isEmpty else { return nil }
+            if part.end > source.duration + 0.1 {
+                guard part.start >= earliest, part.start < source.duration else { return nil }
+                damaged = true
+            }
+            previous = part.start
+        }
+        guard damaged else { return nil }
+        for index in value.segments.indices {
+            let start = value.segments[index].start
+            if start >= earliest, start < source.duration,
+               value.segments[..<index].allSatisfy({ $0.end <= start }) { return start }
+        }
+        return nil
+    }
+
+    private struct TranscriptRepairWindow {
+        var start: Double
+        var end: Double
+        var replacedSegments: Range<Int>
+        var isInterior: Bool
+    }
+
+    private static func repairableTranscriptWindow(_ value: Transcript, data: Data, source: SourceRecord) -> TranscriptRepairWindow? {
+        if let start = repairableTailStart(value, data: data, source: source),
+           let first = value.segments.firstIndex(where: { $0.start >= start }) {
+            return TranscriptRepairWindow(start: start, end: source.duration,
+                replacedSegments: first..<value.segments.count, isInterior: false)
+        }
+        // MLX may retain a wordless decoder segment's timestamps after aligning
+        // its neighbors. Only this isolated, source-bound ordering fault is
+        // eligible; the original text is never sorted, removed or retimed.
+        guard let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              value.sourceID == source.id, value.sourceSHA256 == source.sha256,
+              abs(value.duration - source.duration) < 0.1, !value.engine.isEmpty,
+              raw["source_id"] as? String == source.id, raw["source_sha256"] as? String == source.sha256,
+              raw["model"] as? String == "mlx-whisper", raw["word_timestamps"] as? Bool == true,
+              (raw["transcription_status"] as? String)?.hasPrefix("completed") == true,
+              raw["source_file"] as? String == URL(fileURLWithPath: source.path).lastPathComponent,
+              let rawSegments = raw["segments"] as? [[String: Any]],
+              rawSegments.count == value.segments.count, rawSegments.count >= 3,
+              source.duration.isFinite, source.duration > 0 else { return nil }
+        var previous = 0.0, previousWord = 0.0
+        var faults: [Int] = [], wordless: [Int] = []
+        for (index, part) in value.segments.enumerated() {
+            let rawPart = rawSegments[index]
+            guard part.start.isFinite, part.end.isFinite, part.start >= 0,
+                  part.end >= part.start, part.end <= source.duration + 0.1, !part.text.isEmpty,
+                  rawPart["start_seconds"] as? Double == part.start,
+                  rawPart["end_seconds"] as? Double == part.end, rawPart["text"] as? String == part.text,
+                  let words = rawPart["words"] as? [[String: Any]] else { return nil }
+            if part.start < previous { faults.append(index) }
+            if words.isEmpty { wordless.append(index) }
+            for word in words {
+                guard let first = word["start_seconds"] as? Double, let last = word["end_seconds"] as? Double,
+                      first.isFinite, last.isFinite, first >= previousWord,
+                      last >= first, last <= source.duration + 0.1 else { return nil }
+                previousWord = first
+            }
+            previous = part.start
+        }
+        guard faults.count == 1, wordless == faults, let fault = faults.first,
+              fault > 0, fault < value.segments.count - 1 else { return nil }
+
+        let damagedStart = value.segments[fault].start
+        let damagedEnd = max(value.segments[fault].end, value.segments[fault - 1].end)
+        var best: TranscriptRepairWindow?, bestScore: [Double]?
+        for left in 0..<fault {
+            let start = value.segments[left].start
+            guard start <= damagedStart, start >= max(0, damagedEnd - 30),
+                  value.segments[..<left].allSatisfy({ $0.end <= start }) else { continue }
+            for right in (fault + 1)..<value.segments.count {
+                let end = value.segments[right].start
+                if end - start > 30 { break }
+                guard end > start, end >= damagedEnd, end < source.duration,
+                      value.segments[left..<right].allSatisfy({ $0.start >= start && $0.end <= end }),
+                      value.segments[right...].allSatisfy({ $0.start >= end }) else { continue }
+                // Prefer context on both sides, then balanced context, shorter
+                // audio, and the earlier boundary. No source-specific offsets.
+                let before = damagedStart - start, after = end - damagedEnd
+                let score = [-min(before, after), abs(before - after), end - start, start]
+                if bestScore == nil || score.lexicographicallyPrecedes(bestScore!) {
+                    best = TranscriptRepairWindow(start: start, end: end,
+                        replacedSegments: left..<right, isInterior: true)
+                    bestScore = score
+                }
+            }
+        }
+        return best
+    }
+
+    private struct TranscriptRepair: Codable {
+        var sourceID: String
+        var sourceSHA256: String
+        var sourceDuration: Double
+        var originalASRSHA256: String
+        // Existing tail keys remain unchanged. A missing windowEnd means the
+        // source ending; an interior receipt describes [tailStart, windowEnd).
+        var tailStart: Double
+        var tailDuration: Double
+        var tailSHA256: String
+        var windowEnd: Double?
+        var regeneratedASRSHA256: String?
+        var transcriptSHA256: String?
+
+        var excerptName: String { windowEnd == nil ? "source-tail.wav" : "source-window.wav" }
+        var regeneratedName: String { windowEnd == nil ? "asr-tail.json" : "asr-window.json" }
+    }
+
+    private static func validateTranscriptRepair(_ proof: TranscriptRepair, source: SourceRecord, directory: URL) throws {
+        let end = proof.windowEnd ?? source.duration
+        guard proof.sourceID == source.id, proof.sourceSHA256 == source.sha256,
+              proof.sourceDuration == source.duration, proof.tailStart.isFinite,
+              proof.tailStart >= 0, end.isFinite, end > proof.tailStart, end <= source.duration,
+              end - proof.tailStart <= 30, proof.windowEnd == nil || end < source.duration,
+              proof.tailDuration.isFinite, proof.tailDuration > 0,
+              abs(proof.tailDuration - (end - proof.tailStart)) < 0.1 else {
+            throw JoeyError.invalid("Transcript repair source identity or interval changed; retained files preserved")
+        }
+        var files = [(URL(fileURLWithPath: source.path), proof.sourceSHA256),
+            (directory.appendingPathComponent("asr-source.json"), proof.originalASRSHA256),
+            (directory.appendingPathComponent("transcript-repair/" + proof.excerptName), proof.tailSHA256)]
+        if let hash = proof.regeneratedASRSHA256 {
+            files.append((directory.appendingPathComponent("transcript-repair/" + proof.regeneratedName), hash))
+        }
+        let canonical = directory.appendingPathComponent("transcript.json")
+        if FileManager.default.fileExists(atPath: canonical.path) {
+            guard let hash = proof.transcriptSHA256 else {
+                throw JoeyError.invalid("Transcript repair lacks acceptance evidence; retained files preserved")
+            }
+            files.append((canonical, hash))
+        }
+        for (file, hash) in files {
+            guard (try? Integrity.sha256(file)) == hash else {
+                throw JoeyError.invalid("Transcript repair evidence changed or is unavailable: \(file.lastPathComponent); retained files preserved")
+            }
+        }
+        let raw = try Data(contentsOf: directory.appendingPathComponent("asr-source.json"))
+        let original = try decodeTranscript(raw, source: source)
+        guard let window = repairableTranscriptWindow(original, data: raw, source: source),
+              window.start == proof.tailStart, window.end == end,
+              window.isInterior == (proof.windowEnd != nil) else {
+            throw JoeyError.invalid("Transcript repair boundary no longer matches the original ASR; retained files preserved")
+        }
+    }
+
+    private static func repairTranscriptWindow(_ original: Transcript, window: TranscriptRepairWindow, source: SourceRecord,
+                                            configuration: Configuration, directory: URL) async throws -> Transcript {
+        let work = directory.appendingPathComponent("transcript-repair")
+        let excerpt = work.appendingPathComponent(window.isInterior ? "source-window.wav" : "source-tail.wav")
+        let generated = work.appendingPathComponent(window.isInterior ? "asr-window.json" : "asr-tail.json")
+        let raw = directory.appendingPathComponent("asr-source.json")
+        let receipt = directory.appendingPathComponent("transcript-repair.json")
+        let start = window.start, duration = window.end - window.start
+        var proof: TranscriptRepair
+        if FileManager.default.fileExists(atPath: receipt.path) {
+            proof = try Persistence.load(receipt)
+            try validateTranscriptRepair(proof, source: source, directory: directory)
+            guard proof.tailStart == start, (proof.windowEnd ?? source.duration) == window.end,
+                  (proof.windowEnd != nil) == window.isInterior else {
+                throw JoeyError.invalid("Transcript repair boundary changed")
+            }
+        } else {
+            _ = try transcriptionTools(configuration)
+            guard try Integrity.sha256(URL(fileURLWithPath: source.path)) == source.sha256 else {
+                throw JoeyError.invalid("Original source changed before transcript recovery")
+            }
+            try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+            // Only this unaccepted derived excerpt can be replaced after an
+            // interrupted extraction. Original and ASR files are never replaced.
+            _ = try await Processes.run("ffmpeg", ["-nostdin", "-v", "error", "-y", "-ss", String(start),
+                "-i", source.path, "-t", String(duration), "-vn", "-ac", "1", "-ar", "16000",
+                "-c:a", "pcm_s16le", excerpt.path], timeout: 60)
+            let measured = try await Media.probe(excerpt)
+            guard measured.duration > 0, abs(measured.duration - duration) < 0.1 else {
+                throw JoeyError.invalid("Decoded transcript audio does not cover the requested source interval")
+            }
+            proof = TranscriptRepair(sourceID: source.id, sourceSHA256: source.sha256,
+                sourceDuration: source.duration, originalASRSHA256: try Integrity.sha256(raw),
+                tailStart: start, tailDuration: measured.duration, tailSHA256: try Integrity.sha256(excerpt),
+                windowEnd: window.isInterior ? window.end : nil)
+            try Persistence.save(proof, to: receipt)
+        }
+        var tailSource = source
+        tailSource.id = window.isInterior
+            ? source.id + ":transcript-window:" + String(start) + ":" + String(window.end)
+            : source.id + ":transcript-tail:" + String(start)
+        tailSource.path = excerpt.path
+        tailSource.sha256 = proof.tailSHA256
+        tailSource.duration = proof.tailDuration
+        if !FileManager.default.fileExists(atPath: generated.path) {
+            let (python, script, model) = try transcriptionTools(configuration)
+            var arguments = [script, "--source", excerpt.path, "--source-id", tailSource.id,
+                "--output", generated.path, "--model-dir", model, "--cpu-threads", "2"]
+            if let payload = try JSONSerialization.jsonObject(with: Data(contentsOf: raw)) as? [String: Any],
+               let language = payload["language"] as? String, !language.isEmpty {
+                arguments += ["--language", language]
+            }
+            _ = try await Processes.run(python, arguments, timeout: 180)
+        }
+        let regeneratedData = try Data(contentsOf: generated)
+        let tail = try decodeTranscript(regeneratedData, source: tailSource)
+        try tail.validate(sourceID: tailSource.id, sha256: tailSource.sha256, duration: tailSource.duration)
+        if window.isInterior, !tail.segments.allSatisfy({ $0.end <= duration }) {
+            throw JoeyError.invalid("Regenerated transcript crosses the preserved suffix boundary")
+        }
+        try validateAlignedTail(regeneratedData, duration: tailSource.duration,
+            maximumEnd: window.isInterior ? duration : nil)
+        let prefix = original.segments[..<window.replacedSegments.lowerBound]
+        let suffix = original.segments[window.replacedSegments.upperBound...]
+        let combined = Transcript(sourceID: source.id, sourceSHA256: source.sha256, duration: source.duration,
+            engine: original.engine + (window.isInterior ? "; bounded local window retranscription" : "; bounded local tail retranscription"),
+            segments: Array(prefix) + tail.segments.map {
+                TranscriptSegment(start: start + $0.start, end: start + $0.end, text: $0.text)
+            } + Array(suffix))
+        try combined.validate(sourceID: source.id, sha256: source.sha256, duration: source.duration)
+        let hash = Integrity.textHash(String(decoding: try Persistence.encoder.encode(combined), as: UTF8.self))
+        if let accepted = proof.transcriptSHA256, accepted != hash {
+            throw JoeyError.invalid("Transcript repair result changed; retained files preserved")
+        }
+        let alreadyAccepted = proof.transcriptSHA256 != nil
+        proof.regeneratedASRSHA256 = try Integrity.sha256(generated)
+        proof.transcriptSHA256 = hash
+        try validateTranscriptRepair(proof, source: source, directory: directory)
+        // Save acceptance before the canonical write so interruption can recover
+        // from these same validated bytes without invoking inference again.
+        // An already accepted receipt, including legacy formatting, stays intact.
+        if !alreadyAccepted { try Persistence.save(proof, to: receipt) }
+        return combined
+    }
+
+    private static func validateAlignedTail(_ data: Data, duration: Double, maximumEnd: Double? = nil) throws {
+        guard let raw = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              raw["word_timestamps"] as? Bool == true,
+              let segments = raw["segments"] as? [[String: Any]] else {
+            throw JoeyError.invalid("Regenerated transcript tail lacks aligned words")
+        }
+        var previous = 0.0
+        for (index, segment) in segments.enumerated() {
+            guard let start = segment["start_seconds"] as? Double, let end = segment["end_seconds"] as? Double,
+                  let words = segment["words"] as? [[String: Any]], !words.isEmpty else {
+                throw JoeyError.invalid("Regenerated transcript tail segment \(index + 1) lacks aligned words")
+            }
+            for word in words {
+                guard let first = word["start_seconds"] as? Double, let last = word["end_seconds"] as? Double,
+                      first.isFinite, last.isFinite, first >= previous, first >= start - 0.1,
+                      last >= first, last <= end + 0.1, last <= duration + 0.1,
+                      maximumEnd == nil || last <= maximumEnd! else {
+                    throw JoeyError.invalid("Regenerated transcript tail segment \(index + 1) has invalid word timing")
+                }
+                previous = first
+            }
+        }
     }
 }

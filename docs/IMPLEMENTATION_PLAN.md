@@ -1,11 +1,79 @@
 # Joey Native Implementation Plan
 
-> Existing implementation roadmap. Current task state and evidence are recorded in STATUS.md. Historical handoff limitations below are superseded by Frank’s subsequent explicit implementation and installation instructions. First production delivery and the approved UI/final branding milestone are complete; Taxstone Library Mode is installed and running; initial real deliveries are verified, with native UI acceptance pending.
+> Existing implementation roadmap. The active G0–G5 core completion directive below supersedes earlier execution and acceptance priorities. Current progress is recorded in STATUS.md. Older milestones and VERIFICATION.md retain their historical evidence scope; they do not require further test campaigns, production jobs or visual acceptance for this assignment.
 
 **Goal:** Implement the standalone local media workflow in REQUIREMENTS.md.
 **Architecture:** SwiftUI calls a serial actor coordinator with atomic JSON checkpoints and cross-process locking. Foundation Process invokes installed media tools without a shell; Swift owns planning, state, hashes and provider readback. Existing Xcode folder membership compiles the shared core; Swift Package Manager provides a dependency-free test/runner harness using the same files and Xcode toolchain.
 **Tech Stack:** Swift, SwiftUI, Foundation, CryptoKit, AppKit/CoreGraphics, FFmpeg/FFprobe, existing yt-dlp/rclone/local ASR.
 **Spec:** REQUIREMENTS.md, sole current requirements document.
+
+## Active final integration closeout — 2026-11-03
+
+G0–G5 remain closed. Frank's subsequent directive authorizes only final source-control integration, any necessary native installation, accurate documentation and safe task cleanup. Starting active branch is clean/pushed `codex/functional-completion` at `0ef1171ed6dce0bee8a528cbda8c22539d80d916`; PR #13 is draft/open and mergeable into main `02956bad1a37f29ef2d6af4d81dc8770f412b0e0`. Installed artifact/source inputs already match the core-completion build receipts.
+
+- [x] Read current origin, branch/history, changed/untracked active files, PR head/base/check/protection state, and installed artifact/source binding. Preserve other checkout/worktree contents during classification.
+- [ ] Commit/push the authorized closeout documentation, mark PR #13 ready and merge through the permitted ordinary merge path; read back the merge and closed state.
+- [ ] Synchronize local main with final remote main without reset or loss of unique work. Reuse the installed app only after merged application inputs match its existing binding; otherwise build/install through the established protected procedure.
+- [ ] Remove only demonstrably redundant task branches/worktrees/disposable files; retain unique, unrelated or evidence-bearing material with an explicit reason.
+- [ ] Record actual integration, source/build/install identities, preservation, cleanup disposition and remaining unobserved behavior; commit/push final documentation and confirm a clean synchronized main. Stop.
+
+No tests, new production jobs, optional features, acceptance campaign, protection changes, evidence deletion or manufacture of a clean tree are included. STATUS carries actual progress and the final receipt; this section does not reopen the product roadmap or create a new acceptance gate.
+
+## Active core app completion roadmap — 2026-11-03
+
+Objective: finish and deliver the existing standalone native macOS application through Frank's fixed G0–G5 roadmap. Required operation is Applications launch, supported link intake and Content/Workflow selections, processing, meaningful progress and cancellation, required Drive outputs/records, a persisted in-app recap with actual results/links, and safe job history/recovery. REQUIREMENTS.md remains the sole product specification.
+
+Authorized scope is concrete missing or broken core functionality, necessary native builds/packaging/protected installation, and updates to this plan, STATUS and operating instructions where behavior changes. Preserve current source/creator/rendering/storage/delivery contracts, existing work and runtime data. Exclusions: tests or test creation, further audits/reviews/QA campaigns, new production jobs, repeated accepted processing/provider writes, backlog activation, optional features, redesign/refactoring, services/dependencies, permission changes, social/email actions, public distribution/notarization, PR merging or release-state changes. Existing automatic runtime validation and completion safeguards remain mandatory.
+
+Completion means the finite implementation list is closed, the resulting app is installed at the existing authorized location, no known core functional blocker remains, and the handoff states source identity, dependencies and unobserved behavior accurately. Visual observation and wider production/platform acceptance are reported separately and are not invented implementation gaps. Dependencies are the existing Xcode/toolchain, local helpers/models, authorized provider connections and applicable connectivity/capability evidence; no paid or cloud AI service is added. Installation must preserve runtime state and the established rollback procedure.
+
+### G0 frozen remaining-work list
+
+One bounded pass traced NewJobView, ContentView, JobDetailView, JobModel, JobPresentation, JobRecord, Coordinator and Persistence against the required core workflow. The active source is the existing repository's cached clone at `/Users/frank/Library/Caches/Joey-Native-Build/functional-verification-20261103/source`, branch `codex/functional-completion`, baseline `0e6ef87f08eeccd163dbc0f40fd2c90a4e842ca8`, with no starting working changes. Origin and live remote branch match; live main is `02956bad1a37f29ef2d6af4d81dc8770f412b0e0`. PR #13 remains open and draft. The original checkout and prior worktrees remain preserved.
+
+| Item / owning gate | Requirement and concrete behavior | Existing files | Required action / essential dependency | Status |
+| --- | --- | --- | --- | --- |
+| G0 | Bound actual implementation gaps; separate evidence limits and historical dependencies | This plan; docs/STATUS.md | Record this finite list; no additional tracking system | Closed |
+| G1 | Supported link, Content/Workflow, Start, progress, selection and precise errors | Joey/NewJobView.swift; ContentView.swift; JobModel.swift; Core/JobPresentation.swift | Reuse existing native controls, coordinator actions and durable state | Carried forward; no implementation gap |
+| G2-1 | Recap must identify the saved workflow. Inspector shows creator/source/results but omitted Full Show versus Highlights | Joey/JobDetailView.swift | Added a Workflow field from immutable `job.request.mode`, using existing intake labels. No provider/runtime dependency | Delivered in installed build |
+| G2 | Remaining saved recap fields: source, actual completion/count, clip titles/intervals/durations, QA/delivery/records, folder/direct links and failures | Joey/JobDetailView.swift; Core/JobPresentation.swift; Core/Domain.swift | Reuse persisted job evidence and existing completion predicate. Do not repeat the completed job | Carried forward except G2-1 |
+| G3 | Cancellation, Resume, history/reopening and accepted-stage preservation | Joey/JobModel.swift; ContentView.swift; JobDetailView.swift; Core/Coordinator.swift; Core/Persistence.swift; Core/Domain.swift | Reuse existing actions, atomic persistence, immutable identity, locks and completed-job early return | Carried forward; no implementation gap |
+| G4 | Deliver changed application at `/Users/frank/Applications/Joey Native.app` | Existing Joey.xcodeproj; Tools/run-local.py; established protected installer | Native build/signature, protected replacement and artifact/runtime readback; existing Xcode and installation access | Closed; installed and relaunched |
+| G5 | Accurate closure and handoff | This plan; docs/STATUS.md; docs/OPERATING_GUIDE.md | Reconciled finite list, source/build/install identity, genuine dependencies and unobserved behavior; stop | Closed; no required implementation item remains |
+
+Already delivered evidence is retained: selected job `dub-0bc5fc39fef657927e40715b` is COMPLETED, with 48 clips, four canonical companions and 48 required register rows, independently read back. Final visible recap, direct Resume-button observation and broader fresh native workflows remain unobserved, not demonstrated defects. Existing historical paused/storage-blocked jobs are outside this assignment. Current capability, source/asset, connectivity and disk dependencies continue to be enforced for future work; they do not authorize backlog processing or another acceptance campaign.
+
+### Gate progress
+
+- G0 closed: one concrete implementation item, G2-1; no vague work or new gates.
+- G1 closed by reuse: required controls/actions/progress/navigation/error wiring already implemented.
+- G2 closed: the saved Workflow field is implemented; all other required recap bindings are reused. Visual observation remains separate.
+- G3 closed by reuse: existing cancellation/Resume/history/persistence/recovery wiring has no demonstrated missing or broken requirement. No new production run or test cycle occurred.
+- G4 closed: native build and strict signature succeeded, each direct exit 0. Protected installation at `2026-11-04T02:03:53Z` succeeded, direct exit 0; minimal-environment relaunch and artifact/runtime readback succeeded, direct exit 0. All ten installed bundle hashes match the candidate. Runtime preservation covers 31 jobs, 509 accepted outputs, 28 originals and 807 protected identities, with only Joe monitoring's expected `lastCheckedAt` update after launch. No new job, processing or provider write occurred. Existing rollback is retained at `/Users/frank/Applications/Joey Rollbacks/2026-11-03-before-core-completion/Joey Native.app`.
+- G5 closed: all finite items are delivered or reused. No required implementation item or demonstrated core functional blocker remains. The operating guide explains reopening the saved recap and its Workflow field. Final source disposition is a scoped follow-up on `codex/functional-completion`; PR #13 remains draft/open without merge or release-state change. Native window/Workflow presentation, direct Resume-button operation, actual sleep/wake and universal production/platform acceptance remain unobserved or outside this task, not hidden implementation failures. Optional features and historical jobs remain deferred. Stop here.
+
+Delivery identity: installed bundle ID `devplaceholder.C88ISLGM.Joey`, version 1.0 (1), native dylib SHA-256 `17429183251d616dae4d1683c9e262398279b4fd7d6232d1a981d79ac1a159f8`. The build is bound to baseline `0e6ef87f08eeccd163dbc0f40fd2c90a4e842ca8` plus the exact Workflow-field diff and 115 input hashes in `core-completion/build-inputs.json` and `verification.json` under the existing evidence root. Only JobDetailView.swift differs from the prior build inputs. Build/signature/install/launch/readback receipts are in that same directory. No tests, new review/QA campaign or production acceptance job ran. Earlier tests and provider evidence below retain their original scope; they are not claimed as fresh tests of this display change.
+
+## Native functional completion — 2026-11-03
+
+Historical implementation/acceptance sequence. The active G0–G5 directive above controls further work; outstanding observation-only criteria below do not reopen implementation or authorize more testing/production.
+
+Use the existing combined Swift/SwiftUI application and preserve all prior original-retention, replay-duration, dimension and source-classification repairs. Frank approved `x:broadcast:2rJapEXbVkKRAR` for the selected native full-show acceptance through required Drive and register readback. The exact current task, exclusions, evidence and dependencies are maintained in STATUS and VERIFICATION.
+
+- [x] Verify actual source, installed build, account evidence, exact destinations, existing record schema and selected-source duplication constraints.
+- [x] Reproduce and repair local transcript-tail recovery and stale capacity-wait state without weakening validation or changing immutable contracts.
+- [x] Cover accepted clips without companion receipts, legacy receipt hydration, interrupted writes and repeated recovery; reuse the existing correct delivery implementation.
+- [x] Reproduce and repair unbounded autoreleased read-buffer retention in source/scratch hashing while preserving hashes and secure descriptor checks.
+- [x] Correct premature aggregate storage admission before source selection; retain stage-specific budgets, reserve and live monitoring, with local/reuse and insufficient-render-capacity regressions.
+- [x] Repair completed own-job original reuse before redundant download admission, preserving source/provenance/duration checks; verify interrupted-remux, ambiguity and partial-download behavior. Correct source-kind export dimensions in the recap. The reviewed candidate is installed; exact build and remaining acceptance limits are in STATUS.
+- [x] Install and verify bounded interior local-ASR recovery, preserve outside transcript segments and legacy receipts, and demonstrate native transcript adoption without a complete retranscription.
+- [x] Correct audio tick rounding, native-rate source-reference ordering, sample-scaled quiet checks and original-PTS picture selection/EOF handling. Use the existing macOS AudioToolbox AAC encoder within the verified bitrate ceiling, preserving float channel mixing and planned presentation endpoints. Final full suite, fresh real audio cases, independent reviews, protected installation, unchanged accepted-output audit and native retry/delivery passed; onscreen recap observation remains unverified.
+- [x] Verify bounded real transcript recovery, representative DUB/Taxstone audio renderer QA and read-only live routing.
+- [x] Complete final combined checks and install the matching signed build with rollback and runtime preservation. Final follow-up affected tests and native cancellation/accessibility checks are recorded in STATUS.
+- [ ] Exercise the approved source through installed native intake, complete source/transcript/planning/QA/delivery/records and recap; verify cancellation/restart/reuse without duplicate work.
+- [x] Independently review final native/provider acceptance evidence and reconcile verified, failed, blocked and unverified functions in the existing matrix. The selected native-video job and independent provider review are complete; visible native recap and wider fresh native workflow coverage remain explicitly unverified.
+
+Current boundary after the drift audit: selected native-video processing, all 48 QA outputs, Drive filing, four companions, Master Library rows and final package reconciliation are VERIFIED by the app and independent current provider readback (340/340 checks, exit 0). The same job is COMPLETED. The remaining unverified selected-path criterion is onscreen native recap observation; current controls expose no window, without establishing a physical lock. Inspect that recap when control is available. Do not start more media jobs, repeat passed rendering, add optional features or promote this one path into whole-product/platform-ingestion readiness.
 
 
 ## Joe Budden full-episode retention and naming — 2026-11-02

@@ -107,6 +107,58 @@ final class NativeModelRegressionTests: XCTestCase {
         XCTAssertTrue(drained,"Parent returned before its worker completed cancellation")
     }
 
+    @MainActor func testCancellingStorageWaitPreservesCheckpointWithoutShowingAnErrorAlert() async throws {
+        let model = try model()
+        var request = try Fixtures.request(dir: model.root, path: model.root.appendingPathComponent("not-acquired.mp4").path)
+        request.transcriptPolicy = .modelIndependent
+        // The real coordinator must stop at storage admission, before source
+        // acquisition, media tools or provider operations can begin.
+        let acceptance = StorageManager.$capacityOverride.withValue({ 0 }) { model.start(request) }
+        XCTAssertEqual(acceptance, .accepted)
+        let processing = try XCTUnwrap(model.task)
+        defer { processing.cancel() }
+        for _ in 0..<200 where model.jobs.first?.storageRequiredBytes == nil {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let blocked = try XCTUnwrap(model.jobs.first)
+        XCTAssertNotNil(blocked.storageRequiredBytes)
+        XCTAssertEqual(blocked.state, .processing)
+        XCTAssertTrue(model.busy)
+
+        model.cancel()
+        XCTAssertTrue(model.cancelling)
+        await processing.value
+        for _ in 0..<100 where model.cancelling { try await Task.sleep(nanoseconds: 1_000_000) }
+
+        XCTAssertNil(model.error, "Expected cancellation must not present Joey needs attention")
+        XCTAssertFalse(model.busy)
+        XCTAssertFalse(model.cancelling)
+        XCTAssertNil(model.task)
+        XCTAssertEqual(model.selected, blocked.id)
+        let displayed = try XCTUnwrap(model.jobs.first { $0.id == blocked.id })
+        let saved: JobRecord = try Persistence.load(model.root.appendingPathComponent("jobs/\(blocked.id)/job.json"))
+        XCTAssertEqual(try Persistence.encoder.encode(displayed), try Persistence.encoder.encode(saved))
+        XCTAssertEqual(saved.state, .cancelled)
+        XCTAssertEqual(saved.stage, "Paused while storage blocked")
+        XCTAssertNil(saved.storageRequiredBytes)
+        XCTAssertFalse(saved.resumesAutomatically)
+        XCTAssertEqual(try saved.request.identityData(), try request.identityData())
+        XCTAssertTrue(saved.error?.contains("progress preserved") == true, saved.error ?? "")
+    }
+
+    @MainActor func testOrdinaryStartFailureStillShowsAnErrorAlert() async throws {
+        let model = try model()
+        var invalid = try Fixtures.request(dir: model.root, path: "unused")
+        invalid.sourceID = ""
+        XCTAssertEqual(model.start(invalid), .accepted)
+        let processing = try XCTUnwrap(model.task)
+        await processing.value
+        XCTAssertTrue(model.error?.contains("Source identity") == true, model.error ?? "Missing failure alert")
+        XCTAssertFalse(model.busy)
+        XCTAssertNil(model.task)
+        XCTAssertTrue(model.jobs.isEmpty)
+    }
+
     @MainActor func testTaxstoneIntakeSetupUsesSelectedOwnerAndOnlySavesTaxstone() throws {
         let model = try model()
         let dub = try Fixtures.profile(dir:model.root)

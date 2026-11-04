@@ -289,7 +289,15 @@ final class SourceIntegrityTests: XCTestCase {
         }
     }
 
-    private func assertLegacyEvidencePreserved(_ evidence: String) async throws {
+    func testDisprovenAcceptedAudioWithoutCompanionReceiptsPreservesEvidence() async throws {
+        try await assertLegacyEvidencePreserved("all-accepted",includeCompanionReceipt:false)
+    }
+
+    func testDisprovenPartiallyAcceptedAudioWithoutCompanionReceiptsPreservesEvidence() async throws {
+        try await assertLegacyEvidencePreserved("partial",includeCompanionReceipt:false)
+    }
+
+    private func assertLegacyEvidencePreserved(_ evidence: String, includeCompanionReceipt: Bool = true) async throws {
         let root = try workspace()
         let url = try await video(in:root,filter:"drawbox=color=black:t=fill:enable='not(eq(n,3))'")
         var request = try Fixtures.request(dir:root,path:url.path);request.fileToDrive = true
@@ -312,7 +320,13 @@ final class SourceIntegrityTests: XCTestCase {
         if evidence == "receipt-only" {job.clips[0].qa = nil}
         let receipt = DriveReceipt(id:"fixture-receipt",name:"clip_manifest.json",parent:"fixture-folder",bytes:1,sha256:hash,
             url:"https://example.invalid/fixture",permissions:["owner"],verifiedAt:Date())
-        job.companions[receipt.name] = receipt
+        if includeCompanionReceipt {job.companions[receipt.name] = receipt}
+        else {
+            XCTAssertTrue(job.companions.isEmpty)
+            XCTAssertNil(job.folderID)
+            XCTAssertTrue(job.registerRows.isEmpty)
+            XCTAssertTrue(job.clips.allSatisfy {$0.drive == nil},"Accepted QA alone must trigger preservation")
+        }
         let files = try Records.write(job:job,directory:dir)
         let before = try Dictionary(uniqueKeysWithValues:files.map {($0,try Data(contentsOf:$0))})
         try Persistence.save(job,to:dir.appendingPathComponent("job.json"))

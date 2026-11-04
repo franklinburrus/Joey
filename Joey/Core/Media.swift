@@ -47,9 +47,27 @@ public struct RenderReceipt: Codable, Sendable {
 public enum Media {
     // Buffer's Instagram surface caps audio at 128 kbps. Leave room for
     // AAC's variable packet sizes, then verify the measured stream bitrate.
-    static let audioEncodingBitrate = 120_000
+    // Full-source fidelity checks selected AudioToolbox AAC. Its 120 kbps
+    // CBR request can quantize above 128 kbps; 112 kbps retains strict headroom.
+    static let audioEncodingBitrate = 112_000
     static let maximumAudioBitrate = 128_000
     static let maximumVideoBitrate = 25_000_000
+    static func audioEncodingArguments(channels: Int, duration: Double) -> [String] {
+        // AudioToolbox can emit codec flush packets past the planned ending.
+        // Retain negative priming timestamps and every in-range packet payload;
+        // only exclude wholly post-ending packets and shorten the crossing
+        // packet's presentation duration on the integer sample clock. Applying
+        // this before waveform extraction also preserves decoded PCM at muxing.
+        let ending = "noise=amount=0:drop='gte(pts,round(\(duration)/tb))',"
+            + "setts=duration='max(0,min(DURATION,round(\(duration)/TB)-PTS))'"
+        return ["-c:a","aac_at","-profile:a","1","-ac",String(channels),"-ar","48000",
+                "-b:a",String(audioEncodingBitrate),"-aac_at_mode","cbr","-aac_at_quality","2","-bsf:a",ending]
+    }
+    static func audioEncodingFormat(channels: Int) -> String {
+        // Preserve the established float downmix before AudioToolbox's integer
+        // conversion; combining both steps would normalize surround gain.
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=\(channels == 1 ? "mono" : "stereo")"
+    }
     public static func probe(_ url: URL) async throws -> MediaProbe {
         let result = try await Processes.run("ffprobe",["-v","error","-show_streams","-show_format","-of","json",url.path])
         let probe = try JSONDecoder().decode(MediaProbe.self, from: result.stdout)
@@ -273,7 +291,9 @@ public enum Media {
         // The default resampler threshold ignores small timestamp gaps. Hard
         // compensation at 100 microseconds preserves millisecond packet gaps
         // without stretching subsequent source audio to absorb the difference.
-        "atrim=start=\(interval.start):end=\(interval.end),asetpts=PTS-\(interval.start)/TB,aresample=48000:async=1:min_comp=0.0001:min_hard_comp=0.0001:first_pts=0,atrim=duration=\(interval.duration)"
+        // Round the origin to native clock ticks before subtraction. Floating
+        // division can otherwise advance packet timestamps by one sample.
+        "atrim=start=\(interval.start):end=\(interval.end),asetpts=PTS-round(\(interval.start)/TB),aresample=48000:async=1:min_comp=0.0001:min_hard_comp=0.0001:first_pts=0,atrim=duration=\(interval.duration)"
     }
     static func hasSourceAudio(_ source: SourceRecord, in interval: Interval) -> Bool {
         guard let audio = source.streams.first(where: {$0.codec_type == "audio"}) else {return false}
@@ -390,8 +410,10 @@ public enum Media {
         }
         let maxVideoRate = Int(max(64_000,min(6_000_000,Double(profile.maxBytes)*8/outputDuration*0.90-Double(audioEncodingBitrate))))
         if source.kind == .nativeVideo {
-            var args = ["-nostdin","-v","error","-y"]+compositionInputs(source:source,clip:clip,branding:branding)+["-filter_complex",compositionFilter(source,clip,outputProfile,branding:branding),"-map","[v]"]
-            if source.hasAudio { args += ["-map","[a]","-c:a","aac","-profile:a","aac_low","-ac",String(audioChannels),"-b:a",String(audioEncodingBitrate)] }
+            let filter = compositionFilter(source,clip,outputProfile,branding:branding)
+                + (source.hasAudio ? ";[a]\(audioEncodingFormat(channels:audioChannels))[encoded-a]" : "")
+            var args = ["-nostdin","-v","error","-y"]+compositionInputs(source:source,clip:clip,branding:branding)+["-filter_complex",filter,"-map","[v]"]
+            if source.hasAudio { args += ["-map","[encoded-a]"]+audioEncodingArguments(channels:audioChannels,duration:outputDuration) }
             args += ["-c:v","libx264","-preset","veryfast","-crf","18","-maxrate",String(maxVideoRate),"-bufsize",String(maxVideoRate*2),"-pix_fmt","yuv420p","-r","30","-g","60","-movflags","+faststart","-t",String(outputDuration),output.path]
             _ = try await Processes.run("ffmpeg",args)
         } else {
@@ -401,7 +423,7 @@ public enum Media {
                   source.owner != .dub || artwork.file.sha256 == "1522d2fbbbb6d943cd08cb07b617212be4fafcb841c7dcdba713fe81c4fdc790",
                   let selected = receipt.selectedAudio else { throw JoeyError.dependency("Missing approved \(source.owner.rawValue) artwork matching source \(source.id)") }
             let audio = work.appendingPathComponent("final-audio.m4a")
-            _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-y","-i",selected,"-c:a","aac","-profile:a","aac_low","-ac",String(audioChannels),"-b:a",String(audioEncodingBitrate),audio.path])
+            _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-y","-i",selected,"-af",audioEncodingFormat(channels:audioChannels)]+audioEncodingArguments(channels:audioChannels,duration:clip.expectedDuration)+[audio.path])
             let pcm = work.appendingPathComponent("waveform.f32")
             _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-i",audio.path,"-vn","-ac","1","-ar","48000","-f","f32le","-"],output:pcm)
             let wave = AudioPresentation.envelope(samples:try AudioPresentation.samples(pcm),sampleRate:48000)
@@ -436,7 +458,7 @@ public enum Media {
     }
     static func validateAudioSamples(_ a: [Float], _ b: [Float], channels: Int, duration: Double) throws -> String {
         guard abs(a.count-b.count) <= 900*channels else { throw JoeyError.failed("Audio duration differs beyond 75ms encoding tolerance") }
-        var minimum = 1.0, comparisons = 0
+        var minimum = 1.0, comparisons = 0, quietComparisons = 0
         // Decoding and resampling can retain packet padding after the cut.
         // Compare every intended sample, including a fractional final window,
         // but never treat padding beyond the planned interval as source audio.
@@ -445,23 +467,54 @@ public enum Media {
         for channel in 0..<channels {
             for start in stride(from:channel,to:count,by:12000*channels) {
                 let end = min(count,start+12000*channels)
-                var aa = 0.0, bb = 0.0, ab = 0.0
-                for i in stride(from:start,to:end,by:channels) { aa += Double(a[i])*Double(a[i]); bb += Double(b[i])*Double(b[i]); ab += Double(a[i])*Double(b[i]) }
-                if aa < 0.000001 {
-                    guard bb < 0.001 else { throw JoeyError.failed("Source silence changed to audible output") }
+                var aa = 0.0, bb = 0.0, ab = 0.0, ee = 0.0, sampleCount = 0
+                for i in stride(from:start,to:end,by:channels) {
+                    let source = Double(a[i]), output = Double(b[i]), difference = source-output
+                    aa += source*source; bb += output*output; ab += source*output; ee += difference*difference
+                    sampleCount += 1
+                }
+                // Reuse the existing one-second silence energy allowance as
+                // a per-channel RMS budget, including fractional final windows.
+                // Quiet acceptance requires both signals and their zero-lag
+                // absolute error to fit; low source energy alone is not enough.
+                let quietBudget = 0.001 * Double(sampleCount) / 12000
+                if aa < quietBudget, bb < quietBudget, ee < quietBudget {
+                    quietComparisons += 1
                 } else {
+                    guard aa != 0 else {
+                        throw JoeyError.failed("Source silence changed beyond the quiet-audio budget at sample \(start): output energy \(bb), limit \(quietBudget)")
+                    }
                     let correlation = ab/sqrt(max(1e-20,aa*bb)), gain = sqrt(bb/aa)
                     guard correlation >= 0.90, gain >= 0.7, gain <= 1.4 else { throw JoeyError.failed("Audio fidelity/sync failed at sample \(start): correlation \(correlation), gain \(gain)") }
                     minimum = min(minimum,correlation); comparisons += 1
                 }
             }
         }
-        return "\(comparisons) channel windows at 12kHz within the planned interval; minimum zero-lag correlation \(minimum); gain 0.7–1.4; silence checked"
+        let relative = comparisons == 0 ? "0 relative-fidelity channel windows"
+            : "\(comparisons) relative-fidelity channel windows; minimum zero-lag correlation \(minimum); gain 0.7–1.4"
+        return "\(relative); \(quietComparisons) quiet channel windows with source, output and zero-lag error energies below sample-scaled budget (0.001 per 12000 channel samples); checked within the planned interval at 12kHz"
     }
     static func sourceTimelineAudio(source: SourceRecord, intervals: [Interval], channels: Int, work: URL) async throws -> [Float] {
+        try Task.checkCancellation()
         let rate = 12_000
         let total = intervals.reduce(0.0) {$0+$1.duration}
-        var samples = [Float](repeating:0,count:Int((total*Double(rate)).rounded())*channels)
+        let expectedCount = Int((total*Double(rate)).rounded())*channels
+        guard expectedCount > 0 else {return []}
+        let nativeRate: Int
+        if let recorded = source.streams.first(where: {$0.codec_type == "audio"})?.sample_rate.flatMap(Int.init), recorded > 0 {
+            nativeRate = recorded
+        } else {
+            let actual = try await probe(URL(fileURLWithPath:source.path))
+            guard let decoded = actual.audio?.sample_rate.flatMap(Int.init), decoded > 0 else {
+                throw JoeyError.failed("Audio source native sample rate is unavailable")
+            }
+            nativeRate = decoded
+        }
+        let nativeCount = Int((total*Double(nativeRate)).rounded())*channels
+        let largestInterval = intervals.map(\.duration).max() ?? 0
+        let intervalCount = Int((largestInterval*Double(nativeRate)).rounded())*channels
+        try Persistence.checkDisk(at:work,requiredBytes:Int64(nativeCount+intervalCount+expectedCount)*4)
+        var samples = [Float](repeating:0,count:nativeCount)
         var outputStart = 0.0
         for interval in intervals {
             try Task.checkCancellation()
@@ -475,8 +528,10 @@ public enum Media {
             // This oracle never resets timestamps, pads, mixes or concatenates
             // streams. Decode PCM with its source PTS, then place every packet
             // on the requested output timeline independently of render filters.
+            // Placement must precede resampling: a resampler carries delayed
+            // samples from the preceding packet across gaps and overlaps.
             let layout = channels == 1 ? "mono" : "stereo"
-            let filter = "[0:a:0]atrim=start=\(interval.start):end=\(interval.end),aresample=\(rate),aformat=sample_fmts=flt:channel_layouts=\(layout),asplit=2[pcm][clock]"
+            let filter = "[0:a:0]atrim=start=\(interval.start):end=\(interval.end),aformat=sample_fmts=flt:channel_layouts=\(layout),asplit=2[pcm][clock]"
             // The text sidecar remains valid with zero frames. Empty NUT
             // containers cannot be probed, so they cannot represent packet gaps.
             _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-y"] + intervalInputs(source:source,intervals:[interval]) +
@@ -486,8 +541,15 @@ public enum Media {
             let decoded: [Float] = rawBytes == 0 ? [] : try AudioPresentation.samples(raw)
             var cursor = 0
             var timebase: Double?
-            let intervalEnd = Int(((outputStart+interval.duration)*Double(rate)).rounded())*channels
+            let intervalEnd = Int(((outputStart+interval.duration)*Double(nativeRate)).rounded())*channels
             try lines(in:timed) {line in
+                try Task.checkCancellation()
+                if line.hasPrefix("#sample_rate 0:") {
+                    guard Int(line.dropFirst(15).trimmingCharacters(in:.whitespaces)) == nativeRate else {
+                        throw JoeyError.failed("Audio source native rate differs from decoded PCM")
+                    }
+                    return
+                }
                 if line.hasPrefix("#tb 0:") {
                     let terms = line.dropFirst(6).trimmingCharacters(in:.whitespaces).split(separator:"/").compactMap {Double($0)}
                     if terms.count == 2,terms[1] > 0 {timebase = terms[0]/terms[1]}
@@ -502,7 +564,7 @@ public enum Media {
                 let pts = ticks*base
                 let count = bytes/4
                 guard cursor+count <= decoded.count else {throw JoeyError.failed("Audio source timeline packet coverage differs from decoded PCM")}
-                let destination = Int(((outputStart+pts-interval.start)*Double(rate)).rounded())*channels
+                let destination = Int(((outputStart+pts-interval.start)*Double(nativeRate)).rounded())*channels
                 let lower = max(0,-destination), upper = min(count,min(samples.count,intervalEnd)-destination)
                 if lower < upper {
                     samples.replaceSubrange((destination+lower)..<(destination+upper),with:decoded[(cursor+lower)..<(cursor+upper)])
@@ -512,16 +574,110 @@ public enum Media {
             guard cursor == decoded.count else {throw JoeyError.failed("Audio source timeline has unaccounted decoded samples")}
             outputStart += interval.duration
         }
-        return samples
+        try Task.checkCancellation()
+        let stem = "qa-source-timeline-"+UUID().uuidString
+        let native = work.appendingPathComponent(stem+"-native.f32"), resampled = work.appendingPathComponent(stem+"-12000.f32")
+        defer {try? FileManager.default.removeItem(at:native);try? FileManager.default.removeItem(at:resampled)}
+        try samples.withUnsafeBufferPointer {try Data(buffer:$0).write(to:native)}
+        _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-y","-f","f32le","-ar",String(nativeRate),
+            "-ac",String(channels),"-i",native.path,"-ar",String(rate),"-ac",String(channels),"-f","f32le",resampled.path])
+        var reference = try AudioPresentation.samples(resampled)
+        // Native and QA sample clocks can round the final duration one frame
+        // apart. Preserve the established requested-timeline sample count.
+        guard abs(reference.count-expectedCount) <= channels else {
+            throw JoeyError.failed("Audio source resampling changed timeline coverage")
+        }
+        if reference.count > expectedCount {reference.removeLast(reference.count-expectedCount)}
+        if reference.count < expectedCount {reference += [Float](repeating:0,count:expectedCount-reference.count)}
+        return reference
+    }
+    private static func sourcePictureFrame(source: SourceRecord, origin: Double, interval: Interval,
+                                           localTime: Double, width: Int, height: Int, comparison: String) async throws -> Data {
+        let work = FileManager.default.temporaryDirectory.appendingPathComponent("joey-picture-clock-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:work,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+        defer {try? FileManager.default.removeItem(at:work)}
+        let pixels = work.appendingPathComponent("frames.gray"), clock = work.appendingPathComponent("frames.framecrc")
+        let sourceTime = interval.start+localTime
+        // Retain the preceding keyframe instead of accurate-seek's first frame
+        // after the requested time. Only original timestamps and pixel fitting
+        // are used here: no fps/setpts, renderer graph, or image-based search.
+        let seek = max(0,sourceTime-1), end = min(interval.end,sourceTime+1.0/30)
+        let maximumFrames = 4096, frameBytes = 160*90
+        let filter = "[0:v:0]trim=start=\(origin+interval.start):end=\(origin+end),scale=\(width):\(height),\(comparison),split[pixels][clock]"
+        _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-threads","1","-filter_complex_threads","1",
+            "-copyts","-noaccurate_seek","-ss",String(seek),"-i",source.path,"-filter_complex",filter,
+            "-map","[pixels]","-an","-c:v","rawvideo","-threads","1","-enc_time_base","demux","-fps_mode","passthrough",
+            "-frames:v",String(maximumFrames),"-f","rawvideo",pixels.path,
+            "-map","[clock]","-an","-c:v","rawvideo","-threads","1","-enc_time_base","demux","-fps_mode","passthrough",
+            "-frames:v",String(maximumFrames),"-f","framecrc",clock.path],timeout:60)
+        let data = try Data(contentsOf:pixels,options:.mappedIfSafe)
+        guard data.count%frameBytes == 0, data.count <= maximumFrames*frameBytes else {
+            throw JoeyError.failed("Source picture timeline frame coverage is invalid")
+        }
+        var timebase: Double?, previous = -Double.infinity
+        var frames = 0, selected: Int?, reachedLaterFrame = false
+        // Round source presentation times to the fixed output grid, with exact
+        // half-frame ties away from zero. When several source frames map to the
+        // same output tick, the last frame wins. A fractional interval offset
+        // may place the requested output time between local ticks; never select
+        // a source frame assigned to a later tick.
+        let target = localTime*30
+        try lines(in:clock) { line in
+            if line.hasPrefix("#tb 0:") {
+                let terms = line.dropFirst(6).trimmingCharacters(in:.whitespaces).split(separator:"/").compactMap {Double($0)}
+                if terms.count == 2,terms[0] > 0,terms[1] > 0 {timebase = terms[0]/terms[1]}
+                return
+            }
+            if line.isEmpty || line.hasPrefix("#") {return}
+            let fields = line.split(separator:",").map {$0.trimmingCharacters(in:.whitespaces)}
+            guard fields.count >= 6, fields[0] == "0", let base = timebase,base.isFinite,base > 0,
+                  let ticks = Double(fields[2]),ticks.isFinite, Int(fields[4]) == frameBytes,
+                  (frames+1)*frameBytes <= data.count else {
+                throw JoeyError.failed("Source picture timeline frame metadata is invalid")
+            }
+            let pts = ticks*base-origin
+            guard pts.isFinite,pts >= previous else {throw JoeyError.failed("Source picture timeline timestamps are not ordered")}
+            previous = pts
+            let outputTick = ((pts-interval.start)*30).rounded(.toNearestOrAwayFromZero)
+            // The numerical allowance is a few floating-point ulps, not a
+            // temporal tolerance or permission to choose an adjacent frame.
+            if outputTick <= target+max(target.ulp,outputTick.ulp)*4 {selected = frames}
+            else {reachedLaterFrame = true}
+            frames += 1
+        }
+        guard frames*frameBytes == data.count, frames < maximumFrames || reachedLaterFrame else {
+            throw JoeyError.failed("Source picture timeline bounded decode did not establish the sampled frame")
+        }
+        if let selected {return data.subdata(in:selected*frameBytes..<(selected+1)*frameBytes)}
+        guard reachedLaterFrame else {throw JoeyError.failed("Source picture timeline has no frame coverage at the requested time")}
+        return Data(repeating:0,count:frameBytes)
     }
     static func validateSourcePictureTiming(output: URL, source: SourceRecord, clip: ClipRecord, profile: SharedProfile, render: RenderReceipt) async throws -> String {
-        let probe = try await probe(URL(fileURLWithPath:source.path))
+        let sourceURL = URL(fileURLWithPath:source.path)
+        let probe = try await probe(sourceURL)
         let origin = Double(probe.format.start_time ?? "") ?? source.streams.compactMap {Double($0.start_time ?? "")}.min() ?? 0
-        let first = (Double(probe.video?.start_time ?? "") ?? origin)-origin
         var offset = 0.0, comparisons = 0
         let width = render.pictureWidth, height = render.pictureHeight
         guard width > 0, height > 0, width <= profile.width, height <= profile.height else {throw JoeyError.failed("Source picture timeline geometry is absent")}
         guard let video = probe.video else {throw JoeyError.failed("Source picture timeline stream is absent")}
+        let cachedVideo = source.streams.first(where: {$0.codec_type == "video"})
+        var videoStart = Double(video.start_time ?? "") ?? Double(cachedVideo?.start_time ?? "") ?? origin
+        var videoDuration = Double(video.duration ?? "") ?? Double(cachedVideo?.duration ?? "")
+        if videoDuration == nil {
+            // Legacy records and containers such as NUT can omit stream spans.
+            // Measure actual packet endpoints with the existing source inspector;
+            // a longer audio/container duration is not the video's ending. Keep
+            // this measured view local rather than rewriting the saved source.
+            let measured = try await sourceTimeline(sourceURL,probe:probe)
+            if let measuredVideo = measured.streams.first(where: {$0.codec_type == "video"}) {
+                videoStart = Double(measuredVideo.start_time ?? "") ?? videoStart
+                videoDuration = Double(measuredVideo.duration ?? "")
+            }
+        }
+        guard let videoDuration,videoDuration.isFinite,videoDuration > 0,videoStart.isFinite else {
+            throw JoeyError.failed("Source picture timeline video extent is unavailable")
+        }
+        let first = videoStart-origin, last = first+videoDuration
         let picture = try fittedPictureDimensions(video,profile:profile)
         guard width == picture.width, height == picture.height else {throw JoeyError.failed("Source picture timeline geometry conflicts with display metadata")}
         var comparison = "scale=160:90,format=gray"
@@ -537,30 +693,36 @@ public enum Media {
             }
         }
         for interval in clip.intervals {
-            // Independent direct seeks catch a reference graph that accidentally
-            // repeats the renderer's timestamp normalization. Compare only the
-            // picture rectangle so black portrait padding cannot hide a shift.
+            // Compare only the picture rectangle so black portrait padding
+            // cannot hide a shift. Source frames are selected independently by
+            // original PTS, not by forward-seek behavior at fractional cuts.
             for fraction in [0.1,0.5,0.9] {
                 let outputTime = floor((offset+interval.duration*fraction)*30)/30
-                let sourceTime = interval.start+outputTime-offset
+                let localTime = outputTime-offset, localTick = localTime*30
                 let actual = try await Processes.run("ffmpeg",["-nostdin","-v","error","-ss",String(outputTime),"-i",output.path,"-frames:v","1",
                     "-vf","crop=\(width):\(height):(iw-\(width))/2:(ih-\(height))/2,\(comparison)","-an","-f","rawvideo","-"])
                 var expected = Data(repeating:0,count:160*90)
-                if sourceTime >= first {
-                    let result = try await Processes.run("ffmpeg",["-nostdin","-v","error","-ss",String(sourceTime),"-i",source.path,"-frames:v","1",
-                        "-vf","scale=\(width):\(height),\(comparison)","-an","-f","rawvideo","-"])
-                    if !result.stdout.isEmpty {expected = result.stdout}
+                // The source's first/end timestamps bound its presence on the
+                // same 30 fps grid. After an early video EOF the canvas remains
+                // black while longer source audio continues; never freeze the
+                // final frame merely because a backward decode can find it.
+                let firstTick = ((first-interval.start)*30).rounded(.toNearestOrAwayFromZero)
+                let lastTick = ((last-interval.start)*30).rounded(.toNearestOrAwayFromZero)
+                let epsilon = max(localTick.ulp,max(firstTick.ulp,lastTick.ulp))*4
+                if localTick+epsilon >= firstTick,localTick+epsilon < lastTick {
+                    expected = try await sourcePictureFrame(source:source,origin:origin,interval:interval,
+                        localTime:localTime,width:width,height:height,comparison:comparison)
                 }
                 guard actual.stdout.count == expected.count else {throw JoeyError.failed("Source picture timeline sample coverage mismatch")}
                 let mean = zip(actual.stdout,expected).reduce(0.0) {$0+abs(Double($1.0)-Double($1.1))}/Double(expected.count)
-                // Independent source seeks can select the neighboring frame at
-                // a fractional cut. This bound allows that single-frame error.
+                // Retain the existing picture-fidelity bound; source PTS must
+                // establish which frame is compared before examining pixels.
                 guard mean <= 16 else {throw JoeyError.failed("Source picture timeline differs at output \(outputTime)s: mean pixel error \(mean)")}
                 comparisons += 1
             }
             offset += interval.duration
         }
-        return "\(comparisons) independent source/output seeks inside the picture rectangle; common file origin and interval positions checked"
+        return "\(comparisons) independent source-PTS/output-frame comparisons inside the picture rectangle; common file origin and interval positions checked"
             + (render.joeBranding == nil ? "" : "; only the approved logo footprint masked during source content; outro checked separately")
     }
     public static func validate(output: URL, source: SourceRecord, clip: ClipRecord, profile: SharedProfile, render: RenderReceipt, work: URL) async throws -> QAReport {

@@ -63,6 +63,18 @@ final class RuntimeTests: XCTestCase {
         try Data("changed".utf8).write(to: path)
         XCTAssertThrowsError(try evidence.validate())
     }
+    func testFileDigestsIncludeEveryChunkAndFinalPartialRead() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:dir)}
+        let path = dir.appendingPathComponent("multi-chunk.bin")
+        try Data(repeating:0xa5,count:2*1024*1024+37).write(to:path)
+        XCTAssertEqual(try Integrity.sha256(path),"1c625488b3f3134828f5e1dc39976e591f6fa0e836d8e3d60c3096fb35627b7d")
+        XCTAssertEqual(try Integrity.md5(path),"53d15327d62df732a4c8f4b1d87c8288")
+        try Data().write(to:path)
+        XCTAssertEqual(try Integrity.sha256(path),"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        XCTAssertEqual(try Integrity.md5(path),"d41d8cd98f00b204e9800998ecf8427e")
+    }
     func testAtomicSaveAndExclusiveLockProtectCheckpoint() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: dir) }

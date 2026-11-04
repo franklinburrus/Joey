@@ -225,6 +225,9 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
                     await self?.receive(job)
                 }
                 receive(result)
+            } catch is CancellationError {
+                // Expected user cancellation. Refresh the saved checkpoint below
+                // without presenting cancellation as an application failure.
             } catch {self.error = error.localizedDescription}
             await refresh()
         }

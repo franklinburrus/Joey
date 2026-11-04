@@ -30,6 +30,30 @@ final class DriveFilingTests: XCTestCase {
         XCTAssertEqual(second.permissionFingerprint,try DriveDelivery.permissionFingerprint(["permissions":FilingProvider.permissions]))
         XCTAssertEqual(provider.permissionMutations,0)
     }
+    func testLegacyMediaReceiptReconcilesCurrentDestinationAndPermissionsWithoutUpload() async throws {
+        let (dir,source,request,route,provider,delivery) = try setup()
+        let file = dir.appendingPathComponent("01_clip.mp4"), id = "legacy_provider_file_123456789"
+        let bytes = try Data(contentsOf:file), hash = try Integrity.sha256(file)
+        provider.files[id] = bytes;provider.names[id] = file.lastPathComponent;provider.parents[id] = FilingProvider.folder
+        let legacy = DriveReceipt(id:id,name:file.lastPathComponent,parent:FilingProvider.folder,bytes:Int64(bytes.count),
+            md5:try Integrity.md5(file),sha256:hash,url:"https://drive.google.com/file/d/"+id+"/view",
+            permissions:["anyone:reader","user:owner"],verifiedAt:Date())
+        var job = JobRecord(id:"legacy-job",request:request);job.source = source;job.folderID = FilingProvider.folder
+        job.clips = [ClipRecord(id:1,title:"Synthetic",intervals:[Interval(0,source.duration)],filename:file.lastPathComponent,
+            bytes:Int64(bytes.count),sha256:hash,qa:QAReport(checkedAt:Date(),checks:[:],outputSHA256:hash,passed:true,limitations:[]),drive:legacy)]
+        XCTAssertNil(legacy.destination);XCTAssertNil(legacy.permissionFingerprint)
+        XCTAssertEqual(job.verifiedDriveClipCount,0,"Legacy receipt counts cannot establish current placement")
+        for _ in 0..<2 {
+            let receipt = try await delivery.upload(file,parent:FilingProvider.folder,destination:route)
+            try Coordinator.acceptDelivery(receipt,for:&job.clips[0])
+            XCTAssertEqual(receipt.id,legacy.id);XCTAssertEqual(receipt.sha256,legacy.sha256)
+            XCTAssertEqual(receipt.destination,route)
+            XCTAssertEqual(receipt.permissionFingerprint,try DriveDelivery.permissionFingerprint(["permissions":FilingProvider.permissions]))
+            XCTAssertEqual(job.verifiedDriveClipCount,1)
+        }
+        XCTAssertEqual(provider.writes,0);XCTAssertEqual(provider.permissionMutations,0)
+        XCTAssertEqual(provider.files,[id:bytes]);XCTAssertEqual(try Data(contentsOf:file),bytes)
+    }
     func testInterruptedCommittedUploadReconcilesWithoutSecondWrite() async throws {
         let (dir,_,_,route,provider,delivery) = try setup()
         provider.loseResponse = true

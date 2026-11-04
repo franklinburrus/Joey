@@ -55,6 +55,7 @@ public actor Coordinator {
                         var current: JobRecord = try Persistence.load(checkpoint)
                         if current.storageRequiredBytes != nil,try Persistence.encoder.encode(current) == Persistence.encoder.encode(job) {
                             current.state = .cancelled;current.storageRequiredBytes = nil
+                            current.stage = "Paused while storage blocked"
                             current.error = "Paused while storage blocked; progress preserved"
                             try Persistence.save(current,to:checkpoint)
                             try await progress(current)
@@ -119,17 +120,20 @@ public actor Coordinator {
                 if job.request != previous {try await save()}
                 try await progress(job); return job
             }
+            job.stage = "capability verification"
             try renewCapabilityEvidence(requireCurrent:true)
             sourceValidationSnapshot = job
             let delivery: any CoordinatorDelivery = try Self.deliveryOverride ?? DriveDelivery(remote:config.rcloneRemote)
             job.error = nil; job.storageRequiredBytes = nil;job.state = .processing; job.stage = "source"; try await save()
             try authorizeNewOperation()
             if job.source == nil, let duration = estimatedDuration ?? request.expectedDuration {
-                let audio = request.productionWorkflow == .taxstoneLibrary
                 guard duration.isFinite,duration > 0,duration < 1_000_000 else {throw JoeyError.invalid("Invalid episode duration for storage admission")}
-                let estimate = try StorageManager.peakBytes(duration:duration,sourceBytes:Int64(duration * (audio ? 192_000 : 1_500_000)),clipDuration:min(duration,request.profile.maxDuration),audio:audio)
-                try Persistence.checkDisk(at:root,requiredBytes:estimate)
-            } else if job.clips.isEmpty || job.clips.contains(where:{$0.qa?.passed != true}) {
+            }
+            // Acquisition adapters admit their own writes after choosing the
+            // actual source. Local/reusable originals need no second download.
+            // Admit all remaining outputs and render scratch after inspection,
+            // when free capacity already accounts for the retained original.
+            if job.clips.isEmpty || job.clips.contains(where:{$0.qa?.passed != true}) {
                 try Persistence.checkDisk(at:root,requiredBytes:128*1024*1024)
             }
             if request.productionWorkflow == .joeBudden, job.source == nil {
@@ -383,7 +387,7 @@ public actor Coordinator {
             if let blocked = error as? StorageBlocked {
                 job.state = .processing;job.stage = "Storage blocked — capacity recheck in 60 seconds"
                 job.storageRequiredBytes = blocked.required
-            }
+            } else {job.storageRequiredBytes = nil}
             job.error = error is CancellationError ? "Cancelled; progress preserved for resume" : error.localizedDescription
             try await save()
             if job.source != nil {_ = try? Records.write(job:job,directory:dir)}
