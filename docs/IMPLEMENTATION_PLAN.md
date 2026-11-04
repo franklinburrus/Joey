@@ -7,6 +7,18 @@
 **Tech Stack:** Swift, SwiftUI, Foundation, CryptoKit, AppKit/CoreGraphics, FFmpeg/FFprobe, existing yt-dlp/rclone/local ASR.
 **Spec:** REQUIREMENTS.md, sole current requirements document.
 
+## Active final integration closeout — 2026-11-03
+
+G0–G5 remain closed. Frank's subsequent directive authorizes only final source-control integration, any necessary native installation, accurate documentation and safe task cleanup. Starting active branch is clean/pushed `codex/functional-completion` at `0ef1171ed6dce0bee8a528cbda8c22539d80d916`; PR #13 is draft/open and mergeable into main `02956bad1a37f29ef2d6af4d81dc8770f412b0e0`. Installed artifact/source inputs already match the core-completion build receipts.
+
+- [x] Read current origin, branch/history, changed/untracked active files, PR head/base/check/protection state, and installed artifact/source binding. Preserve other checkout/worktree contents during classification.
+- [ ] Commit/push the authorized closeout documentation, mark PR #13 ready and merge through the permitted ordinary merge path; read back the merge and closed state.
+- [ ] Synchronize local main with final remote main without reset or loss of unique work. Reuse the installed app only after merged application inputs match its existing binding; otherwise build/install through the established protected procedure.
+- [ ] Remove only demonstrably redundant task branches/worktrees/disposable files; retain unique, unrelated or evidence-bearing material with an explicit reason.
+- [ ] Record actual integration, source/build/install identities, preservation, cleanup disposition and remaining unobserved behavior; commit/push final documentation and confirm a clean synchronized main. Stop.
+
+No tests, new production jobs, optional features, acceptance campaign, protection changes, evidence deletion or manufacture of a clean tree are included. STATUS carries actual progress and the final receipt; this section does not reopen the product roadmap or create a new acceptance gate.
+
 ## Active core app completion roadmap — 2026-11-03
 
 Objective: finish and deliver the existing standalone native macOS application through Frank's fixed G0–G5 roadmap. Required operation is Applications launch, supported link intake and Content/Workflow selections, processing, meaningful progress and cancellation, required Drive outputs/records, a persisted in-app recap with actual results/links, and safe job history/recovery. REQUIREMENTS.md remains the sole product specification.

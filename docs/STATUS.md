@@ -1,4 +1,14 @@
-## Core app completion roadmap — DELIVERED; G0–G5 CLOSED (2026-11-03)
+## Final Git and installation closeout — IN PROGRESS (2026-11-03)
+
+Frank explicitly authorized final commit/push, PR #13 readiness and merge into its verified base main, local main synchronization, necessary native installation and safe removal of demonstrably redundant task leftovers. G0–G5 remain closed. This closeout does not authorize features, another audit/test/QA campaign, new media jobs/provider writes, deferred queue activation, requirements/safeguard changes, force pushes, destructive resets, or deletion of unique work/evidence/runtime/rollback material.
+
+Starting state, freshly read: active source `/Users/frank/Library/Caches/Joey-Native-Build/functional-verification-20261103/source`, origin `https://github.com/franklinburrus/Joey.git`, branch `codex/functional-completion`, clean at pushed `0ef1171ed6dce0bee8a528cbda8c22539d80d916`. PR #13 is open/draft, mergeable and targets main `02956bad1a37f29ef2d6af4d81dc8770f412b0e0`. Its 27 changed source/test/documentation files are the existing authorized implementation; no credentials, production media, models, runtime data or generated build products are included. Main permits merge commits, has no active protection/rules or required status checks, and the PR reports no check runs. Use an ordinary merge commit to preserve the existing history; do not bypass controls.
+
+Fresh artifact binding confirms all 115 recorded build/source/test inputs and all ten installed bundle files match the prior core-completion records. Installed app remains `/Users/frank/Applications/Joey Native.app`, version 1.0 (1), dylib SHA-256 `17429183251d616dae4d1683c9e262398279b4fd7d6232d1a981d79ac1a159f8`. Existing installation/relaunch/preservation/rollback evidence is reusable if merged application inputs stay identical. No rebuild/reinstall is required solely for a merge or documentation commit. Current work: complete Git integration, synchronize main, classify task leftovers without destroying unique work, reconcile actual merge/source/install identities here and in IMPLEMENTATION_PLAN, push final documentation, then perform bounded final-state readback. Do not record merge/cleanup as successful before it happens.
+
+---
+
+## Core app completion roadmap — DELIVERED; G0–G5 CLOSED (2026-11-03; preceding implementation)
 
 Frank's latest directive replaces the earlier audit/acceptance priority with implementation delivery through fixed gates G0–G5. No tests/test creation, additional QA/audit/review campaign, new production job, accepted-media rerender or repeated provider write is authorized. Preserve REQUIREMENTS, automatic runtime validation, existing job states, originals/accepted work, settings/connections and rollback. This existing STATUS and IMPLEMENTATION_PLAN are the only active task records.
 
