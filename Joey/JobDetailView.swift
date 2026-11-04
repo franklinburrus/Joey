@@ -89,6 +89,7 @@ struct JobDetailView: View {
             Text("Source").font(JoeyTheme.font(13,weight:.medium))
             Text(sourceLabel)
                 .font(JoeyTheme.font(12)).textSelection(.enabled).lineLimit(3).id(sourceLabel)
+            LabeledContent("Workflow",value:job.request.mode == .fullShow ? "Clip Entire Show" : "Highlights")
             if let source = job.source {
                 LabeledContent("Duration",value:Duration.seconds(source.duration).formatted(.time(pattern:.hourMinuteSecond)))
                 LabeledContent("Media",value:source.kind == .audio ? "Audio · waveform MP4" : "Native video")
