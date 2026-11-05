@@ -3,6 +3,16 @@ import UniformTypeIdentifiers
 
 private enum JoeyDestination: String, CaseIterable {
     case process = "Process", jobs = "Jobs", shows = "Shows", buffer = "Ready for Buffer"
+    var workspaceNavigationTitle: String {
+        switch self {
+        case .shows: return "Back to Shows"
+        case .buffer: return "Clip List"
+        default: return "Job List"
+        }
+    }
+    var workspaceNavigationAccessibilityLabel: String {
+        self == .shows ? "Return to Shows" : "Show " + workspaceNavigationTitle.lowercased()
+    }
     var symbol: String {
         switch self {case .process: return "record.circle"; case .jobs: return "list.bullet.rectangle"; case .shows: return "mic";case .buffer:return "square.and.arrow.up"}
     }
@@ -13,11 +23,13 @@ struct ContentView: View {
     @StateObject private var buffer: BufferViewModel
     @State private var destination: JoeyDestination = .process
     @State private var selectedID: String?
+    @State private var showingDetail = true
     @State private var intake = false
     @State private var intakeURL = ""
     @State private var intakeContent: LinkContent = .dub
     @State private var settings = false
     @State private var assistant = false
+    @State private var checkpointRecovery = false
     @State private var dropTargeted = false
     @AppStorage("joey.appearance") private var appearance = JoeyAppearance.light.rawValue
     @Environment(\.colorScheme) private var scheme
@@ -31,19 +43,40 @@ struct ContentView: View {
     }
 
     var body: some View {
-        HStack(spacing:0) {
-            sidebar.frame(width:220)
-            Divider()
-            HSplitView {
-                workspace.frame(minWidth:420,maxWidth:.infinity,maxHeight:.infinity)
-                inspector.frame(minWidth:350,idealWidth:400,maxWidth:500,maxHeight:.infinity)
-            }
+        GeometryReader { geometry in
+            // Keep recovery notices and all panes inside the proposed window
+            // viewport. Their intrinsic content must not enlarge its minimum.
+            VStack(spacing:0) {
+                if !model.checkpointFailures.isEmpty {checkpointNotice}
+                // These thresholds come from the pane minimums, not a display's
+                // half-screen size. macOS controls the actual tiled window bounds.
+                if geometry.size.width >= 1100 {
+                    HStack(spacing:0) {
+                        sidebar.frame(width:220)
+                        Divider()
+                        panes
+                    }
+                } else {
+                    VStack(spacing:0) {
+                        compactNavigation(showDetailToggle:geometry.size.width < 900)
+                        Divider()
+                        if geometry.size.width >= 900 {
+                            panes
+                        } else if showingDetail && (selectedJob != nil || destination == .buffer) {
+                            inspector
+                        } else {
+                            workspace
+                        }
+                    }
+                }
+            }.frame(width:geometry.size.width,height:geometry.size.height)
         }
         .font(JoeyTheme.font(16))
         .foregroundStyle(.primary)
         .background(JoeyTheme.background(scheme))
         .tint(JoeyTheme.primary(scheme))
-        .frame(minWidth:1040,minHeight:660)
+        .frame(minWidth:440,minHeight:480)
+        .sheet(isPresented:$checkpointRecovery) {checkpointRecoveryDetails}
         .preferredColorScheme(selectedAppearance.colorScheme)
         .onAppear {selectedAppearance.apply()}
         .onChange(of:appearance) {_,_ in selectedAppearance.apply()}
@@ -56,7 +89,7 @@ struct ContentView: View {
                 HStack {Text("Settings").font(.headline);Spacer();Button("Done") {settings = false}}.padding()
                 Divider()
                 JoeySettingsView(model:model,appearance:$appearance) {id in
-                    selectedID = id;destination = .jobs;settings = false
+                    selectedID = id;destination = .jobs;showingDetail = true;settings = false
                 }
             }.frame(width:680,height:650)
         }
@@ -66,12 +99,74 @@ struct ContentView: View {
         } message: {Text(model.error ?? "")}
     }
 
+    private var checkpointNotice: some View {
+        VStack(alignment:.leading,spacing:8) {
+            Label("History needs recovery",systemImage:"exclamationmark.circle").font(.headline)
+            Text("\(model.checkpointFailures.count) saved checkpoint(s) need repair. Readable history remains available. New jobs wait for identity reconciliation.")
+                .fixedSize(horizontal:false,vertical:true)
+            HStack {
+                Button("Recovery Details") {checkpointRecovery = true}
+                Button("Refresh History") {Task {await model.refresh()}}
+            }.controlSize(.small)
+        }.font(JoeyTheme.font(12)).padding(12).frame(maxWidth:.infinity,alignment:.leading)
+            .background(JoeyTheme.panel(scheme))
+    }
+    private var checkpointRecoveryDetails: some View {
+        VStack(alignment:.leading,spacing:16) {
+            Text("Saved checkpoint recovery").font(.title2)
+            ScrollView {
+                VStack(alignment:.leading,spacing:20) {
+                    ForEach(model.checkpointFailures) {failure in
+                        VStack(alignment:.leading,spacing:8) {
+                            Text(failure.directoryID).font(.headline).textSelection(.enabled)
+                            Text(failure.message).fixedSize(horizontal:false,vertical:true)
+                            Button("Show Folder") {model.revealCheckpoint(failure)}
+                        }
+                    }
+                    if model.checkpointFailures.isEmpty {Text("All saved checkpoints are readable.")}
+                }.frame(maxWidth:.infinity,alignment:.leading)
+            }
+            HStack {
+                Button("Refresh History") {Task {await model.refresh()}}
+                Spacer()
+                Button("Done") {checkpointRecovery = false}.keyboardShortcut(.cancelAction)
+            }
+        }.padding(24).frame(minWidth:360,idealWidth:620,maxWidth:620,minHeight:260,idealHeight:420)
+    }
+
+    private var panes: some View {
+        HSplitView {
+            workspace.frame(minWidth:380,maxWidth:.infinity,maxHeight:.infinity)
+            inspector.frame(minWidth:350,idealWidth:400,maxWidth:500,maxHeight:.infinity)
+        }
+    }
+
+    private func compactNavigation(showDetailToggle: Bool) -> some View {
+        HStack(spacing:12) {
+            Menu {
+                ForEach(JoeyDestination.allCases,id:\.self) {item in
+                    Button(item.rawValue,systemImage:item.symbol) {destination = item;showingDetail = false}
+                }
+                Divider()
+                Button("Settings…") {settings = true}
+                Button("Local Assistant…") {assistant = true}.disabled(working)
+            } label: {Label("Navigate",systemImage:"sidebar.left")}
+                .accessibilityLabel("Navigation and settings")
+            Spacer(minLength:0)
+            if showDetailToggle && (selectedJob != nil || destination == .buffer) {
+                Button(showingDetail ? destination.workspaceNavigationTitle : (destination == .buffer ? "Handoff" : "Job Details"),systemImage:showingDetail ? "list.bullet" : "info.circle") {
+                    showingDetail.toggle()
+                }.accessibilityLabel(showingDetail ? destination.workspaceNavigationAccessibilityLabel : (destination == .buffer ? "Show Buffer handoff" : "Show selected job details"))
+            }
+        }.controlSize(.regular).padding(12)
+    }
+
     private var sidebar: some View {
         VStack(alignment:.leading,spacing:36) {
             Text("Joey").font(JoeyTheme.font(38,weight:.bold)).tracking(-2).padding(.top,24)
             VStack(spacing:8) {
                 ForEach(JoeyDestination.allCases,id:\.self) {item in
-                    Button {destination = item} label: {
+                    Button {destination = item;showingDetail = false} label: {
                         HStack(spacing:12) {
                             Image(systemName:item.symbol).font(.system(size:19)).frame(width:24)
                             Text(item.rawValue).font(JoeyTheme.font(16,weight:.medium)).fixedSize(horizontal:false,vertical:true)
@@ -92,9 +187,9 @@ struct ContentView: View {
             } label: {Label("Settings",systemImage:"gearshape").font(JoeyTheme.font(12))}
                 .menuStyle(.borderlessButton).fixedSize().foregroundStyle(.secondary)
             Label {
-                Text(working ? "Working" : model.error != nil ? "Needs attention" : "Ready")
+                Text(working ? "Working" : model.error != nil || !model.checkpointFailures.isEmpty ? "Needs attention" : "Ready")
             } icon: {
-                Circle().fill(working || model.error != nil ? Color.secondary : JoeyTheme.verified).frame(width:7,height:7)
+                Circle().fill(working || model.error != nil || !model.checkpointFailures.isEmpty ? Color.secondary : JoeyTheme.verified).frame(width:7,height:7)
             }.font(JoeyTheme.font(12)).foregroundStyle(.secondary)
         }.padding(.horizontal,18).padding(.bottom,24)
     }
@@ -120,7 +215,7 @@ struct ContentView: View {
                     } else {
                         LazyVStack(spacing:0) {
                             ForEach(destination == .process ? Array(model.jobs.prefix(8)) : model.jobs) {job in
-                                JobRow(job:job,selected:selectedJob?.id == job.id,isRunning:isRunning(job)) {selectedID = job.id}
+                                JobRow(job:job,selected:selectedJob?.id == job.id,isRunning:isRunning(job)) {selectedID = job.id;showingDetail = true}
                                 Divider()
                             }
                         }
@@ -189,7 +284,8 @@ struct ContentView: View {
         if destination == .buffer {
             BufferHandoffPanel(buffer:buffer,model:model)
         } else if let job = selectedJob {
-            JobDetailView(model:model,job:job,isRunning:isRunning(job),onPrepare:{buffer.episodeID = job.id;destination = .buffer})
+            JobDetailView(model:model,job:job,isRunning:isRunning(job),onPrepare:{buffer.episodeID = job.id;destination = .buffer;showingDetail = false})
+                .id(job.id)
         } else {
             VStack(spacing:16) {
                 Image(systemName:"film.stack").font(.system(size:30,weight:.light))

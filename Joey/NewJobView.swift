@@ -30,7 +30,13 @@ struct NewJobView: View {
         (try? Acquisition.validateOriginalURL(url.trimmingCharacters(in:.whitespacesAndNewlines))) != nil
     }
     private var canStart: Bool {
-        validSourceLink && !model.busy && !model.libraryBusy && !model.preparingSource
+        validSourceLink && model.checkpointFailures.isEmpty && !model.busy && !model.libraryBusy && !model.preparingSource
+    }
+    private var startMessage: String {
+        if !model.checkpointFailures.isEmpty {return "Restore the unreadable checkpoints and Refresh History before starting a new job."}
+        if model.preparingSource {return "Reading source details…"}
+        if model.busy || model.libraryBusy {return "Processing continues in Jobs."}
+        return validSourceLink ? "Selections complete. Source and delivery checks run next." : "Add a valid source link to complete your selections."
     }
     var body: some View {
         ScrollView {
@@ -83,7 +89,7 @@ struct NewJobView: View {
         .background(JoeyTheme.background(scheme)).tint(JoeyTheme.primary(scheme))
         .safeAreaInset(edge:.bottom) {
             HStack(spacing:20) {
-                Text(model.preparingSource ? "Reading source details…" : model.busy || model.libraryBusy ? "Processing continues in Jobs." : validSourceLink ? "Selections complete. Source and delivery checks run next." : "Add a valid source link to complete your selections.")
+                Text(startMessage)
                     .font(JoeyTheme.font(14)).foregroundStyle(canStart ? JoeyTheme.primary(scheme) : .secondary)
                     .frame(maxWidth:.infinity,alignment:.leading)
                 Button("Start Processing",systemImage:"play.fill") {

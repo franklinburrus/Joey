@@ -53,20 +53,47 @@ public struct SurfaceCapability: Codable, Equatable, Sendable {
         self.officialURLs = officialURLs;self.accountEvidence = accountEvidence
     }
     public func validate(now: Date, requireCurrentEvidence: Bool = true) throws {
-        guard ["X", "Instagram"].contains(platform), !account.isEmpty, !surface.isEmpty,
-              (!requireCurrentEvidence || (checkedAt <= now && validUntil > now)), validUntil > checkedAt,
+        let label = ["X", "Instagram"].contains(platform) ? platform : "Platform"
+        let recovery = "Open Production Setup and verify the saved account and upload surface with current official limits and matching account evidence."
+        guard ["X", "Instagram"].contains(platform), !account.isEmpty, !surface.isEmpty else {
+            throw JoeyError.dependency("\(label) account or upload-surface identity is missing or invalid. \(recovery)")
+        }
+        guard validUntil > checkedAt,
               maxDuration.isFinite, maxDuration > 0, maxBytes > 0,
-              maxWidth > 0, maxHeight > 0, maxFPS >= 30, !officialURLs.isEmpty else {
-            throw JoeyError.dependency("Missing or expired \(platform) account/upload-surface capability evidence")
+              maxWidth > 0, maxHeight > 0, maxFPS.isFinite, maxFPS >= 30, !officialURLs.isEmpty else {
+            throw JoeyError.dependency("\(label) capability limits, dates or official sources are invalid. \(recovery)")
+        }
+        if requireCurrentEvidence {
+            if checkedAt > now {
+                throw JoeyError.dependency("\(label) capability checkedAt is in the future (\(ISO8601DateFormatter().string(from:checkedAt))). \(recovery)")
+            }
+            if validUntil <= now {
+                throw JoeyError.dependency("\(label) capability evidence expired at \(ISO8601DateFormatter().string(from:validUntil)). \(recovery)")
+            }
         }
         for raw in officialURLs {
             guard let u = URL(string: raw), u.scheme == "https", let host = u.host,
                   (platform == "X" ? ["help.x.com", "docs.x.com", "developer.x.com", "support.buffer.com"].contains(host)
                     : ["help.instagram.com", "developers.facebook.com", "www.facebook.com", "www.instagram.com", "support.buffer.com"].contains(host)) else {
-                throw JoeyError.invalid("Capability requires official platform or upload-surface sources")
+                throw JoeyError.invalid("\(label) capability requires official platform or upload-surface sources. \(recovery)")
             }
         }
-        if requireCurrentEvidence {try accountEvidence.validate()}
+        if requireCurrentEvidence {
+            guard !accountEvidence.basis.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
+                  accountEvidence.sha256.count == 64 else {
+                throw JoeyError.dependency("\(label) account evidence metadata is missing or invalid. \(recovery)")
+            }
+            let file = URL(fileURLWithPath:accountEvidence.path)
+            guard FileManager.default.fileExists(atPath:file.path) else {
+                throw JoeyError.dependency("\(label) account evidence file is missing. \(recovery)")
+            }
+            let hash: String
+            do {hash = try Integrity.sha256(file)}
+            catch {throw JoeyError.dependency("\(label) account evidence file cannot be read. \(recovery)")}
+            guard hash == accountEvidence.sha256 else {
+                throw JoeyError.dependency("\(label) account evidence SHA-256 changed. \(recovery)")
+            }
+        }
     }
 
     /// Renewable observations are not part of a media job's immutable contract.
@@ -77,6 +104,39 @@ public struct SurfaceCapability: Codable, Equatable, Sendable {
         copy.officialURLs = []
         copy.accountEvidence = EvidenceFile(path:"",sha256:"",basis:"")
         return copy
+    }
+
+    /// A newer observation may establish broader limits while the job keeps
+    /// its original account, surface and conservative technical contract.
+    func renewingEvidence(from proposed: SurfaceCapability, requireCurrentEvidence: Bool) throws -> SurfaceCapability {
+        let label = ["X", "Instagram"].contains(platform) ? platform : "Platform"
+        let requirements = [
+            (platform == proposed.platform, "platform identity differs"),
+            (account == proposed.account, "saved account differs from the configured account"),
+            (surface == proposed.surface, "saved upload surface differs from the configured surface"),
+            (proposed.maxDuration >= maxDuration, "maxDuration requires \(maxDuration) seconds, current limit \(proposed.maxDuration) seconds"),
+            (proposed.maxBytes >= maxBytes, "maxBytes requires \(maxBytes) bytes, current limit \(proposed.maxBytes) bytes"),
+            (proposed.maxWidth >= maxWidth, "maxWidth requires \(maxWidth) pixels, current limit \(proposed.maxWidth) pixels"),
+            (proposed.maxHeight >= maxHeight, "maxHeight requires \(maxHeight) pixels, current limit \(proposed.maxHeight) pixels"),
+            (proposed.maxFPS >= maxFPS, "maxFPS requires \(maxFPS), current limit \(proposed.maxFPS)")
+        ]
+        let conflicts = requirements.filter {!$0.0}.map { $0.1 }
+        guard conflicts.isEmpty else {
+            throw JoeyError.invalid("\(label) capability mismatch. \(conflicts.joined(separator:". ")). Open Production Setup and restore evidence for the saved account, upload surface and required limits. Existing job and accepted clips are preserved.")
+        }
+        if proposed.checkedAt >= checkedAt, proposed != self {
+            do {
+                try proposed.validate(now:Date())
+                var renewed = self
+                renewed.checkedAt = proposed.checkedAt
+                renewed.validUntil = proposed.validUntil
+                renewed.officialURLs = proposed.officialURLs
+                renewed.accountEvidence = proposed.accountEvidence
+                return renewed
+            } catch {if requireCurrentEvidence {throw error}}
+        }
+        try validate(now:Date(),requireCurrentEvidence:requireCurrentEvidence)
+        return self
     }
 }
 
@@ -132,16 +192,24 @@ public struct SharedProfile: Codable, Equatable, Sendable {
     /// Refresh evidence only. A different account, surface or encoding contract
     /// requires an explicit new decision, never a silent resume or rerender.
     func renewingEvidence(from proposed: SharedProfile, requireCurrentEvidence: Bool = true) throws -> SharedProfile {
-        guard identityContract == proposed.identityContract else {
-            throw JoeyError.invalid("Capability renewal changes the saved account, upload surface or technical constraints; existing job preserved")
+        guard width == proposed.width, height == proposed.height, driveOnlyJoe == proposed.driveOnlyJoe else {
+            throw JoeyError.invalid("Saved export profile requires \(width)×\(height) and its original delivery mode. Production Setup selects \(proposed.width)×\(proposed.height) or a different delivery mode. Restore the saved profile before Resume. Existing job and accepted clips are preserved.")
         }
-        if proposed != self, proposed.driveOnlyJoe != true,
-           proposed.x!.checkedAt >= x!.checkedAt, proposed.instagram!.checkedAt >= instagram!.checkedAt {
-            do {try proposed.validate();return proposed}
-            catch {if requireCurrentEvidence {throw error}}
+        if driveOnlyJoe == true {
+            guard identityContract == proposed.identityContract else {
+                throw JoeyError.invalid("Saved Drive-only profile changed. Restore the original Joe Budden Drive-only profile in Production Setup before Resume.")
+            }
+            try validate(requireCurrentEvidence:requireCurrentEvidence)
+            return self
         }
-        try validate(requireCurrentEvidence:requireCurrentEvidence)
-        return self
+        guard let x, let instagram, let proposedX = proposed.x, let proposedInstagram = proposed.instagram else {
+            throw JoeyError.dependency("Saved or configured X/Instagram capability is missing. Open Production Setup and supply current evidence for both saved accounts and upload surfaces.")
+        }
+        var renewed = self
+        renewed.x = try x.renewingEvidence(from:proposedX,requireCurrentEvidence:requireCurrentEvidence)
+        renewed.instagram = try instagram.renewingEvidence(from:proposedInstagram,requireCurrentEvidence:requireCurrentEvidence)
+        try renewed.validate(requireCurrentEvidence:requireCurrentEvidence)
+        return renewed
     }
     public static func select(x: SurfaceCapability, instagram: SurfaceCapability, now: Date = Date()) throws -> SharedProfile {
         for (w,h) in [(1080,1920),(720,1280)] {

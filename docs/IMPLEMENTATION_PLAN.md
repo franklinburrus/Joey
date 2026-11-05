@@ -1,3 +1,17 @@
+## App reliability repair plan — delivered 2026-11-05
+
+Frank approved the five-fix application plan and excluded content. All five implementation items are delivered and verified in the installed native app. Current REQUIREMENTS remain the product authority. The former content-run priority below is historical for this assignment.
+
+1. Completed structured checkpoint inventory, actionable native recovery and identity-safe admission, preserving readable history and damaged files.
+2. Completed lazy artwork resolution and durable artwork validation for required renders, retaining accepted-only audio recovery.
+3. Completed checking/rejected/paused source markers without changing accepted QA, saved errors or checkpoint schema.
+4. Completed content-addressed verified helper upgrades, old/custom helper retention, concurrent/idempotent publication and nonblocking rejection of FIFO helpers.
+5. Completed Back to Shows wording and accessibility destination.
+6. Completed synthetic regression suite, Python checks, native build, whole-change review, protected installation and native readback. Native verification corrected the new recovery notice's minimum-height propagation by keeping it inside the bounded viewport.
+7. Task-owned source/report/checkpoint closeout belongs in the approved local commit. Exact commit and retained unrelated documentation state are read back externally. GitHub push/merge remain separate.
+
+Actual proof and acceptance limits are in the leading STATUS section and the consolidated November 5 audit report. All original retention, account/destination/technical validation, source identity, accepted-stage reuse and delivery safeguards remain binding. No content job, live provider write, publication or permission change is part of this repair task. Actual sleep/wake and broader platform/media acceptance remain separately qualified observations.
+
 # Joey Native Implementation Plan
 
 > Existing implementation roadmap. The active G0–G5 core completion directive below supersedes earlier execution and acceptance priorities. Current progress is recorded in STATUS.md. Older milestones and VERIFICATION.md retain their historical evidence scope; they do not require further test campaigns, production jobs or visual acceptance for this assignment.

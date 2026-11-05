@@ -12,6 +12,27 @@ protocol CoordinatorDelivery: TaxstoneReuseProvider, Sendable {
 }
 extension DriveDelivery: CoordinatorDelivery {}
 
+public struct CheckpointFailure: Identifiable, Sendable {
+    public enum Kind: Sendable {case missing, unreadable, malformed, identityMismatch}
+    public let directoryID: String
+    public let kind: Kind
+    public var id: String {directoryID}
+    public var message: String {
+        let reason: String
+        switch kind {
+        case .missing: reason = "The checkpoint is missing, but saved artifacts remain."
+        case .unreadable: reason = "The checkpoint or its directory cannot be read safely."
+        case .malformed: reason = "The checkpoint could not be decoded."
+        case .identityMismatch: reason = "The saved job identity does not match its directory."
+        }
+        return reason + " Preserve this folder and restore its verified job.json, then Refresh. New jobs wait until identity reconciliation is possible."
+    }
+}
+public struct JobInventory: Sendable {
+    public let jobs: [JobRecord]
+    public let failures: [CheckpointFailure]
+}
+
 public actor Coordinator {
     @TaskLocal static var deliveryOverride: (any CoordinatorDelivery)?
     public let root: URL
@@ -23,12 +44,52 @@ public actor Coordinator {
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
         self.root = try StorageManager.canonicalRoot(root)
     }
-    public func jobs() throws -> [JobRecord] {
-        let dir = root.appendingPathComponent("jobs")
-        guard FileManager.default.fileExists(atPath:dir.path) else {return []}
-        return try FileManager.default.contentsOfDirectory(at:dir,includingPropertiesForKeys:nil).compactMap {
-            try? Persistence.load($0.appendingPathComponent("job.json")) as JobRecord
-        }.sorted {$0.updatedAt > $1.updatedAt}
+    /// Existing callers retain the readable-job array. UI and admission use
+    /// the full inventory so a damaged checkpoint cannot silently disappear.
+    public func jobs() throws -> [JobRecord] {try inventory().jobs}
+    public func inventory() throws -> JobInventory {
+        let directory = root.appendingPathComponent("jobs")
+        guard FileManager.default.fileExists(atPath:directory.path) else {return JobInventory(jobs:[],failures:[])}
+        let properties: Set<URLResourceKey> = [.isDirectoryKey,.isSymbolicLinkKey,.isRegularFileKey]
+        let parent = try directory.resourceValues(forKeys:properties)
+        guard parent.isDirectory == true,parent.isSymbolicLink != true else {
+            throw JoeyError.dependency("The jobs directory cannot be read safely. Restore the existing local jobs directory before processing.")
+        }
+        var readable: [JobRecord] = []
+        var failures: [CheckpointFailure] = []
+        let entries = try FileManager.default.contentsOfDirectory(at:directory,includingPropertiesForKeys:Array(properties),options:.skipsHiddenFiles)
+        for entry in entries.sorted(by:{$0.lastPathComponent < $1.lastPathComponent}) {
+            let id = entry.lastPathComponent
+            do {
+                let values = try entry.resourceValues(forKeys:properties)
+                if values.isSymbolicLink == true {
+                    failures.append(CheckpointFailure(directoryID:id,kind:.unreadable));continue
+                }
+                guard values.isDirectory == true else {continue}
+                let checkpoint = entry.appendingPathComponent("job.json")
+                if !FileManager.default.fileExists(atPath:checkpoint.path) {
+                    if !(try FileManager.default.contentsOfDirectory(at:entry,includingPropertiesForKeys:nil,options:.skipsHiddenFiles)).isEmpty {
+                        failures.append(CheckpointFailure(directoryID:id,kind:.missing))
+                    }
+                    continue
+                }
+                let file = try checkpoint.resourceValues(forKeys:properties)
+                guard file.isRegularFile == true,file.isSymbolicLink != true else {
+                    failures.append(CheckpointFailure(directoryID:id,kind:.unreadable));continue
+                }
+                let job: JobRecord = try Persistence.load(checkpoint)
+                guard job.id == id else {
+                    failures.append(CheckpointFailure(directoryID:id,kind:.identityMismatch));continue
+                }
+                readable.append(job)
+            } catch is DecodingError {
+                failures.append(CheckpointFailure(directoryID:id,kind:.malformed))
+            } catch {
+                failures.append(CheckpointFailure(directoryID:id,kind:.unreadable))
+            }
+        }
+        readable.sort {$0.updatedAt == $1.updatedAt ? $0.id < $1.id : $0.updatedAt > $1.updatedAt}
+        return JobInventory(jobs:readable,failures:failures)
     }
     public func directory(for id: String) -> URL {root.appendingPathComponent("jobs").appendingPathComponent(id)}
     public func run(_ request: JobRequest, estimatedDuration: Double? = nil, progress: @escaping @Sendable (JobRecord) async throws -> Void = {_ in}) async throws -> JobRecord {
@@ -74,11 +135,15 @@ public actor Coordinator {
         // New IDs omit renewable observations. Older IDs remain authoritative:
         // locate their immutable contract and retain their directory/receipts.
         let identity = try supplied.identityData()
-        let checkpoints = try jobs()
+        let inventory = try inventory()
+        let checkpoints = inventory.jobs
         let matches = try checkpoints.filter {try $0.request.identityData() == identity}
         guard matches.count <= 1 else {throw JoeyError.invalid("Multiple checkpoints match this job; reconcile existing identities before resume")}
         if matches.isEmpty,try checkpoints.contains(where:{try $0.request.identityData(ignoringProfile:true) == supplied.identityData(ignoringProfile:true)}) {
             throw JoeyError.invalid("Resume changes the saved account, upload surface or technical constraints; existing job preserved")
+        }
+        guard !matches.isEmpty || inventory.failures.isEmpty else {
+            throw JoeyError.dependency("Unreadable checkpoint identities prevent creating a new job. Restore the reported job.json files and Refresh history. Existing jobs and accepted files are preserved.")
         }
         let id = try matches.first?.id ?? supplied.stableID()
         let dir = directory(for:id), checkpoint = dir.appendingPathComponent("job.json")
@@ -228,18 +293,34 @@ public actor Coordinator {
             }
             var branding: JoeBranding?
             var artwork = request.artwork
-            if source.kind == .audio, artwork == nil {
-                guard request.transcriptPolicy != .modelIndependent else {throw JoeyError.dependency("Model-independent local audio requires supplied approved artwork")}
-                job.stage = "artwork"; try await save()
-                try authorizeNewOperation()
-                artwork = try await delivery.resolveArtwork(source:source,configuration:config,root:dir)
-                try Persistence.save(artwork,to:dir.appendingPathComponent("artwork.json"))
-            }
+            var artworkValidated = false
             var failures: [String] = []
             for index in job.clips.indices {
                 try Task.checkCancellation()
                 let clip = job.clips[index], output = dir.appendingPathComponent(clip.filename)
                 if clip.qa?.passed == true, let sha = clip.sha256, (try? Integrity.sha256(output)) == sha {continue}
+                if source.kind == .audio, !artworkValidated {
+                    job.stage = "artwork"; try await save()
+                    try authorizeNewOperation()
+                    let receipt = dir.appendingPathComponent("artwork.json")
+                    if artwork == nil, FileManager.default.fileExists(atPath:receipt.path) {
+                        do {artwork = try Persistence.load(receipt)}
+                        catch {throw JoeyError.dependency("Saved artwork receipt cannot be read. Restore its verified evidence in the existing job folder before rendering. Accepted clips are retained.")}
+                    }
+                    var resolvedArtwork = false
+                    if artwork == nil {
+                        guard request.transcriptPolicy != .modelIndependent else {throw JoeyError.dependency("Model-independent local audio requires supplied approved artwork")}
+                        artwork = try await delivery.resolveArtwork(source:source,configuration:config,root:dir)
+                        resolvedArtwork = true
+                    }
+                    guard let art = artwork, art.owner == source.owner,
+                          source.owner == .dub ? (art.sourceID == nil || art.sourceID == source.id) : art.sourceID == source.id else {
+                        throw JoeyError.invalid("Saved artwork does not match this creator and episode. Restore the approved artwork evidence before rendering. Accepted clips are retained.")
+                    }
+                    try art.file.validate()
+                    if resolvedArtwork {try Persistence.save(art,to:receipt)}
+                    artworkValidated = true
+                }
                 // Attempt directories fence writers left by abrupt termination;
                 // the native supervisor also terminates orphan process groups.
                 try Persistence.checkDisk(at:root,requiredBytes:StorageManager.peakBytes(duration:clip.expectedDuration,sourceBytes:0,clipDuration:clip.expectedDuration, audio:source.kind == .audio))

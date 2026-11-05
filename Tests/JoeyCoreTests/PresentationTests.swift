@@ -77,6 +77,85 @@ final class PresentationTests: XCTestCase {
         XCTAssertEqual(JobPresentation(job:job).status,"Delivery incomplete")
     }
 
+    func testRejectedSourceMarkersPreserveAcceptedEvidenceAndExactFailure() throws {
+        let cases: [(JobState, String)] = [
+            (.failed, "Synthetic source hash rejection"),
+            (.qaPassed, "Synthetic source duration rejection"),
+            (.filed, "Synthetic source classification rejection")
+        ]
+        for (state, error) in cases {
+            var job = try deliveredJob()
+            job.state = state
+            job.stage = "source"
+            job.error = error
+            let before = try Persistence.encoder.encode(job)
+            let presentation = JobPresentation(job:job)
+            let source = try XCTUnwrap(presentation.stages.first {$0.id == "source"})
+
+            XCTAssertFalse(source.verified)
+            XCTAssertEqual(source.detail,"Verification failed · original evidence retained. Resolve the reported source issue before Resume.")
+            XCTAssertEqual(job.error,error)
+            XCTAssertTrue(presentation.stages.first {$0.id == "qa"}!.verified)
+            XCTAssertEqual(presentation.accepted,job.clips.count)
+            XCTAssertEqual(try Persistence.encoder.encode(job),before,"Presentation must preserve the rejected source, accepted clips, receipts and exact failure")
+        }
+    }
+
+    func testSourceVerificationCheckingAndPauseRemainUnverified() throws {
+        for state in [JobState.processing, .planned, .cancelled] {
+            var job = try deliveredJob()
+            job.state = state
+            job.stage = "source"
+            job.error = "Retained previous-attempt diagnostic"
+            let before = try Persistence.encoder.encode(job)
+            let source = try XCTUnwrap(JobPresentation(job:job).stages.first {$0.id == "source"})
+
+            XCTAssertFalse(source.verified)
+            XCTAssertEqual(source.detail,state == .cancelled ? "Verification paused · original evidence retained" : "Checking original · saved evidence retained")
+            XCTAssertEqual(try Persistence.encoder.encode(job),before)
+        }
+    }
+
+    func testLegacySourceFailureWithoutErrorRemainsUnverified() throws {
+        var job = try deliveredJob()
+        job.state = .failed
+        job.stage = "source"
+        job.error = nil
+        let before = try Persistence.encoder.encode(job)
+        let source = try XCTUnwrap(JobPresentation(job:job).stages.first {$0.id == "source"})
+
+        XCTAssertFalse(source.verified)
+        XCTAssertTrue(source.detail.contains("Verification failed"))
+        XCTAssertEqual(try Persistence.encoder.encode(job),before)
+    }
+
+    func testSavedSourceMarkersRemainVerifiedOutsideCurrentSourceChecks() throws {
+        var job = try deliveredJob()
+        let completedBefore = try Persistence.encoder.encode(job)
+        let completed = JobPresentation(job:job)
+        XCTAssertTrue(completed.completed)
+        XCTAssertTrue(completed.stages.first {$0.id == "source"}!.verified)
+        XCTAssertEqual(completed.stages.first {$0.id == "source"}!.detail,"Verified original")
+        XCTAssertEqual(try Persistence.encoder.encode(job),completedBefore)
+
+        job.state = .failed
+        job.stage = "capability verification"
+        job.error = "Synthetic later-stage failure"
+        let laterFailureBefore = try Persistence.encoder.encode(job)
+        let laterFailure = JobPresentation(job:job)
+        XCTAssertTrue(laterFailure.stages.first {$0.id == "source"}!.verified)
+        XCTAssertEqual(laterFailure.stages.first {$0.id == "source"}!.detail,"Verified original")
+        XCTAssertEqual(try Persistence.encoder.encode(job),laterFailureBefore)
+
+        job.source = nil
+        job.stage = "source"
+        let absentBefore = try Persistence.encoder.encode(job)
+        let absent = try XCTUnwrap(JobPresentation(job:job).stages.first {$0.id == "source"})
+        XCTAssertFalse(absent.verified)
+        XCTAssertEqual(absent.detail,"Pending")
+        XCTAssertEqual(try Persistence.encoder.encode(job),absentBefore)
+    }
+
     private func deliveredJob() throws -> JobRecord {
         var request = try Fixtures.request(dir:FileManager.default.temporaryDirectory,path:"fixture")
         request.owner = .taxstone;request.fileToDrive = true

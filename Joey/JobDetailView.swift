@@ -8,6 +8,9 @@ struct JobDetailView: View {
     let isRunning: Bool
     var onPrepare: (() -> Void)? = nil
     @Environment(\.colorScheme) private var scheme
+    @State private var resumeIssue: String? = "Checking saved requirements…"
+    @State private var productionSetup = false
+    @State private var capabilityDetails: [String] = []
     private var presentation: JobPresentation {JobPresentation(job:job)}
     private var sourceLabel: String {
         job.source.map {URL(fileURLWithPath:$0.path).lastPathComponent} ?? job.request.originalURL ?? job.request.sourceID
@@ -34,8 +37,14 @@ struct JobDetailView: View {
                     Text(job.request.title).font(JoeyTheme.font(16)).textSelection(.enabled).id(job.request.title)
                     Text(presentation.status).font(JoeyTheme.font(12)).foregroundStyle(presentation.completed ? JoeyTheme.verified : .secondary)
                 }
+                if !presentation.completed && !isRunning {
+                    attention
+                    controls
+                } else if isRunning {
+                    controls
+                }
                 JobPreview(url:previewURL,isAudio:job.source?.kind == .audio)
-                    .frame(height:176)
+                    .aspectRatio(16.0 / 9,contentMode:.fit)
                 VStack(alignment:.leading,spacing:10) {
                     Text(presentation.stage).font(JoeyTheme.font(13,weight:.medium))
                     JobProgressView(presentation:presentation,isRunning:isRunning)
@@ -53,21 +62,73 @@ struct JobDetailView: View {
                         }.accessibilityElement(children:.combine)
                     }
                 }
-                if let error = job.error {
-                    VStack(alignment:.leading,spacing:8) {
-                        Label(job.state == .cancelled ? "Progress saved" : "Needs attention",systemImage:"exclamationmark.circle")
-                            .font(JoeyTheme.font(13,weight:.medium))
-                        Text(error).textSelection(.enabled).id(error)
-                        Text(presentation.recovery).foregroundStyle(.secondary)
-                    }.font(JoeyTheme.font(12))
-                }
-                controls
+                if presentation.completed {controls}
                 Divider()
                 metadata
                 Divider()
                 results
             }.padding(24)
         }.background(JoeyTheme.panel(scheme))
+        .task(id:job.id + String(job.updatedAt.timeIntervalSince1970)) {
+            while !Task.isCancelled {
+                checkResume()
+                do {try await Task.sleep(nanoseconds:30_000_000_000)} catch {return}
+            }
+        }
+        .onReceive(model.$configuration) {_ in checkResume()}
+        .onReceive(NotificationCenter.default.publisher(for:NSApplication.didBecomeActiveNotification)) {_ in checkResume()}
+        .sheet(isPresented:$productionSetup,onDismiss:checkResume) {
+            ProductionSetupView(model:model,owner:job.request.owner)
+        }
+    }
+    private func checkResume() {
+        guard !isRunning else {return}
+        resumeIssue = presentation.completed ? nil : model.resumeIssue(for:job)
+        capabilityDetails = presentation.completed ? [] : model.resumeDiagnostics(for:job)
+    }
+    @ViewBuilder private var attention: some View {
+        if let issue = resumeIssue {
+            VStack(alignment:.leading,spacing:10) {
+                Label("Needs attention",systemImage:"exclamationmark.circle")
+                    .font(JoeyTheme.font(13,weight:.medium))
+                Text(issue).textSelection(.enabled).fixedSize(horizontal:false,vertical:true)
+                Text("Accepted clips and saved progress are retained.").foregroundStyle(.secondary)
+                ViewThatFits(in:.horizontal) {
+                    HStack {
+                        Button("Production Setup…") {productionSetup = true}
+                        Button("Check Again",action:checkResume)
+                    }
+                    VStack(alignment:.leading,spacing:8) {
+                        Button("Production Setup…") {productionSetup = true}
+                        Button("Check Again",action:checkResume)
+                    }
+                }
+            }.font(JoeyTheme.font(12)).controlSize(.small)
+        } else if job.error != nil {
+            VStack(alignment:.leading,spacing:8) {
+                Label(job.stage == "capability verification" ? "Requirements ready to recheck" : "Progress saved",systemImage:"info.circle")
+                if job.stage == "capability verification" {
+                    Text("Current evidence supports the saved contract. Resume rechecks the checkpoint and continues missing work.")
+                } else {
+                    Text(job.error ?? "").textSelection(.enabled)
+                    Text(presentation.recovery)
+                }
+            }.font(JoeyTheme.font(12))
+        }
+        if !capabilityDetails.isEmpty {
+            DisclosureGroup("Capability details") {
+                VStack(alignment:.leading,spacing:8) {
+                    ForEach(capabilityDetails,id:\.self) {detail in
+                        Text(detail).textSelection(.enabled).fixedSize(horizontal:false,vertical:true)
+                    }
+                }.padding(.top,8)
+            }.font(JoeyTheme.font(11))
+        }
+        if let error = job.error {
+            DisclosureGroup("Previous attempt diagnostics") {
+                Text(error).textSelection(.enabled).fixedSize(horizontal:false,vertical:true)
+            }.font(JoeyTheme.font(11))
+        }
     }
     private var controls: some View {
         VStack(alignment:.leading,spacing:10) {
@@ -75,12 +136,22 @@ struct JobDetailView: View {
                 Button("Cancel and Save Progress",systemImage:"stop.circle") {model.cancel()}
                     .help("Stops this attempt. Resume reuses accepted clips and saved progress.")
             } else if !presentation.completed {
-                Button("Resume",systemImage:"play") {model.start(job.request)}
-                    .disabled(model.busy || model.libraryBusy || model.preparingSource)
+                Button("Resume",systemImage:"play") {
+                    checkResume()
+                    if resumeIssue == nil {model.resume(job)}
+                }
+                    .disabled(resumeIssue != nil || model.busy || model.libraryBusy || model.preparingSource)
+                    .help(resumeIssue ?? "Rechecks the saved job and reuses accepted clips and verified delivery records.")
             }
-            HStack {
-                Button("Open Clips") {model.openClips(job)}.disabled(presentation.accepted == 0)
-                Button("Report") {model.openReport(job)}.disabled(!model.hasReport(job))
+            ViewThatFits(in:.horizontal) {
+                HStack {
+                    Button("Open Clips") {model.openClips(job)}.disabled(presentation.accepted == 0)
+                    Button("Report") {model.openReport(job)}.disabled(!model.hasReport(job))
+                }
+                VStack(alignment:.leading,spacing:8) {
+                    Button("Open Clips") {model.openClips(job)}.disabled(presentation.accepted == 0)
+                    Button("Report") {model.openReport(job)}.disabled(!model.hasReport(job))
+                }
             }
         }.controlSize(.small)
     }

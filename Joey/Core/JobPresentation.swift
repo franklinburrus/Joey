@@ -13,11 +13,31 @@ struct JobPresentation {
         let detail: String
         let verified: Bool
     }
+    /// Retained source metadata is historical evidence. A current source check
+    /// can be running, paused or rejected without discarding that evidence.
+    private var sourceStage: Stage {
+        guard job.source != nil else {
+            return Stage(id:"source",title:"Source",detail:"Pending",verified:false)
+        }
+        if job.stage == "source" {
+            switch job.state {
+            case .processing, .planned:
+                return Stage(id:"source",title:"Source",detail:"Checking original · saved evidence retained",verified:false)
+            case .cancelled:
+                return Stage(id:"source",title:"Source",detail:"Verification paused · original evidence retained",verified:false)
+            default:
+                if job.state == .failed || job.error != nil {
+                    return Stage(id:"source",title:"Source",detail:"Verification failed · original evidence retained. Resolve the reported source issue before Resume.",verified:false)
+                }
+            }
+        }
+        return Stage(id:"source",title:"Source",detail:"Verified original",verified:true)
+    }
     /// Each stage reports its own saved evidence, not an inferred position in
     /// a linear timeline. Recovery can reuse later work while retrying a stage.
     var stages: [Stage] {
         [
-            Stage(id:"source",title:"Source",detail:job.source == nil ? "Pending" : "Verified original",verified:job.source != nil),
+            sourceStage,
             Stage(id:"transcript",title:"Transcript",detail:job.transcript != nil ? "Source-bound transcript" : job.planningBasis == .deterministicTime ? "Unavailable · time-based planning" : "Pending",verified:job.transcript != nil),
             Stage(id:"planning",title:"Clip plan",detail:total > 0 ? "\(total) clips" : "Pending",verified:total > 0),
             Stage(id:"qa",title:"Automatic QA",detail:"\(accepted)/\(total) passed",verified:total > 0 && accepted == total),

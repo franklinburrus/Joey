@@ -1,3 +1,13 @@
+## App reliability repairs verification — 2026-11-05
+
+The five-fix application plan is installed and verified. Final Swift invocation returned direct exit 0 with 399 executed, 395 passed, four opt-in skips and zero failures in 292.863 seconds. Python returned direct exit 0 with 22 passed. Targeted red/green proofs cover hidden/unknown checkpoint identities, accepted-only audio artwork recovery, source-marker states, helper upgrades and FIFO rejection. Whole-change and final viewport reviews found no remaining material introduced issue.
+
+The final ContentView viewport correction followed the core suite. ContentView is excluded from the Swift Package target, and all compiled core/test inputs remain identical. The existing Xcode project rebuilt successfully with the corrected view. Native fixture proof demonstrates minimum 440 × 512 points and loaded-media Left/Fill/Return/Left frames of 840 × 1050, 1680 × 1050, 1280 × 800 and 840 × 1050 points on the 1680 × 1050-point, 2× display. Recovery details, Refresh, source rejection and Back to Shows were observed using isolated synthetic records and generated media.
+
+Strict signatures, protected installation, running-process identity, source/bundle binding, helper migration, rollback and final runtime readback passed. Installed `/Users/frank/Applications/Joey Native.app` dylib SHA-256 is `7c732c3a856e7854728a580828a0cfed762cb615e316de54542fa25551823189`. Final protected readback retains 31 jobs, 509 accepted outputs, 28 originals and 808 protected identities. Extended checks preserve all 1529 baseline media identities and all 3189 runtime records except the expected verified helper pointer and monitoring timestamp.
+
+Evidence is `/Users/frank/Library/Caches/Joey-Native-Build/app-reliability-20261105`, with final native receipts in viewport-install/. Opt-in live Drive, real-media and installed-assistant cases were skipped. Actual sleep/wake, VoiceOver, additional display scales and platform ingestion remain unverified. Content processing and provider writes were excluded. The prior native-tool locked-Mac diagnosis remains retracted.
+
 ## Native X-to-Drive/records path VERIFIED; visual recap and wider native coverage UNVERIFIED (2026-11-03)
 
 This matrix records Frank's functional-completion task, not backlog recovery or a replacement product specification. Baseline is `02956ba`; selected native acceptance source is Frank-approved `x:broadcast:2rJapEXbVkKRAR`. Prior 294-pass/four-skip evidence establishes only its recorded local scope. Source changes require affected checks to run again; skipped optional assistant tests do not expand this assignment.

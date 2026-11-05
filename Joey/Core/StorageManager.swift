@@ -104,7 +104,7 @@ public final class StorageManager {
     }
     /// Every ancestor is opened without following links. Subsequent file
     /// operations stay relative to this descriptor, never metadata paths.
-    private static func openDirectory(_ url: URL) throws -> Int32 {
+    static func openDirectory(_ url: URL) throws -> Int32 {
         var fd = open("/",O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard fd >= 0 else {throw JoeyError.failed("Cannot open filesystem root")}
         do {

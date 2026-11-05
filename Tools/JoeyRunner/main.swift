@@ -36,8 +36,11 @@ import JoeyCore
                 print("Settings: \(root.appendingPathComponent("settings.json").path)")
                 print("Local ASR: \(config.modelPath == nil ? "missing":"found"); shared profile: \(config.profile == nil ? "requires account evidence":"configured")")
             case .list:
-                let jobs = try await coordinator.jobs()
-                print(String(decoding:try Persistence.encoder.encode(jobs),as:UTF8.self))
+                let inventory = try await coordinator.inventory()
+                print(String(decoding:try Persistence.encoder.encode(inventory.jobs),as:UTF8.self))
+                for failure in inventory.failures {
+                    FileHandle.standardError.write(Data(("Checkpoint " + failure.directoryID + ". " + failure.message + "\n").utf8))
+                }
             case .run:
                 guard let path = invocation.request else {throw JoeyError.invalid("Request path required")}
                 let request: JobRequest = try Persistence.load(path)

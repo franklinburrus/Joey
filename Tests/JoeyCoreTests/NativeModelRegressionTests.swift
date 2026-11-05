@@ -11,6 +11,36 @@ final class NativeModelRegressionTests: XCTestCase {
         return JobModel(root:root,startsAutomatically:false)
     }
 
+    @MainActor func testManualResumePreflightRejectsExpiredEvidenceWithoutStartingOrMutatingCheckpoint() async throws {
+        let model = try model()
+        var request = try Fixtures.request(dir:model.root,path:"unused synthetic source")
+        request.owner = .taxstone
+        request.profile.x!.account = "synthetic-private-account"
+        request.profile.x!.surface = "synthetic-private-surface"
+        request.profile.x!.validUntil = Date().addingTimeInterval(-10)
+        request.profile.x!.checkedAt = Date().addingTimeInterval(-100)
+        request.profile.instagram!.validUntil = Date().addingTimeInterval(-10)
+        request.profile.instagram!.checkedAt = Date().addingTimeInterval(-100)
+        var config = Configuration()
+        config.taxstoneProfile = request.profile
+        try Persistence.save(config,to:model.root.appendingPathComponent("settings.json"))
+        let job = JobRecord(id:try request.stableID(),request:request)
+        let checkpoint = model.root.appendingPathComponent("jobs/\(job.id)/job.json")
+        try Persistence.save(job,to:checkpoint)
+        let before = try Data(contentsOf:checkpoint)
+        let issue = model.resumeIssue(for:job)
+        XCTAssertNotNil(issue)
+        let details = model.resumeDiagnostics(for:job).joined(separator:" ")
+        XCTAssertTrue(details.contains("expires"))
+        XCTAssertFalse(details.contains("synthetic-private-account"))
+        XCTAssertFalse(details.contains("synthetic-private-surface"))
+        XCTAssertFalse(details.contains(model.root.path))
+        XCTAssertEqual(model.resume(job),.unavailable)
+        XCTAssertFalse(model.busy)
+        XCTAssertNil(model.task)
+        XCTAssertEqual(try Data(contentsOf:checkpoint),before)
+    }
+
     @MainActor func testInterleavedJoeTurnsAdvancePastFailuresAcrossReconciliationAndRestart() async throws {
         let model = try model()
         model.libraryBusy = true;model.joeAutomation.enabled = true;model.joeAutomation.afterEpisode = 0

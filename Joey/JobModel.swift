@@ -9,6 +9,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
 
 @MainActor final class JobModel: ObservableObject {
     @Published var jobs: [JobRecord] = []
+    @Published private(set) var checkpointFailures: [CheckpointFailure] = []
     @Published var selected: String?
     @Published var busy = false
     @Published private(set) var cancelling = false
@@ -79,6 +80,10 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         }
     }
     func startLink(_ raw: String, content: LinkContent, mode: JobMode, archive: String, archiveRoot: String, transcript: String) {
+        guard checkpointFailures.isEmpty else {
+            error = "Restore the reported unreadable checkpoints and Refresh history before importing a new job. Existing readable jobs remain available."
+            return
+        }
         guard !cancelling, !busy, !libraryBusy, !preparingSource else {return}
         preparingSource = true;error = nil
         Task {
@@ -211,8 +216,52 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         }
     }
     func refresh() async {
-        do {jobs = try await coordinator?.jobs() ?? []}
-        catch {self.error = error.localizedDescription}
+        guard let coordinator else {jobs = [];checkpointFailures = [];return}
+        do {
+            let inventory = try await coordinator.inventory()
+            jobs = inventory.jobs;checkpointFailures = inventory.failures
+        } catch {self.error = error.localizedDescription}
+    }
+    func revealCheckpoint(_ failure: CheckpointFailure) {
+        NSWorkspace.shared.activateFileViewerSelecting([root.appendingPathComponent("jobs").appendingPathComponent(failure.directoryID)])
+    }
+    /// Read current settings for every manual resume check. The coordinator
+    /// repeats admission under its lock before any processing or provider write.
+    func resumeIssue(for job: JobRecord) -> String? {
+        do {
+            let url = root.appendingPathComponent("settings.json")
+            let config: Configuration = try Persistence.load(url)
+            return config.resumeIssue(for:job.request,sourceKind:job.source?.kind)
+        } catch {
+            return "Saved production settings could not be read. Open Settings and restore the existing verified configuration, then Check Again."
+        }
+    }
+    /// Numeric contract and identity comparisons are safe to display. Raw
+    /// account names, upload-surface text and evidence paths stay out of logs.
+    func resumeDiagnostics(for job: JobRecord) -> [String] {
+        guard let config: Configuration = try? Persistence.load(root.appendingPathComponent("settings.json")),
+              job.request.profile.driveOnlyJoe != true else {return []}
+        let saved = job.request.profile
+        guard let current = job.request.owner == .taxstone ? config.taxstoneProfile : config.profile else {
+            return ["No owner-specific capability profile is configured."]
+        }
+        var details = ["Saved export canvas \(saved.width) × \(saved.height). Configured canvas \(current.width) × \(current.height)."]
+        for (name,old,new) in [("X",saved.x,current.x),("Instagram",saved.instagram,current.instagram)] {
+            guard let old, let new else {details.append("\(name) capability is missing.");continue}
+            details.append("\(name) account \(old.account == new.account ? "matches" : "differs"). Upload surface \(old.surface == new.surface ? "matches" : "differs").")
+            details.append("\(name) evidence expires \(ISO8601DateFormatter().string(from:new.validUntil)).")
+            details.append("\(name) saved/current limits. Duration \(old.maxDuration)/\(new.maxDuration) s. File size \(old.maxBytes)/\(new.maxBytes) bytes. Width \(old.maxWidth)/\(new.maxWidth) px. Height \(old.maxHeight)/\(new.maxHeight) px. Frame rate \(old.maxFPS)/\(new.maxFPS) fps.")
+        }
+        details.append("Broader verified limits renew observations only. The saved export contract and accepted work stay bound to this job.")
+        return details
+    }
+    @discardableResult func resume(_ job: JobRecord) -> JobAcceptance {
+        guard !busy, !libraryBusy, !preparingSource, !cancelling, !automationRunning else {return .deferred}
+        if let issue = resumeIssue(for:job) {
+            error = issue
+            return .unavailable
+        }
+        return start(job.request)
     }
     @discardableResult func start(_ request: JobRequest, automatic: Bool = false) -> JobAcceptance {
         guard !cancelling, !busy, (!libraryBusy || automatic), (!automationRunning || automatic) else {return .deferred}

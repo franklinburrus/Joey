@@ -26,6 +26,67 @@ final class RecoveryRegressionTests: XCTestCase {
         XCTAssertTrue(result.companions.isEmpty)
     }
 
+    func testAcceptedAudioRecoveryDoesNotResolveArtworkOrRerender() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.owner = .taxstone;request.fileToDrive = true
+        var (saved,directory) = try completed(request,root:root)
+        saved.source!.kind = .audio;saved.state = .qaPassed;saved.companions = [:]
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let persisted: JobRecord = try Persistence.load(directory.appendingPathComponent("job.json"))
+        let provider = RecoveryDelivery()
+        let result = try await Coordinator.$deliveryOverride.withValue(provider) {
+            try await Coordinator(root:root).run(request) {job in
+                if job.stage.hasPrefix("render clip") || job.stage.hasPrefix("QA clip") {
+                    XCTFail("Accepted audio must not render or repeat QA")
+                }
+                if job.stage == "Drive folder",job.error == nil {throw CancellationError()}
+            }
+        }
+        XCTAssertEqual(result.stage,"Drive folder",result.error ?? "")
+        XCTAssertEqual(result.state,.cancelled)
+        let artworkCalls = await provider.artworkCalls
+        XCTAssertEqual(artworkCalls,0)
+        XCTAssertEqual(result.clips,persisted.clips)
+        XCTAssertEqual(try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename)),saved.clips[0].sha256)
+    }
+
+    func testRequiredAudioRenderValidatesSavedArtworkAndPreservesAcceptedClips() async throws {
+        for fault in ["none","owner","episode","changed","malformed","missing"] {
+            let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+            var request = try Fixtures.request(dir:root,path:"unused")
+            request.owner = .taxstone;request.fileToDrive = true
+            var (saved,directory) = try completed(request,root:root)
+            saved.source!.kind = .audio;saved.state = .qaPassed;saved.companions = [:]
+            saved.clips.append(ClipRecord(id:2,title:"Pending synthetic",intervals:[Interval(50,100)],filename:"pending.mp4"))
+            let artFile = directory.appendingPathComponent("approved-art.fixture")
+            try Data("Synthetic artwork identity, never decoded by this admission test".utf8).write(to:artFile)
+            var art = Artwork(owner:.taxstone,sourceID:saved.source!.id,driveID:"synthetic-art",file:EvidenceFile(path:artFile.path,sha256:try Integrity.sha256(artFile),basis:"Synthetic admission fixture"))
+            if fault == "owner" {art.owner = .dub}
+            if fault == "episode" {art.sourceID = "other-episode"}
+            let receipt = directory.appendingPathComponent("artwork.json")
+            if fault != "missing" {try Persistence.save(art,to:receipt)}
+            if fault == "malformed" {try Data("{malformed".utf8).write(to:receipt)}
+            if fault == "changed" {try Data("Changed synthetic bytes".utf8).write(to:artFile)}
+            let priorReceipt = try? Data(contentsOf:receipt)
+            try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+            let persisted: JobRecord = try Persistence.load(directory.appendingPathComponent("job.json"))
+            let provider = RecoveryDelivery()
+            let result = try await Coordinator.$deliveryOverride.withValue(provider) {
+                try await Coordinator(root:root).run(request) {job in
+                    if job.stage == "render clip 2",job.error == nil {throw CancellationError()}
+                }
+            }
+            let artworkCalls = await provider.artworkCalls
+            XCTAssertEqual(artworkCalls,fault == "missing" ? 1:0,fault)
+            XCTAssertEqual(result.stage,fault == "none" ? "render clip 2":"artwork",fault)
+            XCTAssertEqual(result.state,fault == "none" ? .cancelled:.failed,fault)
+            XCTAssertEqual(result.clips[0],persisted.clips[0],fault)
+            XCTAssertEqual(try? Data(contentsOf:receipt),priorReceipt,fault)
+            XCTAssertEqual(try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename)),saved.clips[0].sha256)
+        }
+    }
+
     private func workspace() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
@@ -414,6 +475,136 @@ final class RecoveryRegressionTests: XCTestCase {
         let jobs = try await coordinator.jobs()
         XCTAssertEqual(jobs.count,1);XCTAssertEqual(jobs.first?.id,saved.id)
     }
+    func testCapabilityWideningRenewsObservationsWithoutChangingSavedContract() throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.owner = .taxstone
+        request.profile.x!.maxWidth = 1080;request.profile.instagram!.maxWidth = 1080
+        let identity = try request.identityData(), stableID = try request.stableID()
+        var proposed = try renew(request,in:root).profile
+        proposed.x!.maxWidth = 1920;proposed.instagram!.maxWidth = 1920
+        proposed.x!.maxDuration += 10;proposed.instagram!.maxBytes += 1
+        var settings = Configuration();settings.taxstoneProfile = proposed
+        let renewed = try settings.renewingCapabilities(in:request)
+        XCTAssertEqual(try renewed.identityData(),identity)
+        XCTAssertEqual(try renewed.stableID(),stableID)
+        XCTAssertEqual(renewed.profile.x!.maxWidth,request.profile.x!.maxWidth)
+        XCTAssertEqual(renewed.profile.instagram!.maxBytes,request.profile.instagram!.maxBytes)
+        XCTAssertEqual(renewed.profile.x!.accountEvidence,proposed.x!.accountEvidence)
+        XCTAssertEqual(renewed.profile.instagram!.validUntil,proposed.instagram!.validUntil)
+    }
+    func testCapabilityRestrictionReportsExactRequirementWithoutDisclosingAccountOrSurface() throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        let request = try Fixtures.request(dir:root,path:"unused")
+        let renewed = try renew(request,in:root)
+        var proposed = renewed.profile
+        proposed.x!.maxWidth -= 1
+        XCTAssertThrowsError(try request.profile.renewingEvidence(from:proposed)) {error in
+            XCTAssertTrue(error.localizedDescription.contains("maxWidth"),error.localizedDescription)
+            XCTAssertTrue(error.localizedDescription.contains(String(request.profile.x!.maxWidth)),error.localizedDescription)
+            XCTAssertTrue(error.localizedDescription.contains("Production Setup"),error.localizedDescription)
+        }
+        for field in ["platform","account","surface"] {
+            proposed = renewed.profile
+            if field == "platform" {proposed.x!.platform = "DUMMY_SECRET_PLATFORM"}
+            if field == "account" {proposed.x!.account = "DUMMY_SECRET_ACCOUNT"}
+            if field == "surface" {proposed.x!.surface = "DUMMY_SECRET_SURFACE"}
+            XCTAssertThrowsError(try request.profile.renewingEvidence(from:proposed)) {error in
+                XCTAssertTrue(error.localizedDescription.contains(field),error.localizedDescription)
+                XCTAssertFalse(error.localizedDescription.contains("DUMMY_SECRET"),error.localizedDescription)
+            }
+        }
+    }
+    func testWiderConfiguredCapabilityResumesLegacyPartialCheckpointWithoutProviderWork() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused");request.owner = .taxstone
+        request.profile.x!.maxWidth = 1080;request.profile.instagram!.maxWidth = 1080
+        var (saved,directory) = try completed(request,root:root)
+        saved.state = .failed;saved.error = "Previous capability verification failure"
+        saved.clips[0].drive = nil;saved.companions = [:];saved.registerRows = []
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        var proposed = try renew(request,in:root).profile
+        proposed.x!.maxWidth = 1920;proposed.instagram!.maxWidth = 1920
+        var settings = Configuration();settings.taxstoneProfile = proposed
+        try Persistence.save(settings,to:root.appendingPathComponent("settings.json"))
+        let provider = RecoveryDelivery(), coordinator = try Coordinator(root:root)
+        let result = try await Coordinator.$deliveryOverride.withValue(provider) {
+            try await coordinator.run(request) {job in
+                if job.stage == "source",job.state == .processing {throw CancellationError()}
+            }
+        }
+        XCTAssertEqual(result.id,saved.id)
+        XCTAssertEqual(result.state,.cancelled)
+        XCTAssertEqual(try result.request.identityData(),try request.identityData())
+        XCTAssertEqual(result.clips.map(\.sha256),saved.clips.map(\.sha256))
+        XCTAssertEqual(try Persistence.encoder.encode(result.clips.map(\.qa)),try Persistence.encoder.encode(saved.clips.map(\.qa)))
+        XCTAssertEqual(try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename)),saved.clips[0].sha256)
+        let calls = await provider.calls, jobs = try await coordinator.jobs()
+        XCTAssertEqual(calls,0);XCTAssertEqual(jobs.map(\.id),[saved.id])
+    }
+    func testResumeAssessmentRejectsEveryLowerLimitAndCanvasChange() throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        let request = try Fixtures.request(dir:root,path:"unused")
+        let proposed = try renew(request,in:root).profile
+        var variants: [(String,SharedProfile)] = []
+        var next = proposed;next.x!.maxDuration -= 1;variants.append(("maxDuration",next))
+        next = proposed;next.x!.maxBytes -= 1;variants.append(("maxBytes",next))
+        next = proposed;next.x!.maxWidth -= 1;variants.append(("maxWidth",next))
+        next = proposed;next.x!.maxHeight -= 1;variants.append(("maxHeight",next))
+        next = proposed;next.instagram!.maxFPS -= 1;variants.append(("maxFPS",next))
+        next = proposed;next.width = 1080;next.height = 1920;variants.append(("profile",next))
+        for (field,profile) in variants {
+            var settings = Configuration();settings.profile = profile
+            let issue = try XCTUnwrap(settings.resumeIssue(for:request))
+            XCTAssertTrue(issue.contains(field),issue)
+            XCTAssertTrue(issue.contains("Production Setup"),issue)
+        }
+    }
+    func testResumeAssessmentExplainsExpiredMissingAndChangedEvidenceWithoutFilePaths() throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        let request = try Fixtures.request(dir:root,path:"unused")
+        let proposed = try renew(request,in:root).profile
+        var settings = Configuration();settings.profile = proposed
+        XCTAssertNil(settings.resumeIssue(for:request,sourceKind:.nativeVideo))
+        for platform in ["X","Instagram"] {
+            var expired = proposed
+            if platform == "X" {
+                expired.x!.checkedAt = Date().addingTimeInterval(-7200)
+                expired.x!.validUntil = Date().addingTimeInterval(-3600)
+            } else {
+                expired.instagram!.checkedAt = Date().addingTimeInterval(-7200)
+                expired.instagram!.validUntil = Date().addingTimeInterval(-3600)
+            }
+            // The configured observation must be at least as recent as the saved
+            // one, so an expired saved contract cannot fall back to fresh data.
+            var saved = request
+            saved.profile = expired
+            settings.profile = expired
+            let issue = try XCTUnwrap(settings.resumeIssue(for:saved))
+            XCTAssertTrue(issue.contains(platform),issue)
+            XCTAssertTrue(issue.contains("expired at"),issue)
+            XCTAssertTrue(issue.contains("Production Setup"),issue)
+        }
+        var missing = proposed
+        missing.x!.accountEvidence.path = root.appendingPathComponent("DUMMY_SECRET_MISSING_PROOF").path
+        settings.profile = missing
+        var issue = try XCTUnwrap(settings.resumeIssue(for:request))
+        XCTAssertTrue(issue.contains("X account evidence file is missing"),issue)
+        XCTAssertFalse(issue.contains("DUMMY_SECRET"),issue)
+        var changed = proposed
+        changed.x!.accountEvidence.sha256 = String(repeating:"0",count:64)
+        settings.profile = changed
+        issue = try XCTUnwrap(settings.resumeIssue(for:request))
+        XCTAssertTrue(issue.contains("X account evidence SHA-256 changed"),issue)
+        XCTAssertFalse(issue.contains(root.path),issue)
+        let before = try Persistence.encoder.encode(settings)
+        _ = settings.resumeIssue(for:request)
+        XCTAssertEqual(try Persistence.encoder.encode(settings),before)
+        XCTAssertNil(Configuration().resumeIssue(for:request),"Valid saved evidence can be used when no replacement profile is configured")
+        var unsupported = request
+        unsupported.profile.x!.maxWidth = 1080;unsupported.profile.instagram!.maxWidth = 1080
+        XCTAssertTrue(Configuration().resumeIssue(for:unsupported,sourceKind:.nativeVideo)?.contains("1920×1080") == true)
+    }
     func testFreshEvidenceStillRequiredBeforeIncompleteJobCanReachProvider() async throws {
         let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
         var request = try Fixtures.request(dir:root,path:"unused");request.fileToDrive = true
@@ -576,6 +767,7 @@ final class RecoveryRegressionTests: XCTestCase {
 private actor RecoveryDelivery: CoordinatorDelivery {
     var calls = 0
     var downloads = 0
+    var artworkCalls = 0
     var clipCreations = 0
     var clipAttempts = 0
     var committed: [String:DriveReceipt] = [:]
@@ -605,6 +797,7 @@ private actor RecoveryDelivery: CoordinatorDelivery {
         calls += 1;return "synthetic_folder_123456789"
     }
     func resolveArtwork(source: SourceRecord, configuration: Configuration, root: URL) async throws -> Artwork {
+        artworkCalls += 1
         throw JoeyError.failed("Native synthetic checkpoint must not resolve artwork")
     }
     func verifyPackage(job: JobRecord, directory: URL) async throws {
