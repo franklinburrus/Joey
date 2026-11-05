@@ -1,3 +1,15 @@
+## Installed DUB duration selector — 2026-11-05
+
+Frank authorized updating the installed Joey software. This update builds on canonical `92d2381`, not the superseded deferred prototype. Import Link exposes persisted 8/9/10-minute core targets for recognized DUB broadcast full-show links, preserving other imports and existing source contracts. The new regression failed with six assertions when intake ignored the selected target. After implementation, the complete Swift suite executed 423 tests in 300.790 seconds: 416 passed, seven opt-in skips, zero failures, exit 0. All 22 Python tests passed, exit 0. Final native Xcode build and strict deep signature verification passed. Independent read-only review caught and verified the non-broadcast gating repair and required passing-test receipts before installation.
+
+Installed `/Users/frank/Applications/Joey Native.app` at 2026-11-05T23:09:56.772017Z. Final readback at 23:10:53.001381Z verified exact candidate bundle, signature and running PID 20467. Installed `Joey.debug.dylib` SHA-256: `274b679d21d9e05e25870774db43f07056bca32afcf5541829467d4f37350d62`. The prior app remains at `/Users/frank/Applications/Joey Rollbacks/2026-11-05-before-dub-selector/Joey Native.app`.
+
+Readback protected 32 jobs, 509 accepted clips, 28 originals and 813 runtime files. No new job was created. Settings SHA-256 remains `363028f4ea77ab5fad54a70c60429e6cb8fe948654dd555d866e80262e4989d7`. DUB remains paused; Joe, Taxstone and email automation remain disabled. Startup changes were checked semantically: the held CANCELLED DUB entry gained its matching existing CANCELLED job ID, and Joe's read-only monitor timestamp advanced. All other protected content/identities were preserved. The sandboxed AppKit query could not observe the launched app; an authorized unsandboxed exact-bundle query verified it. No process enumeration or GUI-control bypass was used.
+
+Evidence: `/Users/frank/Documents/Codex/2026-11-05/task-2/joey-selector-update/`: `red-behavior.log`, `swift-tests.log`, `python-tests.log`, `native-build-final.log`, `verification.json` (127 input hashes plus bundle/log hashes), `before.json`, `installed.json`, `launch.json`, and `readback.json`.
+
+Limits: no new real broadcast production or social delivery was started; the already delivered November 5 source remains excluded. Native onscreen interaction remains unverified because the known native control surface was not retried. Recorded short-source/final-remainder exceptions remain part of the current planner specification. Buffer derivatives remain a separate authorized Max workflow, not a new Joey publishing control.
+
 ## Dub broadcast ingestion verification — 2026-11-05
 
 ### Scope and authority

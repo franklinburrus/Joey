@@ -161,7 +161,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             cancelling = false
         }
     }
-    func startLink(_ raw: String, content: LinkContent, mode: JobMode, archive: String, archiveRoot: String, transcript: String) {
+    func startLink(_ raw: String, content: LinkContent, mode: JobMode, archive: String, archiveRoot: String, transcript: String, preferredDuration: Double? = nil) {
         guard checkpointFailures.isEmpty else {
             error = "Restore the reported unreadable checkpoints and Refresh history before importing a new job. Existing readable jobs remain available."
             return
@@ -177,14 +177,19 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
                     let sourceID = "x:broadcast:"+canonical.split(separator:"/").last!
                     let existing = jobs.filter {$0.request.owner == .dub && $0.request.sourceID == sourceID && $0.request.mode == .fullShow}
                     guard existing.count <= 1 else {throw JoeyError.dependency("Multiple existing broadcast jobs require identity reconciliation")}
-                    if let prior = existing.first {start(prior.request);return}
+                    if let prior = existing.first {
+                        guard preferredDuration == nil || preferredDuration == (prior.request.preferredDuration ?? 600) else {
+                            throw JoeyError.dependency("This broadcast already has a saved clip-length contract. Open its existing job to resume; a new length cannot replace accepted work.")
+                        }
+                        start(prior.request);return
+                    }
                 }
                 let source: DiscoveredSource
                 if content == .dub,(try? DubBroadcastDiscovery.originalURL(trimmed)) != nil {
                     source = try await DubBroadcastDiscovery.lookup(trimmed).source
                 } else {source = try await SourceDiscovery.lookup(trimmed)}
                 let request = try ProductionIntake.request(source:source,content:content,mode:mode,sharedProfile:content == .taxstone ? configuration?.taxstoneProfile : configuration?.profile,
-                    archive:archive.isEmpty ? nil:archive,archiveRoot:archiveRoot.isEmpty ? nil:archiveRoot,transcript:transcript.isEmpty ? nil:transcript)
+                    archive:archive.isEmpty ? nil:archive,archiveRoot:archiveRoot.isEmpty ? nil:archiveRoot,transcript:transcript.isEmpty ? nil:transcript,preferredDuration:preferredDuration)
                 start(request)
             } catch {self.error = error.localizedDescription}
         }
@@ -400,7 +405,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
                     ($0.request.productionWorkflow == .link || $0.request.productionWorkflow == .joeBudden || $0.request.productionWorkflow == .dubBroadcast) &&
                     $0.request.mode == (work.workflow.content == .joeBudden ? .fullShow:work.workflow.mode) &&
                     $0.request.fixedIntervals == nil && $0.request.requestedCount == nil && $0.request.adExclusions.isEmpty &&
-                    $0.request.preferredDuration == nil && $0.request.transcriptPolicy == nil &&
+                    ($0.request.preferredDuration == nil || $0.request.productionWorkflow == .dubBroadcast) && $0.request.transcriptPolicy == nil &&
                     ($0.request.productionWorkflow == .joeBudden || ($0.request.archiveRootID ?? "") == work.workflow.archiveRoot) &&
                     (work.workflow.content != .joeBudden || $0.request.productionWorkflow == .joeBudden)
                 }

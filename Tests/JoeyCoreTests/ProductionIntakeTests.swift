@@ -2,6 +2,24 @@ import XCTest
 @testable import JoeyCore
 
 final class ProductionIntakeTests: XCTestCase {
+    func testDubSelectedDurationReachesPlanningWithoutSocialCaps() throws {
+        let input = DiscoveredSource(id:"x:broadcast:synthetic123",title:"Fixture",url:"https://x.com/i/broadcasts/synthetic123",duration:4800,channelID:DubBroadcastDiscovery.broadcasterID)
+        for target in [480.0,540,600] {
+            let request = try ProductionIntake.request(source:input,content:.dub,mode:.fullShow,sharedProfile:nil,preferredDuration:target)
+            let restored = try Persistence.decoder.decode(JobRequest.self,from:Persistence.encoder.encode(request))
+            let source = SourceRecord(id:input.id,owner:.dub,title:input.title,path:"fixture",bytes:1,sha256:"fixture",duration:4800,width:1920,height:1080,fps:30,hasAudio:true,kind:.nativeVideo,streams:[],authorizationBasis:"fixture",classificationEvidence:"fixture")
+            let transcript = Transcript(sourceID:source.id,sourceSHA256:source.sha256,duration:4800,engine:"fixture",segments:[TranscriptSegment(start:0,end:4800,text:"Complete program.")])
+            let clips = try Editorial.plan(request:restored,source:source,transcript:transcript,exclusions:[])
+            XCTAssertEqual(clips.first?.expectedDuration,target)
+            XCTAssertTrue(clips.allSatisfy {(480...600).contains($0.expectedDuration)})
+            try Planning.validateCoverage(duration:4800,exclusions:[],clips:clips.map(\.intervals))
+            XCTAssertThrowsError(try BufferPreflight.validateProfile(restored.profile,owner:.dub,workflow:.dubBroadcast))
+        }
+        for invalid in [140.0,601,Double.nan] {
+            XCTAssertThrowsError(try ProductionIntake.request(source:input,content:.dub,mode:.fullShow,sharedProfile:nil,preferredDuration:invalid))
+        }
+        XCTAssertThrowsError(try ProductionIntake.request(source:episode(976),content:.joeBudden,mode:.fullShow,sharedProfile:nil,preferredDuration:480))
+    }
     func episode(_ number: Int) -> DiscoveredSource {
         DiscoveredSource(id:"youtube:abcde\(number)xyz",title:"Joe Budden Podcast Episode \(number) | Example",url:"https://www.youtube.com/watch?v=abcde\(number)xyz",duration:3600,channelID:SourceDiscovery.joeChannelID,episodeNumber:number)
     }

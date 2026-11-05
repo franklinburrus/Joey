@@ -5,16 +5,18 @@ public enum LinkContent: String, Codable, CaseIterable, Sendable {case dub, taxs
 public enum ProductionIntake {
     public static func request(source: DiscoveredSource, content: LinkContent, mode: JobMode,
                                sharedProfile: SharedProfile?, archive: String? = nil,
-                               archiveRoot: String? = nil, transcript: String? = nil) throws -> JobRequest {
+                               archiveRoot: String? = nil, transcript: String? = nil, preferredDuration: Double? = nil) throws -> JobRequest {
         if content == .dub,source.id.hasPrefix("x:broadcast:") {
             guard source.channelID == DubBroadcastDiscovery.broadcasterID,mode == .fullShow else {
                 throw JoeyError.invalid("Dub broadcasts require verified original ownership and Clip Entire Show native masters")
             }
             var request = try DubBroadcastDiscovery.request(DubBroadcast(source:source,broadcasterID:DubBroadcastDiscovery.broadcasterID,startedAt:nil,verifiedAt:Date()))
             request.archiveReference = archive;request.archiveRootID = archiveRoot;request.transcriptPath = transcript
+            request.preferredDuration = preferredDuration
             try request.validate()
             return request
         }
+        guard preferredDuration == nil else {throw JoeyError.invalid("Core clip length selection requires a verified DUB X broadcast and Clip Entire Show")}
         let joe = content == .joeBudden || source.channelID == SourceDiscovery.joeChannelID
         if joe {
             guard content != .taxstone, source.channelID == SourceDiscovery.joeChannelID,

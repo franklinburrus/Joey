@@ -12,6 +12,7 @@ struct NewJobView: View {
     @Environment(\.colorScheme) private var scheme
     @State private var content: LinkContent = .dub
     @State private var mode: JobMode = .fullShow
+    @State private var coreDuration = 600.0
     @State private var url = ""
     @State private var archive = ""
     @State private var archiveRoot = ""
@@ -25,6 +26,9 @@ struct NewJobView: View {
     }
     var productionSetup: ProductionSetupView {
         ProductionSetupView(model:model,owner:content == .taxstone ? .taxstone:.dub)
+    }
+    private var selectsNativeDuration: Bool {
+        content == .dub && mode == .fullShow && (try? DubBroadcastDiscovery.originalURL(url.trimmingCharacters(in:.whitespacesAndNewlines))) != nil
     }
     private var validSourceLink: Bool {
         (try? Acquisition.validateOriginalURL(url.trimmingCharacters(in:.whitespacesAndNewlines))) != nil
@@ -68,8 +72,16 @@ struct NewJobView: View {
                         JoeyChoiceGroup(title:"Workflow",selection:$mode,options:[
                             ("Clip Entire Show",.fullShow),("Highlights",.highlights)
                         ])
-                        Text(mode == .fullShow ? "Clip the complete retained show chronologically, using the verified shared limits." : "One highlight per 15-minute block, including the final partial block. Clip length fits X and Instagram together.")
-                            .font(JoeyTheme.font(14)).foregroundStyle(.secondary)
+                        if selectsNativeDuration {
+                            JoeyChoiceGroup(title:"Core clip length",selection:$coreDuration,options:[
+                                ("8 minutes",480.0),("9 minutes",540.0),("10 minutes",600.0)
+                            ])
+                            Text("For DUB X broadcasts: target source-content length within 8–10 minutes, adjusted at natural boundaries. Native masters go to Drive; shorter Buffer clips are a separate workflow. Existing jobs retain their saved length.")
+                                .font(JoeyTheme.font(14)).foregroundStyle(.secondary)
+                        } else {
+                            Text(mode == .fullShow ? "Clip the complete retained show chronologically, using the verified shared limits." : "One highlight per 15-minute block, including the final partial block. Clip length fits X and Instagram together.")
+                                .font(JoeyTheme.font(14)).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 DisclosureGroup("Advanced Settings",isExpanded:$advanced) {
@@ -93,7 +105,7 @@ struct NewJobView: View {
                     .font(JoeyTheme.font(14)).foregroundStyle(canStart ? JoeyTheme.primary(scheme) : .secondary)
                     .frame(maxWidth:.infinity,alignment:.leading)
                 Button("Start Processing",systemImage:"play.fill") {
-                    model.startLink(url,content:content,mode:mode,archive:archive,archiveRoot:archiveRoot,transcript:transcript)
+                    model.startLink(url,content:content,mode:mode,archive:archive,archiveRoot:archiveRoot,transcript:transcript,preferredDuration:selectsNativeDuration ? coreDuration:nil)
                 }.modifier(JoeyPrimaryButton()).disabled(!canStart)
             }.padding(20).background(JoeyTheme.panel(scheme))
         }
