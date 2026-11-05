@@ -1,5 +1,20 @@
 IMPLEMENT JOEY — CONSOLIDATED REQUIREMENTS
 
+2026-11-05 AUTHORIZED DUB BROADCAST NATIVE-MASTER AMENDMENT
+
+This amendment governs new DUB original X broadcast ingestion and supersedes conflicting shared-social limits for that workflow only. Existing immutable jobs and compatible requirements for Taxstone, Joe Budden and other source workflows remain authoritative. Frank's subsequent spoken correction confirms the simplified creator-based Drive structure in section 11. Core and the former Joey Video Clips/Joey Audio Clips destinations are retired. New native masters use DUB's existing X Video Clips and X Audio Clips roots by inspected original source type. Preserve full originals in their established archives and preserve accepted media and historical evidence.
+
+- Shows provides one primary Check Now action. Only this explicit action discovers additional Dub broadcasts. It reads the existing public website at `https://www.thefileswithdub.com/broadcasts` and visible original-account links at `https://x.com/TheFilesWithDUB` using native WebKit. No heartbeat, launch scan, scheduled discovery, paid API, new hosting, authentication bypass or social publication is authorized.
+- Website catalog entries and visible links are candidates, not a complete or independently verified account inventory. Verify every admitted original broadcast ID, canonical URL, original broadcaster, ended state, replay availability and complete duration through the existing supported X downloader. Verify actual source streams after acquisition. Preserve accurate source and access errors. Explicit original broadcast URLs provide fallback and historical backfill.
+- On the initial website/profile scan, use the latest independently verified broadcast day as the automatic historical boundary. Include all eligible broadcasts from that day forward. Keep that initial boundary fixed on subsequent checks so late discoveries after it remain eligible. Explicit URLs may admit earlier history. Admit verified undated broadcasts without inventing dates and order them after dated items using stable source IDs. Display Date Unknown where necessary.
+- Check Now reconciles the durable queue and automatically starts eligible work. Process one complete broadcast at a time, oldest first by verified date/time, then stable identity. Preserve failed entries and exact errors, continue independent entries, bound transient operations to three attempts, retain cancellation intent, and resume previously authorized interrupted queue work after restart without discovering additional sources.
+- New DUB broadcasts use a distinct `dubBroadcast` workflow and `dubNativeMaster` profile. Both audio and native video cover all retained content with 480–600-second targets, natural boundaries and exact fractional source mappings. Preserve short sources and final remainders with recorded exceptions. Do not omit or repeat speech, stretch playback, invent silence or silently remove uncertain material. A 60-minute source with no boundary adjustments yields six 600-second clips.
+- Buffer/X/Instagram duration capabilities do not govern these Drive-only masters. Preserve the existing native video encoder and source-only proportional fitting at a 1920×1080 output canvas. Preserve original footage/audio/graphics with no new templates, overlays, logos, captions, waveforms or outros. Report effective source picture dimensions accurately. DUB audio retains its approved 1080×1920 composition, source-grounded titles and fixed-position gold waveform driven by the final clip audio. Encoding tolerance is 0.075 seconds, separate from the 600-second planned ceiling. Preserve the existing H.264/yuv420p/progressive/SAR 1:1/30 fps/AAC-LC/faststart integrity contract and 2 GB per-file bound.
+- Reuse source-bound originals, transcripts, accepted clips, archive references, verified uploads and register identities. Inspect known archives before acquisition. Detect existing broadcast packages before new acquisition/rendering. If their independent completion authority cannot be adopted safely, hold the source with exact package identity rather than produce a duplicate. A source explicitly held by Frank remains held through further checks and queue Resume.
+- Deliver the existing episode package, canonical Clip Index CSV, full transcript, clip_manifest.json and RECONCILE.md through the existing Drive adapter and DUB Master Link List schema. Require all applicable QA, retained coverage, exact destination/parent/name/bytes/checksum/access readback, companion evidence and register readback before COMPLETED. Filing failure retains QA_PASSED with its actual error. No routine human media-QA gate applies.
+- Joey's DUB responsibility ends at verified native-master delivery and reconciliation. Max handles separately authorized shorter derivatives and Buffer publishing. Native masters cannot enter Joey's legacy Buffer preflight. Preserve unrelated existing functionality and historical records without silently changing their presentation contracts.
+
+
 Use the attached specification as Joey’s current requirements. First verify that the selected folder contains the existing Joey project and identify its GitHub repository. Reconcile conflicting requirements, then implement and test the changes. Use Swift/SwiftUI and Xcode, with local media processing and optional Xcode Cloud builds. Preserve existing work. Continue through implementation and verification without human QA approval.
 
 The repository is https://github.com/franklinburrus/Joey
@@ -49,7 +64,7 @@ Automatically acquire or import authorized DUB and Taxstone media, plan clips, r
 Native video: cut the original footage into clips without added video templates or branding.
 Audio: render the approved audio artwork/template with a moving soundwave generated from the final clip audio.
 
-Produce ONE shared MP4 per clip satisfying both X and Instagram. There are no separate X and Instagram clip versions, rendering jobs or platform output folders. This applies to native video clips and audio-template MP4s.
+Except for the Drive-only DUB broadcast amendment above and Joe Budden workflow, produce ONE shared MP4 per clip satisfying both X and Instagram. There are no separate X and Instagram clip versions, rendering jobs or platform output folders. This applies to native video clips and audio-template MP4s.
 
 TikTok is eliminated. Keep DUB and Taxstone source identities, artwork, manifests, histories and records separate. Do not schedule or publish social posts.
 
@@ -89,7 +104,7 @@ For full-show jobs:
 - A source shorter than the target becomes one complete clip.
 - Never omit retained content, repeat speech, stretch footage or add silence to force duration.
 
-Verified platform hard limits take priority over preferred duration. Automatically plan shorter shared segments where necessary while preserving required coverage. Do not silently alter an explicitly fixed interval; report the exact conflict if it cannot comply.
+For shared-social workflows, verified platform hard limits take priority over preferred duration. DUB broadcast native masters follow the Drive-only amendment above. Automatically plan shorter shared segments where necessary while preserving required coverage. Do not silently alter an explicitly fixed interval; report the exact conflict if it cannot comply.
 
 Each retained source interval appears exactly once within a documented, tested encoding tolerance. Store exact source/output interval mappings, including multiple intervals when an ad exclusion occurs within a clip.
 
@@ -116,7 +131,7 @@ Add no video template, artwork panel, logo, waveform, title overlay, speech capt
 
 9. AUDIO PRESENTATION
 
-Audio sources produce a shared social-ready MP4 using the correct approved presentation. Preserve the original recording in its existing archive.
+DUB broadcast audio follows the native-master amendment above. Other audio sources produce a shared social-ready MP4 using the correct approved presentation. Preserve the original recording in its existing archive.
 
 DUB audio:
 - Use the approved artwork and reference composition, including its existing branding.

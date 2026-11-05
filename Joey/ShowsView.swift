@@ -3,7 +3,9 @@ import SwiftUI
 struct ShowsView: View {
     @ObservedObject var model: JobModel
     var useEpisode: (String) -> Void
+    var inspectEpisode: (String) -> Void
     @State private var taxstone = false
+    @State private var dubURLs = ""
     @Environment(\.colorScheme) private var scheme
     private var library: TaxstoneLibraryState {model.taxstoneLibrary}
     private var currentEpisode: TaxstoneLibraryEpisode? {
@@ -14,6 +16,7 @@ struct ShowsView: View {
         ScrollView {
             VStack(alignment:.leading,spacing:24) {
                 Text("Shows").font(JoeyTheme.font(24,weight:.medium))
+                dubCard
                 taxstoneCard
                 joeCard
             }.padding(28)
@@ -24,6 +27,62 @@ struct ShowsView: View {
                 Divider()
                 TaxstoneLibraryView(model:model)
             }.frame(width:760,height:680)
+        }
+    }
+
+    private var dubCard: some View {
+        JoeyPanel {
+            HStack(alignment:.top) {
+                Text("Dub Broadcasts").font(JoeyTheme.font(20,weight:.medium))
+                Spacer()
+                Button(model.scanningDub ? "Checking…" : "Check Now") {
+                    model.checkDubBroadcasts(dubURLs.components(separatedBy:.whitespacesAndNewlines))
+                }.modifier(JoeyPrimaryButton()).disabled(model.scanningDub || model.cancelling)
+            }
+            Text(model.dubBroadcasts.discoveryStatus ?? "Check Now scans DUB’s website and visible original X profile for broadcasts, then verifies original replay identity and completeness.").font(JoeyTheme.font(14)).foregroundStyle(.secondary).textSelection(.enabled)
+            if let checked = model.dubBroadcasts.lastCheckedAt {
+                Text("Last discovery check "+checked.formatted()).font(JoeyTheme.font(14))
+            } else {Text("No discovery check yet").foregroundStyle(.secondary)}
+            Text(model.scanningDub ? "Verifying original replays…" : model.dubRunning ? "Processing saved queue" : model.dubBroadcasts.paused ? "Paused; saved work retained" : "Ready for manual Check Now")
+            HStack(alignment:.top,spacing:12) {
+                count("New",value:model.dubBroadcasts.newCount)
+                count("Queued",value:model.dubBroadcasts.entries.filter {$0.state == .planned}.count)
+                count("Completed",value:model.dubBroadcasts.entries.filter {$0.state == .completed}.count)
+                count("Needs attention",value:model.dubBroadcasts.entries.filter {$0.error != nil}.count)
+            }
+            DisclosureGroup("Original broadcast URLs / historical backfill") {
+                VStack(alignment:.leading,spacing:8) {
+                    Text("One original URL per line. Optional fallback. Check Now verifies these original URLs as explicit historical backfill alongside website/profile discovery.")
+                        .font(JoeyTheme.font(14)).foregroundStyle(.secondary)
+                    TextEditor(text:$dubURLs).font(.body).frame(minHeight:72,maxHeight:140)
+                        .accessibilityLabel("Original Dub broadcast URLs")
+                }
+            }
+            if let error = model.dubQueueError ?? model.dubBroadcasts.lastError {errorMessage(error)}
+            if model.dubRunning || model.scanningDub {
+                Button(model.scanningDub ? "Cancel Check" : "Pause",systemImage:"pause.fill") {model.pauseDubBroadcasts()}.disabled(model.cancelling)
+            } else if model.dubBroadcasts.entries.contains(where:{$0.state != .completed}) {
+                Button("Resume Saved Queue",systemImage:"play.fill") {model.resumeDubBroadcasts(retry:true)}
+                    .disabled(model.busy || model.libraryBusy || model.cancelling || model.preparingSource)
+            }
+            ForEach(model.dubBroadcasts.entries) {entry in
+                VStack(alignment:.leading,spacing:6) {
+                    Text(entry.broadcast.source.title).font(JoeyTheme.font(18,weight:.medium)).textSelection(.enabled)
+                    Text((entry.broadcast.source.episodeDate ?? "Date Unknown")+" · "+entry.state.rawValue)
+                        .font(JoeyTheme.font(14)).foregroundStyle(.secondary)
+                    if let job = model.jobs.first(where:{$0.id == entry.jobID || $0.request.sourceID == entry.id}) {
+                        Text(job.stage+" · \(job.clips.filter {$0.qa?.passed == true}.count) / \(job.clips.count) native clips passed QA · \(job.clips.filter {$0.drive != nil}.count) filed")
+                            .font(JoeyTheme.font(14)).textSelection(.enabled)
+                        Button("Inspect Episode Results") {inspectEpisode(job.id)}
+                        if let folder = job.folderID,job.state == .completed {
+                            Link("Verified Drive Results",destination:URL(string:"https://drive.google.com/drive/folders/"+folder)!)
+                        }
+                    }
+                    if let error = entry.error {errorMessage(error)}
+                }.padding(.vertical,8)
+            }
+            Text("Complete broadcasts become 8–10-minute native masters, including short-source and final-remainder exceptions. Drive-only delivery. Restart resumes authorized interrupted work without discovering additional broadcasts.")
+                .font(JoeyTheme.font(14)).foregroundStyle(.secondary)
         }
     }
 

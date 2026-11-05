@@ -198,7 +198,9 @@ struct ContentView: View {
         if destination == .buffer {
             BufferReadyView(buffer:buffer,model:model)
         } else if destination == .shows {
-            ShowsView(model:model) {url in openIntake(url,content:.joeBudden)}
+            ShowsView(model:model,useEpisode:{url in openIntake(url,content:.joeBudden)},inspectEpisode:{id in
+                selectedID = id;destination = .jobs;showingDetail = true
+            })
         } else {
             ScrollView {
                 VStack(alignment:.leading,spacing:28) {

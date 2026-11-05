@@ -1,11 +1,11 @@
 import Foundation
 
 public enum Acquisition {
-    static func metadataArguments(for url: URL) -> [String] {
-        ["--ignore-config","--no-playlist","--skip-download","--dump-single-json",url.absoluteString]
+    static func metadataArguments(for url: URL, nativeMaster: Bool = false) -> [String] {
+        (nativeMaster ? ["--retries","0","--extractor-retries","0"]:[]) + ["--ignore-config","--no-playlist","--skip-download","--dump-single-json",url.absoluteString]
     }
-    static func downloadArguments(for url: URL, directory: URL) -> [String] {
-        ["--ignore-config","--no-playlist","--continue","--no-overwrites","--retries","3","--fragment-retries","3",
+    static func downloadArguments(for url: URL, directory: URL, nativeMaster: Bool = false) -> [String] {
+        (nativeMaster ? ["--extractor-retries","0"]:[]) + ["--ignore-config","--no-playlist","--continue","--no-overwrites","--retries",nativeMaster ? "0":"3","--fragment-retries",nativeMaster ? "0":"3",
          "--abort-on-unavailable-fragments","--write-info-json","--merge-output-format","mp4","-o",directory.appendingPathComponent("original.%(ext)s").path,url.absoluteString]
     }
     static func sourceMetadata(_ data: Data, request: JobRequest,
@@ -128,13 +128,13 @@ public enum Acquisition {
         if let original = try await completedOriginal(request,directory:directory) {return original}
         let metadataURL = directory.appendingPathComponent("acquisition.json")
         let metadata = try await Processes.retry {
-            try await Processes.run("yt-dlp",metadataArguments(for:url))
+            try await Processes.run("yt-dlp",metadataArguments(for:url,nativeMaster:request.productionWorkflow == .dubBroadcast))
         }
         let expected = try await sourceMetadata(metadata.stdout,request:request).duration
         try metadata.stdout.write(to: metadataURL, options:.atomic)
         try Persistence.checkDisk(at:directory,requiredBytes:Int64(expected*1_500_000))
         _ = try await Processes.retry {
-            try await Processes.run("yt-dlp",downloadArguments(for:url,directory:directory))
+            try await Processes.run("yt-dlp",downloadArguments(for:url,directory:directory,nativeMaster:request.productionWorkflow == .dubBroadcast))
         }
         let files = try FileManager.default.contentsOfDirectory(at:directory,includingPropertiesForKeys:nil)
             .filter { $0.deletingPathExtension().lastPathComponent == "original" && ["mp4","mkv","webm","m4a","mp3","opus"].contains($0.pathExtension) }

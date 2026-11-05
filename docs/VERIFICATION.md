@@ -1,3 +1,86 @@
+## Dub broadcast ingestion verification — 2026-11-05
+
+### Scope and authority
+
+Frank authorized native implementation, tests, documentation, commit and push for manual Dub Check Now ingestion. His later spoken correction retains the simplified creator-based Drive roots and retires Core/Joey folders. He also confirmed the November 5 reference was already clipped and delivered, excluding further production of that broadcast. New code and source acceptance are separate from its existing external delivery. Existing historical evidence below remains scoped to its recorded inputs.
+
+### Implementation and independent review
+
+The existing SwiftUI application, Xcode scheme, coordinator, source/downloader/transcript adapters, presentation/QA engine and Drive/register reconciliation remain the execution path. Added native WebKit website/profile discovery, original-broadcaster evidence, persistent oldest-first queue, explicit historical backfill and a distinct DUB native-master profile. No Dub launch scan or heartbeat is present. Link/email intake reuses matching saved full-show contracts, while coordinator admission prevents duplicate native source jobs under its existing lock.
+
+Independent read-only reviews identified and verified fixes for mutable-index dispatch during discovery, dispatch before discovery sorting, missing completed-checkpoint authority, navigation/output wording, nested downloader retries, Pause racing outstanding discovery, silent undated-source omission, external-package detection on source-present resumes and duplicate requests from changed provider metadata. Reproducing regressions failed before the corresponding repairs and passed afterward. Required failed stages retain exact errors and accepted media. No routine human media-QA gate was added.
+
+### Executed evidence
+
+| Check | Actual result |
+| --- | --- |
+| Opening repository/origin/fetch/scheme | Clean main at `e7d974990a5e905df25f0287d3e0e059d02c6ccc`, matching fetched origin/main. Existing Joey project/target/scheme verified. Work uses `codex/dub-broadcast-ingestion`. |
+| Earlier complete Swift suite | Direct exit 0. 418 executed, 412 passed, six opt-in skips, zero failures. 301.444 seconds. This precedes the final source-present/changed-metadata repairs and final renderer tests. |
+| Final affected suite | Direct exit 0. 65 executed, 63 passed, two opt-in skips, zero failures. 5.495 seconds. Includes the final two independent-review repairs, email intake and recovery. |
+| Final complete Swift suite | Direct exit 0. 422 executed, 415 passed, seven opt-in skips, zero failures. 305.511 seconds. |
+| Python tests | Direct exit 0. 22 passed, zero failures. |
+| Existing native Xcode project | Direct exit 0. BUILD SUCCEEDED after the final product-code changes. Strict deep candidate signature verification returned exit 0. |
+| Native website/profile discovery | Direct exit 0. One opt-in live test passed in 3.660 seconds. Native WebKit returned 46 canonical candidate broadcast URLs, including the reference. No production dispatch was authorized by this read-only test. |
+| Original replay identity and current Drive/register readback | Direct exit 0. One live test passed in 6.710 seconds. The original broadcast and linked original post verify account ID `1633447924565680129` as TheFilesWithDUB. Current creator-based roots, exact existing package and 13 register rows were read. |
+| Native video profile | Direct exit 0. A two-second synthetic short source rendered at 1920×1080, retained its actual 128×72 picture, passed applicable media QA and required neither social evidence nor Joe branding. This is an engine fixture, not real-video production acceptance. |
+| Native DUB audio profile | Direct exit 0. One actual existing DUB audio excerpt passed fresh 1080×1920 native-master rendering and QA in 9.443 seconds. Checks include decode, approved artwork/layout, gold waveform/envelope/pixels, audio fidelity/sync, intervals, technical properties and faststart. The 15-second local renderer acceptance is separate from full-broadcast production. |
+| Source/queue/coverage/recovery regressions | Tests cover Check Now automatic dispatch, original ownership/replay rejection, first-day historical boundary, dated/undated ordering, persistence, exclusive ownership, repeated checks, concurrent discovery identity, cancellation, failure continuation, missing completed authority, 60-/90-minute audio/video coverage, short sources/final remainders, fractional ad mappings, Buffer independence and duplicate source admission. Existing recovery/filing/register suites cover accepted-stage reuse, interrupted downloads, uncertain uploads and idempotent rows. |
+| Native visual preview | The isolated Shows fixture compiled and launched with its own cache runtime and inactive production controls. Native computer control returned a locked/unlock failure, so no onscreen visual result was established. The fixture was terminated. This is a control-tool limitation, not a confirmed physical-lock diagnosis or a new production gate. |
+
+### Existing November 5 delivery and cancelled attempt
+
+A new reference acquisition was started before Frank clarified its existing delivery. It was stopped before any clip, archive upload, package upload or register write. Its one new job is CANCELLED, the Dub queue is paused, and the source-specific user hold prevents Check Now/Resume from restarting it. No existing job or accepted media was replaced. The complete downloaded original is preserved locally at `jobs/dub-2ded57b978f7432e5c9d2141/original.mp4`, 6,250,340,031 bytes. SHA-256 `ab3c479b74c62b71f51bf7cc996b300d098e1038859054363356d51298f420be` matches the existing external package's source identity.
+
+Read-only verification found existing package `1wO4uGVXAs7fU-_f6kKc3JkMAoIeRq3Mx` under the retained X Video Clips/Dub branch. All 13 clip IDs, names, byte sizes and Drive server SHA-256 values match its manifest. Manifest intervals reconcile 7,231.333333 seconds chronologically, with all 13 clip durations between 480 and 600 seconds. Thirteen matching Master Library rows were read back. Existing permissions were fingerprinted and preserved. No register write occurred during this assignment.
+
+That external package contains 13 MP4s, clip_manifest.json and source-reference.txt. It does not contain Joey's canonical Clip Index CSV/full-transcript/RECONCILE companion set. Its delivery evidence is preserved. It is not promoted to a new Joey COMPLETED checkpoint. Frank excluded further production of this source. A fresh new native queue job through complete transcription/planning/QA/filing/companions/register readback remains unverified until an eligible source is processed. Onscreen native Shows review also remains unverified. The candidate was built, while the installed application was preserved.
+
+### Commands and evidence
+
+Every executable ran through the repository's minimal-environment launcher. Exact commands, with direct exit status recorded in the corresponding logs, are below.
+
+```sh
+python3 Tools/run-local.py /usr/bin/env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /usr/bin/swift test --scratch-path /Users/frank/Library/Caches/Joey-Native-Build/dub-ingestion-20261105/spm --jobs 2
+python3 Tools/run-local.py /usr/bin/env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /usr/bin/xcodebuild -project Joey.xcodeproj -scheme Joey -configuration Debug -destination platform=macOS -derivedDataPath /Users/frank/Library/Caches/Joey-Native-Build/dub-ingestion-20261105/DerivedData -jobs 2 CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual build
+python3 Tools/run-local.py /usr/bin/python3 -m unittest discover -s Tests -p 'test_*.py'
+```
+
+Live opt-in runs used the same Swift command and `JOEY_REAL_MEDIA_INPUTS` pointing to the local discovery-input.json, readback-input.json or audio-readback-input.json, with the corresponding DubLiveAcceptanceTests method filter. The ordinary suite skips these calls. A normal HTTP client received website HTTP 403, while the site's existing public browser-rendered catalog and original X profile were readable through native WebKit. No client spoofing, desktop credential extraction or challenge bypass was implemented.
+
+The initial audio readback correctly rejected an older 720×1280 accepted fixture against the new 1080×1920 contract. A fresh isolated 1080×1920 render then passed. Old bytes and evidence remain. The isolated UI fixture's first compiler invocation selected CommandLineTools and lacked SwiftUIMacros. Selecting the installed Xcode toolchain corrected the fixture build. These failures did not alter the production export requirements.
+
+Detailed logs, source-input hashes, queue cancellation/preservation evidence, live candidate URLs, metadata/server-hash/register readback, real audio QA, native build and isolated preview are retained outside Git at `/Users/frank/Library/Caches/Joey-Native-Build/dub-ingestion-20261105`. Publication readback records the final commit and remote branch identity in publication.json. Production media, transcripts, credentials and runtime data remain outside Git.
+
+### Changed files
+
+- `Joey/ContentView.swift`
+- `Joey/Core/Acquisition.swift`
+- `Joey/Core/BufferPreflight.swift`
+- `Joey/Core/Configuration.swift`
+- `Joey/Core/Coordinator.swift`
+- `Joey/Core/Delivery.swift`
+- `Joey/Core/Domain.swift`
+- `Joey/Core/DubBroadcasts.swift`
+- `Joey/Core/DubWebsiteDiscovery.swift`
+- `Joey/Core/DurationPolicy.swift`
+- `Joey/Core/ProductionIntake.swift`
+- `Joey/Core/Records.swift`
+- `Joey/JobDetailView.swift`
+- `Joey/JobModel.swift`
+- `Joey/ShowsView.swift`
+- `Tests/JoeyCoreTests/DubBroadcastTests.swift`
+- `Tests/JoeyCoreTests/DubExistingDeliveryTests.swift`
+- `Tests/JoeyCoreTests/DubLiveAcceptanceTests.swift`
+- `Tests/JoeyCoreTests/DubModelTests.swift`
+- `Tests/JoeyCoreTests/DubWebsiteDiscoveryTests.swift`
+- `docs/BUFFER_HANDOFF.md`
+- `docs/IMPLEMENTATION_PLAN.md`
+- `docs/LOCAL_HELPERS.md`
+- `docs/OPERATING_GUIDE.md`
+- `docs/REQUIREMENTS.md`
+- `docs/STATUS.md`
+- `docs/VERIFICATION.md`
+
 ## Publication and installation binding — 2026-11-05
 
 Fresh closeout verification matches 100 source/test files and all ten installed bundle files to the final app-reliability viewport build. Strict deep signature returned direct exit 0. The installed app already contains the final reviewed source. This documentation-only closeout reuses that verified installation and its rollback receipts. Existing test results remain bound to their recorded inputs and are not claimed as a new test run.

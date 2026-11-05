@@ -17,7 +17,7 @@ public struct Configuration: Codable, Sendable {
     public var automaticCleanup: Bool?
     func renewingCapabilities(in request: JobRequest, requireCurrentEvidence: Bool = true) throws -> JobRequest {
         var renewed = request
-        if request.profile.driveOnlyJoe != true,
+        if !request.profile.isDriveOnly,
            let configured = request.owner == .taxstone ? taxstoneProfile : profile {
             renewed.profile = try request.profile.renewingEvidence(from:configured,requireCurrentEvidence:requireCurrentEvidence)
         }

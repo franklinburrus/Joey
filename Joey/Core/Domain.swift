@@ -12,7 +12,7 @@ public enum MediaKind: String, Codable, Sendable { case nativeVideo, audio }
 public enum JobMode: String, Codable, CaseIterable, Sendable { case fullShow, highlights }
 public enum TranscriptPolicy: String, Codable, Sendable { case assisted, modelIndependent }
 public enum PlanningBasis: String, Codable, Sendable { case transcriptAssisted, deterministicTime }
-public enum ProductionWorkflow: String, Codable, Sendable { case link, joeBudden, taxstoneLibrary }
+public enum ProductionWorkflow: String, Codable, Sendable { case link, joeBudden, taxstoneLibrary, dubBroadcast }
 public enum JobState: String, Codable, Sendable {
     case planned = "PLANNED", processing = "PROCESSING", qaPassed = "QA_PASSED"
     case filed = "FILED", completed = "COMPLETED", failed = "FAILED", cancelled = "CANCELLED"
@@ -148,11 +148,18 @@ public struct SharedProfile: Codable, Equatable, Sendable {
     // An explicit Drive-only Joe contract is not account capability evidence.
     // nil keeps every existing shared request's serialized identity unchanged.
     public var driveOnlyJoe: Bool?
+    /// Separate ownership and presentation from Joe's historical branding contract.
+    /// Absence preserves every existing serialized request and stable identity.
+    public var dubNativeMaster: Bool?
+    public var isDriveOnly: Bool {driveOnlyJoe == true || dubNativeMaster == true}
+    public static var dubBroadcastMaster: SharedProfile {
+        SharedProfile(x:nil,instagram:nil,width:1080,height:1920,dubNativeMaster:true)
+    }
     public static var joeBuddenDrive: SharedProfile {
         SharedProfile(x:nil,instagram:nil,width:1920,height:1080,driveOnlyJoe:true)
     }
-    public var maxDuration: Double { driveOnlyJoe == true ? 607.3 : min(x?.maxDuration ?? 0, instagram?.maxDuration ?? 0) }
-    public var maxBytes: Int64 { driveOnlyJoe == true ? 2_000_000_000 : min(x?.maxBytes ?? 0, instagram?.maxBytes ?? 0) }
+    public var maxDuration: Double { dubNativeMaster == true ? 600.075 : driveOnlyJoe == true ? 607.3 : min(x?.maxDuration ?? 0, instagram?.maxDuration ?? 0) }
+    public var maxBytes: Int64 { isDriveOnly ? 2_000_000_000 : min(x?.maxBytes ?? 0, instagram?.maxBytes ?? 0) }
     func outputProfile(for kind: MediaKind) throws -> SharedProfile {
         var output = self
         if kind == .nativeVideo, driveOnlyJoe != true {
@@ -160,7 +167,7 @@ public struct SharedProfile: Codable, Equatable, Sendable {
         }
         // Validate the resolved canvas, not only the portrait selection stored
         // in the request. A native-video override cannot expand account limits.
-        if driveOnlyJoe != true {
+        if !isDriveOnly {
             guard let x, let instagram,
                   output.width <= min(x.maxWidth,instagram.maxWidth),
                   output.height <= min(x.maxHeight,instagram.maxHeight) else {
@@ -170,6 +177,12 @@ public struct SharedProfile: Codable, Equatable, Sendable {
         return output
     }
     public func validate(now: Date = Date(), requireCurrentEvidence: Bool = true) throws {
+        if dubNativeMaster == true {
+            guard driveOnlyJoe != true, x == nil, instagram == nil, width == 1080, height == 1920 else {
+                throw JoeyError.invalid("Dub native masters require their Drive-only contract and approved audio canvas")
+            }
+            return
+        }
         if driveOnlyJoe == true {
             guard x == nil, instagram == nil, width == 1920, height == 1080 else {
                 throw JoeyError.invalid("Joe Budden Drive exports require the explicit 1920×1080 local contract, without platform capability claims")
@@ -192,10 +205,10 @@ public struct SharedProfile: Codable, Equatable, Sendable {
     /// Refresh evidence only. A different account, surface or encoding contract
     /// requires an explicit new decision, never a silent resume or rerender.
     func renewingEvidence(from proposed: SharedProfile, requireCurrentEvidence: Bool = true) throws -> SharedProfile {
-        guard width == proposed.width, height == proposed.height, driveOnlyJoe == proposed.driveOnlyJoe else {
+        guard width == proposed.width, height == proposed.height, driveOnlyJoe == proposed.driveOnlyJoe, dubNativeMaster == proposed.dubNativeMaster else {
             throw JoeyError.invalid("Saved export profile requires \(width)×\(height) and its original delivery mode. Production Setup selects \(proposed.width)×\(proposed.height) or a different delivery mode. Restore the saved profile before Resume. Existing job and accepted clips are preserved.")
         }
-        if driveOnlyJoe == true {
+        if isDriveOnly {
             guard identityContract == proposed.identityContract else {
                 throw JoeyError.invalid("Saved Drive-only profile changed. Restore the original Joe Budden Drive-only profile in Production Setup before Resume.")
             }
@@ -315,6 +328,14 @@ public struct JobRequest: Codable, Equatable, Sendable {
                 }
             } else if profile.driveOnlyJoe == true {throw JoeyError.invalid("The Drive-only Joe profile cannot be used for DUB or Taxstone")}
         } else if profile.driveOnlyJoe == true {throw JoeyError.invalid("Drive-only export requires the Joe Budden workflow")}
+        if profile.dubNativeMaster == true || productionWorkflow == .dubBroadcast {
+            guard productionWorkflow == .dubBroadcast, profile.dubNativeMaster == true,
+                  profile.driveOnlyJoe != true, owner == .dub, mode == .fullShow,
+                  let originalURL, SourceIdentitySuggestion.from(originalURL) == sourceID,
+                  sourceID.hasPrefix("x:broadcast:") else {
+                throw JoeyError.invalid("Dub native masters require the original Dub broadcast full-show Drive-only workflow")
+            }
+        }
         if taxstoneReuse != nil, productionWorkflow != .taxstoneLibrary {throw JoeyError.invalid("Legacy Taxstone reuse belongs only to the library workflow")}
         if episodeDate != nil, dateEvidence?.isEmpty != false { throw JoeyError.invalid("Episode date requires source evidence") }
         if let count = requestedCount, count <= 0 { throw JoeyError.invalid("Highlight count must be positive") }

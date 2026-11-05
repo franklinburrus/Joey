@@ -26,7 +26,7 @@ public enum Records {
             "Episode-index status":"Verified","Metadata verification status":"Drive integrity and automatic QA passed",
             "Last verified":ISO8601DateFormatter().string(from:drive.verifiedAt),"Notes or legacy exception":"Joey job \(job.id); \(clip.durationException ?? ""); no social publication",
             "Workflow route":"Joey","Asset class":source.kind == .audio ? "Audio-template MP4":"Native-video clip",
-            "Platform destination":job.request.productionWorkflow == .joeBudden ? "Drive only; no platform ingestion claim":"Shared X + Instagram","Block number":String(clip.id)]
+            "Platform destination":job.request.profile.isDriveOnly ? "Drive only; no platform ingestion claim":"Shared X + Instagram","Block number":String(clip.id)]
         return Dictionary(uniqueKeysWithValues:headers.enumerated().compactMap { index,header in values[header].map {(index,$0)} })
     }
     public static func csv(_ rows: [[String]]) -> String {
@@ -77,7 +77,7 @@ public enum Records {
         Production editorial requirements: \(job.unavailableTranscriptFeatures.isEmpty ? "Transcript-assisted path" : "INCOMPLETE; local media QA does not establish production completion")
         Failure/dependency: \(job.error ?? "None recorded")
 
-        \(job.request.productionWorkflow == .joeBudden ? "One Drive-only MP4 per clip: 8–10-minute source-content target, DUB logo lower-left, and the full approved 7.300-second outro. Platform-upload compatibility is not asserted." : "One shared file per clip for X and Instagram.") No social publication or email.
+        \(job.request.productionWorkflow == .joeBudden ? "One Drive-only MP4 per clip: 8–10-minute source-content target, DUB logo lower-left, and the full approved 7.300-second outro. Platform-upload compatibility is not asserted." : job.request.profile.dubNativeMaster == true ? "One Drive-only native master per clip with a 480–600-second source-content target and documented short-source/remainder exceptions. Native video retains source footage without added branding. Audio uses approved DUB artwork and a signal-derived gold waveform. Buffer derivatives belong to Max under separate authorization." : "One shared file per clip for X and Instagram.") No social publication or email.
         Native frames retain proportions with black padding; source resolution and effective dimensions are in each QA record.
         Automated decoding, signal and sampled-image checks do not guarantee semantic perfection or platform ingestion.
         The canonical Clip Index is CSV; no duplicate native index is created.

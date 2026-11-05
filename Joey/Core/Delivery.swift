@@ -217,6 +217,35 @@ public actor DriveDelivery {
         }
         return id
     }
+    public func dubPackage(sourceID: String) async throws -> String? {
+        guard sourceID.hasPrefix("x:broadcast:"),let id = sourceID.split(separator:":").last,
+              id.range(of:"^[A-Za-z0-9]+$",options:.regularExpression) != nil else {
+            throw JoeyError.invalid("Expected a stable original broadcast ID")
+        }
+        // Existing packages may predate Joey's canonical filename or source
+        // tags. Search the stable original ID before acquiring or rendering.
+        let query = "trashed=false and mimeType='application/vnd.google-apps.folder' and (appProperties has { key='joeySourceID' and value='"+sourceID+"' } or name contains '"+id+"')"
+        let matches = try await requestFiles(query:query)
+        guard matches.count <= 1 else {throw JoeyError.dependency("Multiple existing packages match broadcast "+id+"; reconciliation required before new production")}
+        return matches.first?["id"] as? String
+    }
+    public func dubOriginal(sourceID: String) async throws -> String? {
+        guard sourceID.hasPrefix("x:broadcast:") else {throw JoeyError.invalid("Expected original broadcast identity")}
+        var matches: [[String:Any]] = []
+        for destination in [DriveDestination.dubVideoEpisodes,.dubAudioEpisodes] {
+            _ = try await verifyRoot(destination)
+            matches += try await children(destination.id).filter {file in
+                guard file["mimeType"] as? String != "application/vnd.google-apps.folder" else {return false}
+                let properties = file["appProperties"] as? [String:String] ?? [:]
+                if properties["joeySourceID"] == sourceID {return true}
+                guard let name = file["name"] as? String else {return false}
+                return (name as NSString).deletingPathExtension.hasSuffix(" — "+Persistence.safeName(sourceID))
+            }
+        }
+        guard matches.count <= 1 else {throw JoeyError.dependency("Multiple archived originals match this broadcast; preserve and reconcile them before acquisition")}
+        guard let id = matches.first?["id"] as? String else {return nil}
+        return "https://drive.google.com/file/d/"+id+"/view"
+    }
     public func archive(source: SourceRecord, request: JobRequest) async throws -> String {
         let route = try DestinationResolver.resolve(source:source,request:request,asset:.fullEpisode)
         if let reference = source.archiveReference {

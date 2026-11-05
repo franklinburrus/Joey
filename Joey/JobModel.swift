@@ -18,6 +18,15 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
     @Published var deliveryCheck: String?
     @Published var checkingDelivery = false
     @Published var preparingSource = false
+    @Published var dubBroadcasts = DubBroadcastState()
+    @Published var scanningDub = false
+    @Published var dubRunning = false
+    @Published var dubQueueError: String?
+    private var dubQueue: DubBroadcastQueue?
+    private var dubTask: Task<Void,Never>?
+    private var dubCheckTask: Task<Void,Never>?
+    var dubScan: @MainActor () async throws -> DubDiscoveryScan = {try await DubWebsiteDiscovery.scan()}
+    var dubLookup: @Sendable (String) async throws -> DubBroadcast = {try await DubBroadcastDiscovery.lookup($0)}
     @Published var scanningJoe = false
     @Published var latestJoe: DiscoveredSource?
     @Published var joeStatus = "Checking recent numbered episodes…"
@@ -44,9 +53,15 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         self.email = EmailIntakeModel(root:root)
         do {coordinator = try Coordinator(root:root); configuration = try Configuration.load(root:root)}
         catch {self.error = error.localizedDescription}
-        guard startsAutomatically else {return}
+        do {dubQueue = try DubBroadcastQueue(root:root)}
+        catch {dubQueueError = "Dub queue unavailable. Saved queue preserved. "+error.localizedDescription}
+        guard startsAutomatically else {recovering = false;return}
         Task {
             await refresh()
+            if let dubQueue {
+                do {try await dubQueue.recover(jobs:jobs)} catch {dubQueueError = error.localizedDescription}
+                dubBroadcasts = await dubQueue.snapshot()
+            }
             do {try email.store?.reconcile(jobs);email.publish()} catch {email.failedPersistence(error)}
             // Recover interrupted valid jobs once at launch. Explicitly
             // cancelled jobs remain cancelled until the user resumes them.
@@ -57,7 +72,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             }
             do {library = try TaxstoneLibrary(root:root); taxstoneLibrary = await library!.snapshot()}
             catch {self.error = "Taxstone library state unreadable: "+error.localizedDescription}
-            let queuedIDs = Set(joeAutomation.queue.map(\.id)).union(taxstoneLibrary.episodes.map(\.id))
+            let queuedIDs = Set(joeAutomation.queue.map(\.id)).union(taxstoneLibrary.episodes.map(\.id)).union(dubBroadcasts.entries.map(\.id))
             let emailJobs = Set(email.state.work.compactMap(\.jobID))
             let pending = jobs.filter { $0.resumesAutomatically && !queuedIDs.contains($0.request.sourceID) && !emailJobs.contains($0.id) }
             for job in pending {
@@ -66,6 +81,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             }
             recovering = false
             email.attach(to:self)
+            if dubBroadcasts.hasRunnableWork {resumeDubBroadcasts();await dubTask?.value}
             if joeAutomation.enabled && !joeAutomation.queue.isEmpty {await runJoeQueue()}
             if taxstoneLibrary.enabled {startTaxstoneLibrary()}
             scanJoe()
@@ -79,17 +95,94 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             }
         }
     }
+    func checkDubBroadcasts(_ urls: [String]) {
+        guard !scanningDub,let dubQueue else {return}
+        scanningDub = true;dubQueueError = nil
+        dubCheckTask = Task {
+            defer {scanningDub = false;dubCheckTask = nil;if !Task.isCancelled {resumeDubBroadcasts()}}
+            do {
+                await refresh()
+                guard checkpointFailures.isEmpty else {throw JoeyError.dependency("Restore unreadable job checkpoints before discovering new Dub work")}
+                let scan: DubDiscoveryScan
+                do {scan = try await dubScan()}
+                catch {
+                    if error is CancellationError {throw error}
+                    scan = DubDiscoveryScan(urls:[],status:"Website/profile scan failed. "+error.localizedDescription)
+                }
+                try await dubQueue.checkNow(urls:urls,jobs:jobs,discoveredURLs:scan.urls,discoveryStatus:scan.status,lookup:dubLookup)
+                dubBroadcasts = await dubQueue.snapshot()
+            } catch {
+                dubQueueError = error is CancellationError ? nil:error.localizedDescription
+                dubBroadcasts = await dubQueue.snapshot()
+            }
+        }
+    }
+    func resumeDubBroadcasts(retry: Bool = false) {
+        guard !dubRunning,!scanningDub,!recovering,!cancelling,!busy,!libraryBusy,!automationRunning,
+              automationTask == nil,!preparingSource,let dubQueue else {return}
+        guard retry || dubBroadcasts.hasRunnableWork else {return}
+        dubRunning = true
+        dubTask = Task {
+            defer {dubRunning = false;dubTask = nil;resumeJoeQueue()}
+            do {
+                if retry {try await dubQueue.resume()}
+                try await dubQueue.run(jobs:jobs,process:{request in
+                    try await self.processDubBroadcast(request)
+                },progress:{state in await self.receiveDub(state)})
+            } catch {dubQueueError = error.localizedDescription}
+            dubBroadcasts = await dubQueue.snapshot()
+            await refresh()
+        }
+    }
+    private func processDubBroadcast(_ request: JobRequest) async throws -> JobRecord {
+        try Task.checkCancellation()
+        guard start(request,automatic:true) == .accepted,let processing = task else {
+            throw JoeyError.dependency("Dub processing owner unavailable; durable queue retained")
+        }
+        await waitForProcessing(processing)
+        try Task.checkCancellation()
+        guard let job = jobs.first(where:{$0.request.sourceID == request.sourceID && $0.request.productionWorkflow == request.productionWorkflow && $0.request.mode == .fullShow}) else {
+            throw JoeyError.dependency(error ?? "No durable broadcast job returned")
+        }
+        return job
+    }
+    private func receiveDub(_ state: DubBroadcastState) {dubBroadcasts = state}
+    func pauseDubBroadcasts() {
+        guard !cancelling,let dubQueue else {return}
+        cancelling = true
+        let running = dubTask,checking = dubCheckTask,processing = dubRunning ? task:nil
+        checking?.cancel();running?.cancel();processing?.cancel()
+        Task {
+            do {try await dubQueue.pause()} catch {dubQueueError = error.localizedDescription}
+            await checking?.value;await running?.value;await processing?.value
+            // Reassert pause after all cancelled discovery/processing callbacks drain.
+            do {try await dubQueue.pause()} catch {dubQueueError = error.localizedDescription}
+            dubBroadcasts = await dubQueue.snapshot()
+            cancelling = false
+        }
+    }
     func startLink(_ raw: String, content: LinkContent, mode: JobMode, archive: String, archiveRoot: String, transcript: String) {
         guard checkpointFailures.isEmpty else {
             error = "Restore the reported unreadable checkpoints and Refresh history before importing a new job. Existing readable jobs remain available."
             return
         }
-        guard !cancelling, !busy, !libraryBusy, !preparingSource else {return}
+        guard !dubRunning, !cancelling, !busy, !libraryBusy, !preparingSource else {return}
         preparingSource = true;error = nil
         Task {
             defer {preparingSource = false}
             do {
-                let source = try await SourceDiscovery.lookup(raw.trimmingCharacters(in:.whitespacesAndNewlines))
+                let trimmed = raw.trimmingCharacters(in:.whitespacesAndNewlines)
+                if content == .dub,mode == .fullShow,let canonical = try? DubBroadcastDiscovery.originalURL(trimmed) {
+                    await refresh()
+                    let sourceID = "x:broadcast:"+canonical.split(separator:"/").last!
+                    let existing = jobs.filter {$0.request.owner == .dub && $0.request.sourceID == sourceID && $0.request.mode == .fullShow}
+                    guard existing.count <= 1 else {throw JoeyError.dependency("Multiple existing broadcast jobs require identity reconciliation")}
+                    if let prior = existing.first {start(prior.request);return}
+                }
+                let source: DiscoveredSource
+                if content == .dub,(try? DubBroadcastDiscovery.originalURL(trimmed)) != nil {
+                    source = try await DubBroadcastDiscovery.lookup(trimmed).source
+                } else {source = try await SourceDiscovery.lookup(trimmed)}
                 let request = try ProductionIntake.request(source:source,content:content,mode:mode,sharedProfile:content == .taxstone ? configuration?.taxstoneProfile : configuration?.profile,
                     archive:archive.isEmpty ? nil:archive,archiveRoot:archiveRoot.isEmpty ? nil:archiveRoot,transcript:transcript.isEmpty ? nil:transcript)
                 start(request)
@@ -152,8 +245,9 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
     }
     func resumeJoeQueue(includeJoe: Bool = true) {
         if includeJoe && joeAutomation.enabled && automationStateReadable {joeResumeRequested = true}
-        guard !cancelling, !recovering, automationTask == nil,
+        guard !dubRunning, !cancelling, !recovering, automationTask == nil,
               !busy, !libraryBusy, !preparingSource else {return}
+        if dubBroadcasts.hasRunnableWork {resumeDubBroadcasts();return}
         let emailReady = email.available && email.state.nextRequestedWork() != nil
         guard joeResumeRequested || emailReady else {return}
         let runJoe = joeResumeRequested;joeResumeRequested = false
@@ -240,7 +334,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
     /// account names, upload-surface text and evidence paths stay out of logs.
     func resumeDiagnostics(for job: JobRecord) -> [String] {
         guard let config: Configuration = try? Persistence.load(root.appendingPathComponent("settings.json")),
-              job.request.profile.driveOnlyJoe != true else {return []}
+              !job.request.profile.isDriveOnly else {return []}
         let saved = job.request.profile
         guard let current = job.request.owner == .taxstone ? config.taxstoneProfile : config.profile else {
             return ["No owner-specific capability profile is configured."]
@@ -256,7 +350,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         return details
     }
     @discardableResult func resume(_ job: JobRecord) -> JobAcceptance {
-        guard !busy, !libraryBusy, !preparingSource, !cancelling, !automationRunning else {return .deferred}
+        guard !dubRunning, !busy, !libraryBusy, !preparingSource, !cancelling, !automationRunning else {return .deferred}
         if let issue = resumeIssue(for:job) {
             error = issue
             return .unavailable
@@ -264,7 +358,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         return start(job.request)
     }
     @discardableResult func start(_ request: JobRequest, automatic: Bool = false) -> JobAcceptance {
-        guard !cancelling, !busy, (!libraryBusy || automatic), (!automationRunning || automatic) else {return .deferred}
+        guard (!dubRunning || automatic), !cancelling, !busy, (!libraryBusy || automatic), (!automationRunning || automatic) else {return .deferred}
         guard let coordinator else {return .unavailable}
         busy = true; error = nil
         task = Task {
@@ -303,7 +397,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
                 let matches = jobs.filter {
                     $0.request.sourceID == work.source.id &&
                     $0.request.owner == (work.workflow.content == .taxstone ? .taxstone:.dub) &&
-                    ($0.request.productionWorkflow == .link || $0.request.productionWorkflow == .joeBudden) &&
+                    ($0.request.productionWorkflow == .link || $0.request.productionWorkflow == .joeBudden || $0.request.productionWorkflow == .dubBroadcast) &&
                     $0.request.mode == (work.workflow.content == .joeBudden ? .fullShow:work.workflow.mode) &&
                     $0.request.fixedIntervals == nil && $0.request.requestedCount == nil && $0.request.adExclusions.isEmpty &&
                     $0.request.preferredDuration == nil && $0.request.transcriptPolicy == nil &&
@@ -313,7 +407,10 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
                 guard matches.count <= 1 else {throw JoeyError.dependency("Multiple existing source contracts match; select the existing job instead of creating another")}
                 if let prior = matches.first {request = prior.request}
                 else {
-                    let source = try await email.lookup(work.source.url)
+                    let source: DiscoveredSource
+                    if work.workflow.content == .dub,work.source.id.hasPrefix("x:broadcast:") {
+                        source = try await DubBroadcastDiscovery.lookup(work.source.url).source
+                    } else {source = try await email.lookup(work.source.url)}
                     guard source.id == work.source.id else {throw JoeyError.invalid("Email source identity changed during discovery")}
                     request = try ProductionIntake.request(source:source,content:work.workflow.content,mode:work.workflow.mode,
                         sharedProfile:work.workflow.content == .taxstone ? configuration?.taxstoneProfile:configuration?.profile,
@@ -361,7 +458,8 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         }
     }
     func cancel() {
-        if libraryBusy && !email.dispatching {pauseTaxstoneLibrary()}
+        if dubRunning {pauseDubBroadcasts()}
+        else if libraryBusy && !email.dispatching {pauseTaxstoneLibrary()}
         else if automationRunning && !email.dispatching {pauseJoe()}
         else {
             let processing = task
@@ -371,7 +469,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         }
     }
     func refreshTaxstoneLibrary() {
-        guard !cancelling, !busy, !libraryBusy, !preparingSource, let library else {return}
+        guard !dubRunning, !cancelling, !busy, !libraryBusy, !preparingSource, let library else {return}
         libraryBusy = true
         libraryTask = Task {
             defer {libraryBusy = false;libraryTask = nil;resumeJoeQueue()}
@@ -381,7 +479,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
     }
     func receiveLibrary(_ state: TaxstoneLibraryState) {taxstoneLibrary = state}
     func startTaxstoneLibrary() {
-        guard !cancelling, !busy, !libraryBusy, !preparingSource, !automationRunning, let library else {return}
+        guard !dubRunning, !cancelling, !busy, !libraryBusy, !preparingSource, !automationRunning, let library else {return}
         libraryBusy = true
         libraryTask = Task {
             defer {libraryBusy = false;libraryTask = nil;resumeJoeQueue()}

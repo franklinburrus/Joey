@@ -97,8 +97,8 @@ public enum BufferPreflight {
     }
 
     static func validateProfile(_ profile: SharedProfile, owner: Owner, workflow: ProductionWorkflow?, now: Date = Date()) throws {
-        guard workflow != .joeBudden, profile.driveOnlyJoe != true else {
-            throw JoeyError.dependency("Joe Budden is Drive-only; an explicit authorized social destination mapping is required")
+        guard workflow != .joeBudden, !profile.isDriveOnly else {
+            throw JoeyError.dependency("This workflow is Drive-only; separate authorization and derivatives are required for social delivery")
         }
         try profile.validate(now:now)
         func handle(_ value: String) -> String {value.trimmingCharacters(in:.whitespacesAndNewlines).trimmingCharacters(in:CharacterSet(charactersIn:"@")).lowercased()}

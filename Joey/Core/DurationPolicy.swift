@@ -12,12 +12,12 @@ public struct DurationPolicy: Sendable {
     public let plannedMaximum: Double
 
     public init(profile: SharedProfile) {
-        let buffer = profile.driveOnlyJoe != true && [profile.x,profile.instagram].contains {
+        let buffer = !profile.isDriveOnly && [profile.x,profile.instagram].contains {
             $0?.surface.lowercased().contains("buffer") == true
         }
         minimum = buffer ? 5 : 0
         measuredMaximum = buffer ? min(140,profile.maxDuration) - Self.bufferCeilingMargin : profile.maxDuration
-        plannedMaximum = buffer ? measuredMaximum - Self.encodingTolerance : profile.maxDuration
+        plannedMaximum = profile.dubNativeMaster == true ? 600 : buffer ? measuredMaximum - Self.encodingTolerance : profile.maxDuration
     }
 
     public func validatePlanned(_ duration: Double) throws {

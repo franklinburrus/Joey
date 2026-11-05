@@ -1,3 +1,9 @@
+## DUB native-master boundary — 2026-11-05
+
+New Dub original X broadcasts belong to the Drive-only `dubBroadcast` workflow. Check Now performs manual website/profile discovery, durable sequential ingestion and complete 480–600-second native master production. Buffer capabilities do not shorten these masters. Native master jobs are blocked from the legacy Buffer preflight and carry accurate Drive-only manifest/register/recap wording.
+
+Frank separately directs Max to select content, create shorter derivatives, verify publishing limits and prepare/publish through Buffer. Joey does not create DUB Buffer derivatives or require Max/Buffer availability to finish native production. The existing handoff implementation documented below remains historical/other-workflow functionality and supplies no authority to publish native masters or modify Max.
+
 # Clip Intelligence and GPT Buffer Handoff
 
 Joey prepares accepted content and keeps distribution history. The existing Buffer connector is operated by GPT only after Frank separately authorizes an exact batch/items, destination accounts and delivery mode. Joey contains no Buffer write client. Exporting, opening or copying a package is not authorization. No live drafts, schedules or posts were created during implementation acceptance.

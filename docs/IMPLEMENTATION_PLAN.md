@@ -1,3 +1,18 @@
+## Dub broadcast ingestion plan — 2026-11-05
+
+Frank authorized execution through commit and push. Extend the existing coordinator, source adapter, destination resolver and Shows design. Keep one processing engine and the existing job checkpoints. Add a small durable Dub queue containing discovery/ordering/recovery intent, without copying media state into another database.
+
+1. Completed checkout/scheme/contracts verification. Native WebKit website/profile discovery returned 46 candidates in a live read-only check. Each admitted candidate is independently verified at X.
+2. Completed failing native-master, identity, queue, manual-trigger and recovery regressions.
+3. Completed an explicit Dub Drive-only master contract with 480–600-second planning, independent of social capabilities. Keep Joe branding and other workflows separate. Use the existing creator-based DUB X Audio Clips/X Video Clips roots, confirmed by Frank's later spoken routing correction.
+4. Completed bounded website/profile candidate discovery, original-URL verification and durable oldest-first deduplicated queue. Check Now authorizes queue processing. Startup only resumes previously authorized work. Reuse prior jobs and verified originals. Preserve failed entries and continue independent jobs.
+5. Completed Shows status/actions with existing coordinator progress, cancellation and completion links. Preserve responsive native controls.
+6. Completed final affected/full Swift verification, Python tests, native build/signature checks, live native discovery, actual DUB audio renderer acceptance, existing Drive/server-SHA/register readback, independent review and regression repairs. Final suite passed 415/422 with seven opt-in skips and zero failures. Existing documents record exact evidence and remaining acceptance. Publish the verified branch through the authorized normal commit/push workflow, with provider readback recorded in publication.json.
+
+Frank confirmed the simplified existing creator tree and excluded further processing of the already-delivered November 5 broadcast. Its new acquisition attempt was cancelled before any clips or provider writes. Queue remains paused with a source-specific hold, while its downloaded original is preserved. Read-only existing-package verification continues. New native queue production acceptance is distinct from these existing external outputs.
+
+Review focus includes missing broadcaster identity, unknown dates, repeated/concurrent Check Now, paused/crashed queues, pre-existing completed/social jobs and archives, fractional coverage, final remainders, failed delivery and destination ancestry. Provider writes require the existing reconciliation path, never blind retries.
+
 ## App reliability repair plan — delivered 2026-11-05
 
 Frank approved the five-fix application plan and excluded content. All five implementation items are delivered and verified in the installed native app. Current REQUIREMENTS remain the product authority. The former content-run priority below is historical for this assignment.

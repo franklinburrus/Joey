@@ -166,7 +166,7 @@ struct JobDetailView: View {
                 LabeledContent("Media",value:source.kind == .audio ? "Audio · waveform MP4" : "Native video")
                 if source.width > 0 {LabeledContent("Source size",value:"\(source.width) × \(source.height)")}
             }
-            LabeledContent("Output",value:job.request.productionWorkflow == .joeBudden ? "Drive MP4" : "Shared X + Instagram MP4")
+            LabeledContent("Output",value:job.request.profile.isDriveOnly ? "Drive MP4" : "Shared X + Instagram MP4")
             LabeledContent("Updated",value:job.updatedAt.formatted(date:.abbreviated,time:.shortened))
             DisclosureGroup("Source details") {
                 VStack(alignment:.leading,spacing:10) {

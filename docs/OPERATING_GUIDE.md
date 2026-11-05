@@ -1,3 +1,15 @@
+## Dub Broadcasts — manual Check Now
+
+Open Shows, then Dub Broadcasts, and select Check Now. Joey reads DUB's website replay catalog and the original X profile's visible broadcast links through native WebKit, verifies the original broadcaster and complete ended replay, reconciles saved identities and automatically starts eligible work. Keep Joey open and the Mac available during production. There is no separate Process New action and no Dub polling, scheduled check or launch discovery.
+
+The first website/profile check starts at the latest verified broadcast day, including all eligible shows that day. Later checks keep that historical boundary and process newly found shows oldest first. Undated verified shows retain Date Unknown and follow dated shows by stable ID. Expand Original broadcast URLs / historical backfill for optional original URLs or older missed broadcasts. The bounded website/profile scan does not prove a complete X account inventory. Website entries are independently verified at X, including owner, ended state, replay and duration. Access or source errors remain visible.
+
+Both audio and video become complete 8–10-minute Drive-only native masters, including documented short-source/final-remainder exceptions. Native video remains source-only. DUB audio retains approved artwork and signal-driven gold waveform. The existing DUB X Video Clips/X Audio Clips destinations are selected by inspected source type. Former Joey folders and Core are retired. Max's later short-form/Buffer workflow is separate.
+
+Pause or Cancel Check stops owned discovery/processing and retains work. Resume Saved Queue resumes accepted stages without a new discovery scan. Application restart resumes authorized interrupted queue work, while paused, failed, cancelled or explicitly held sources retain their recovery state. Failed entries retain exact errors and independent jobs continue. Inspect Episode Results opens the existing job inspector. Verified completed results expose their Drive folder link.
+
+Existing originals, transcripts, QA-passed clips, uploads and register rows are reused. Existing external packages are held for identity/readback reconciliation before acquisition or rendering, preventing duplicate production. COMPLETED requires full retained coverage, QA, all Drive files and companions, register readback and durable completion evidence. A local QA success with failed filing remains QA_PASSED and displays the actual delivery error.
+
 # Joey operating guide
 
 ## Start a job

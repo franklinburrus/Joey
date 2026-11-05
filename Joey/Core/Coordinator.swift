@@ -3,12 +3,18 @@ import Foundation
 /// The coordinator owns recovery and sequencing; provider adapters own current
 /// readback. Tests can replace this boundary without reaching live accounts.
 protocol CoordinatorDelivery: TaxstoneReuseProvider, Sendable {
+    func dubPackage(sourceID: String) async throws -> String?
+    func dubOriginal(sourceID: String) async throws -> String?
     func archive(source: SourceRecord, request: JobRequest) async throws -> String
     func episodeFolder(source: SourceRecord, request: JobRequest, jobID: String, existingFolderID: String?, intentURL: URL) async throws -> String
     func upload(_ local: URL, name: String?, parent: String, destination: FilingDestination, replaceCompanion: Bool) async throws -> DriveReceipt
     func resolveArtwork(source: SourceRecord, configuration: Configuration, root: URL) async throws -> Artwork
     func reconcileRegister(job: JobRecord, tab: String) async throws -> [String]
     func verifyPackage(job: JobRecord, directory: URL) async throws
+}
+extension CoordinatorDelivery {
+    func dubPackage(sourceID: String) async throws -> String? {nil}
+    func dubOriginal(sourceID: String) async throws -> String? {nil}
 }
 extension DriveDelivery: CoordinatorDelivery {}
 
@@ -145,6 +151,10 @@ public actor Coordinator {
         guard !matches.isEmpty || inventory.failures.isEmpty else {
             throw JoeyError.dependency("Unreadable checkpoint identities prevent creating a new job. Restore the reported job.json files and Refresh history. Existing jobs and accepted files are preserved.")
         }
+        if supplied.productionWorkflow == .dubBroadcast,matches.isEmpty,
+           let prior = checkpoints.first(where:{$0.request.owner == .dub && $0.request.sourceID == supplied.sourceID && $0.request.mode == .fullShow}) {
+            throw JoeyError.invalid("Existing Dub broadcast job "+prior.id+" must resume its saved immutable request; changed provider metadata cannot create a duplicate source job")
+        }
         let id = try matches.first?.id ?? supplied.stableID()
         let dir = directory(for:id), checkpoint = dir.appendingPathComponent("job.json")
         if matches.isEmpty,FileManager.default.fileExists(atPath:checkpoint.path) {
@@ -207,6 +217,18 @@ public actor Coordinator {
                     throw JoeyError.invalid("Joe Budden requires a numbered full episode from Joe Budden TV on YouTube")
                 }
             }
+            if request.productionWorkflow == .dubBroadcast,job.folderID == nil,
+               job.clips.isEmpty || job.clips.contains(where:{$0.qa?.passed != true}) {
+                if let existing = try await delivery.dubPackage(sourceID:request.sourceID) {
+                    throw JoeyError.dependency("Existing broadcast package "+existing+" requires readback/adoption before new production. Accepted media retained; no duplicate acquisition or render started.")
+                }
+            }
+            if request.productionWorkflow == .dubBroadcast,job.source == nil {
+                let verified = try await DubBroadcastDiscovery.lookup(request.originalURL!)
+                guard verified.source.id == request.sourceID else {throw JoeyError.invalid("Queued Dub source identity changed")}
+                try Media.validateSourceDuration(verified.source.duration,expected:request.expectedDuration)
+                try Persistence.save(verified,to:dir.appendingPathComponent("dub-source.json"))
+            }
             validatingSource = true
             let reusable = try jobs().first {candidate in
                 candidate.source?.id == request.sourceID && candidate.source?.owner == request.owner &&
@@ -222,6 +244,10 @@ public actor Coordinator {
                 reusableTranscript = reusable?.transcript
             } else if request.localPath == nil, let archive = request.archiveReference {
                 sourceURL = try await delivery.downloadOriginal(reference:archive,directory:dir)
+            } else if request.productionWorkflow == .dubBroadcast,let archive = try await delivery.dubOriginal(sourceID:request.sourceID) {
+                sourceURL = try await delivery.downloadOriginal(reference:archive,directory:dir)
+                var inspected = try await Media.inspect(sourceURL,request:request)
+                inspected.archiveReference = archive;job.source = inspected
             } else {
                 sourceURL = try await Acquisition.acquire(request,directory:dir)
             }
