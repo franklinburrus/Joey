@@ -26,7 +26,7 @@ The final app is `/Users/frank/Applications/Joey Native.app`, version 1.0 (1), n
 
 Final protected readback preserves 31 jobs, 509 accepted outputs, 28 originals and 808 protected identities. Extended baseline checks preserve 1529 media-file identities and 3189 runtime-record hashes, with only the expected helper settings pointer and normal monitoring timestamp changed. Legacy helper bytes and every other decoded setting remain preserved. No content processing or live provider write occurred during implementation.
 
-Evidence is under `/Users/frank/Library/Caches/Joey-Native-Build/app-reliability-20261105`. Final installation receipts are in viewport-install/. Native metrics are in preview-viewport-final.log and the repeated half-screen screenshot is preview-repeat-half-green.jpg. Actual sleep/wake, VoiceOver and other display scaling remain unverified. Earlier native-tool lock reports remain retracted. Source-control closeout retains unrelated documentation edits separately.
+Evidence is under `/Users/frank/Library/Caches/Joey-Native-Build/app-reliability-20261105`. Final installation receipts are in viewport-install/. Native metrics are in preview-viewport-final.log and the repeated half-screen screenshot is preview-repeat-half-green.jpg. Actual sleep/wake, VoiceOver and other display scaling remain unverified. Earlier native-tool lock reports remain retracted. Repair source was committed as `261c894`. Frank subsequently authorized including the retained historical documentation and pushing main. The publication closeout reuses the installed artifact after fresh source/bundle/signature readback.
 
 ## Original audit status
 

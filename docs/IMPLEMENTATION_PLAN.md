@@ -8,20 +8,38 @@ Frank approved the five-fix application plan and excluded content. All five impl
 4. Completed content-addressed verified helper upgrades, old/custom helper retention, concurrent/idempotent publication and nonblocking rejection of FIFO helpers.
 5. Completed Back to Shows wording and accessibility destination.
 6. Completed synthetic regression suite, Python checks, native build, whole-change review, protected installation and native readback. Native verification corrected the new recovery notice's minimum-height propagation by keeping it inside the bounded viewport.
-7. Task-owned source/report/checkpoint closeout belongs in the approved local commit. Exact commit and retained unrelated documentation state are read back externally. GitHub push/merge remain separate.
+7. Repair source and task records were committed locally as `261c894`. Frank subsequently authorized committing the remaining historical documentation and pushing main. Final source/app binding and remote HEAD readback are recorded externally. Content remains outside scope.
 
 Actual proof and acceptance limits are in the leading STATUS section and the consolidated November 5 audit report. All original retention, account/destination/technical validation, source identity, accepted-stage reuse and delivery safeguards remain binding. No content job, live provider write, publication or permission change is part of this repair task. Actual sleep/wake and broader platform/media acceptance remain separately qualified observations.
 
 # Joey Native Implementation Plan
 
-> Existing implementation roadmap. The active G0–G5 core completion directive below supersedes earlier execution and acceptance priorities. Current progress is recorded in STATUS.md. Older milestones and VERIFICATION.md retain their historical evidence scope; they do not require further test campaigns, production jobs or visual acceptance for this assignment.
+> Current authority is REQUIREMENTS.md and Frank's November 5 app-only repair and publication instructions. The five repair items are delivered. The November 4 audit and earlier G0–G5/integration/cleanup sections below are historical evidence. Their former next-content-run instructions do not authorize content processing in this closeout.
 
 **Goal:** Implement the standalone local media workflow in REQUIREMENTS.md.
 **Architecture:** SwiftUI calls a serial actor coordinator with atomic JSON checkpoints and cross-process locking. Foundation Process invokes installed media tools without a shell; Swift owns planning, state, hashes and provider readback. Existing Xcode folder membership compiles the shared core; Swift Package Manager provides a dependency-free test/runner harness using the same files and Xcode toolchain.
 **Tech Stack:** Swift, SwiftUI, Foundation, CryptoKit, AppKit/CoreGraphics, FFmpeg/FFprobe, existing yt-dlp/rclone/local ASR.
 **Spec:** REQUIREMENTS.md, sole current requirements document.
 
-## Active final integration closeout — 2026-11-03
+## Historical functionality priorities after independent drift audit — 2026-11-04
+
+**Objective:** Complete and verify native Joey end-to-end functionality, not the production backlog. This section updates execution priority, not product requirements or a new approval process.
+
+- [x] Verify canonical checkout/origin/main/live history, starting worktree, existing Xcode project and installed artifact; inspect current implementation and retained verification scope.
+- [x] Audit scope, architecture, functionality, verification and priorities; correct current documentation freshness and precedence. Detailed findings and critical-path evidence are in the leading STATUS section.
+- [x] Observe the selected completed native-video recap in the actual installed application. Verify saved Workflow, source/results, clip timings/checks and links; navigate away and back without starting processing. The former unavailable-native-recap blocker is closed.
+- [ ] Next functional task: demonstrate one authorized DUB audio source through installed-native intake/acquisition or verified-original reuse, source-bound transcription, planning, rendering, QA/coverage, exact Drive filing, required register/companion verification and saved recap. The existing two 15-second renderer cases are retained but do not substitute for this native workflow.
+- [ ] Reconcile the remaining required Taxstone/native source-mode and recovery acceptance cases against valid existing evidence. Execute only missing proof, including direct native Resume and actual sleep/wake where still unverified; do not repeat unchanged accepted media or infer functionality from test counts. A concrete reproduced defect requires a minimal owning-layer repair and affected verification plan before implementation.
+
+The audited native-video job `dub-0bc5fc39fef657927e40715b` remains COMPLETED with its retained 48 clips, four companions and 48 required register rows; today's native recap/history observation closes that specific visual gap. No new application-code defect or unavailable dependency was established by this audit. Broader native audio acceptance remains incomplete. This is a verification gap, not authority to rebuild the product or recover every historical job.
+
+Continue using the installed final core-completion artifact and existing SwiftUI/coordinator/local helpers. Check current source authority, capability evidence, assets/tools, capacity and provider connectivity for the selected future run; evidence expiry affects only operations requiring it. Preserve current completion predicates, immutable requests, source/transcript/accepted-file reuse, creator separation, storage/security boundaries and provider reconciliation. Current capability evidence expires `2026-11-04T17:46:56Z`; renew actual observations if required, without altering historical contracts to force a blocked old job through.
+
+Decision rule for every proposed task: proceed only if it directly improves or verifies a required Joey function, removes a demonstrated blocker, or preserves essential operational integrity. Otherwise defer it. Keep Joe/Taxstone bulk queues paused. Do not activate optional features, clear backlogs, rerender accepted outputs, repeat Git cleanup, change permissions, add paid services/infrastructure, publish/schedule, or commit unrelated work. External failure in one workflow does not stop independent functional development.
+
+Completion remains the product acceptance in REQUIREMENTS section 18, with production, delivery, native observation and platform ingestion reported separately. Completed finite implementation gates are preserved; they do not establish universal readiness. This audit itself is complete after the scoped documentation correction/readback. Its next task is the single DUB audio native workflow above, not another general audit campaign.
+
+## Completed final integration closeout — 2026-11-03 (historical)
 
 G0–G5 remain closed. Frank's subsequent directive authorizes only final source-control integration, any necessary native installation, accurate documentation and safe task cleanup. Starting active branch is clean/pushed `codex/functional-completion` at `0ef1171ed6dce0bee8a528cbda8c22539d80d916`; PR #13 is draft/open and mergeable into main `02956bad1a37f29ef2d6af4d81dc8770f412b0e0`. Installed artifact/source inputs already match the core-completion build receipts.
 
@@ -39,7 +57,7 @@ No tests, new production jobs, optional features, acceptance campaign, protectio
 
 Closeout is complete only after the containing documentation-only update is actually committed/pushed and both main repositories are synchronized and read back. Its final commit identity and clean Git/GitHub/app binding are recorded externally and in the final handoff, avoiding another build or self-referential documentation loop. The canonical application checkout is `/Users/frank/Documents/Joey`; the clean cached source clone remains only for its existing build/evidence binding.
 
-## Active core app completion roadmap — 2026-11-03
+## Delivered core app completion roadmap — 2026-11-03 (historical)
 
 Objective: finish and deliver the existing standalone native macOS application through Frank's fixed G0–G5 roadmap. Required operation is Applications launch, supported link intake and Content/Workflow selections, processing, meaningful progress and cancellation, required Drive outputs/records, a persisted in-app recap with actual results/links, and safe job history/recovery. REQUIREMENTS.md remains the sole product specification.
 

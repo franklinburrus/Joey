@@ -1,3 +1,9 @@
+## Publication and installation binding — 2026-11-05
+
+Fresh closeout verification matches 100 source/test files and all ten installed bundle files to the final app-reliability viewport build. Strict deep signature returned direct exit 0. The installed app already contains the final reviewed source. This documentation-only closeout reuses that verified installation and its rollback receipts. Existing test results remain bound to their recorded inputs and are not claimed as a new test run.
+
+The final local/remote commit, clean checkout, source-object binding and runtime-preservation result are read back in the publication-closeout/completed.json receipt under the existing app-reliability evidence directory. November 4 sections below are historical. Current installed dylib is `7c732c3a856e7854728a580828a0cfed762cb615e316de54542fa25551823189`.
+
 ## App reliability repairs verification — 2026-11-05
 
 The five-fix application plan is installed and verified. Final Swift invocation returned direct exit 0 with 399 executed, 395 passed, four opt-in skips and zero failures in 292.863 seconds. Python returned direct exit 0 with 22 passed. Targeted red/green proofs cover hidden/unknown checkpoint identities, accepted-only audio artwork recovery, source-marker states, helper upgrades and FIFO rejection. Whole-change and final viewport reviews found no remaining material introduced issue.
@@ -8,7 +14,19 @@ Strict signatures, protected installation, running-process identity, source/bund
 
 Evidence is `/Users/frank/Library/Caches/Joey-Native-Build/app-reliability-20261105`, with final native receipts in viewport-install/. Opt-in live Drive, real-media and installed-assistant cases were skipped. Actual sleep/wake, VoiceOver, additional display scales and platform ingestion remain unverified. Content processing and provider writes were excluded. The prior native-tool locked-Mac diagnosis remains retracted.
 
-## Native X-to-Drive/records path VERIFIED; visual recap and wider native coverage UNVERIFIED (2026-11-03)
+## Historical evidence reconciliation after independent drift audit — 2026-11-04
+
+At the November 4 snapshot, the installed artifact was the final core-completion build at `/Users/frank/Applications/Joey Native.app`, version 1.0 (1), native dylib SHA-256 `17429183251d616dae4d1683c9e262398279b4fd7d6232d1a981d79ac1a159f8`. Fresh audit readback matches all ten installed files and all 115 cached build inputs to `core-completion/verification.json`; strict deep signature and cached-source Xcode project discovery each returned direct exit 0. Canonical main and live remote main match `2ca35487ed188ab65012494350a1bcc4a79c21c2` before the audit's documentation edits. Three dataless canonical test files were not forced to download; their cached build counterparts match. This is artifact/project verification, not a new build or test run.
+
+The prior unavailable-native-recap observation is superseded. On November 4, CUA accessed the actual installed application and observed job `dub-0bc5fc39fef657927e40715b` as Completed, Workflow “Clip Entire Show,” 48/48 QA and Drive, verified records, source identity, clip titles/timings/durations/checks and episode/direct links. Navigating away and back reopened that saved recap. Native intake owner/workflow controls and empty-link Start prevention were also observed; import was canceled without creating a job. Direct Resume execution and actual sleep/wake remain unverified. The selected checkpoint and settings match their retained hashes; metadata for 509 accepted outputs and 28 originals matches the retained installation baseline.
+
+Retained verification remains scoped: final core suite exit 0, 370 executed/366 passed/four skipped/zero failures; separately opted-in real-media renderer command exit 0, one test/two actual 15-second DUB/Taxstone cases; selected provider review exit 0, 340/340 checks and 74 GET reads at `2026-11-04T01:19:29Z`. Their log/report hashes match recorded receipts. Only the later saved Workflow display differs from that full-suite input map and has separate native build and current GUI proof. No suite, production job or provider review was rerun by the audit. Renderer tests and older deliveries do not prove complete final-build native audio intake-to-delivery acceptance, and packaging does not prove social ingestion.
+
+The leading STATUS section contains the five-category verdict, per-stage evidence and limitations, exact current command/results, preserved scope and next functional priority. Fresh audit evidence is in `/Users/frank/Library/Caches/Joey-Native-Build/functional-verification-20261103/drift-audit-20261104/`. The detailed matrices and timestamps below retain their original historical scope; references there to the previous installed dylib, unobservable recap, superseded blockers or prior active task must not be treated as current state. REQUIREMENTS.md is unchanged. No production-ready claim follows from this audit.
+
+---
+
+## Native X-to-Drive/records path VERIFIED; visual recap and wider native coverage UNVERIFIED (2026-11-03; historical snapshot)
 
 This matrix records Frank's functional-completion task, not backlog recovery or a replacement product specification. Baseline is `02956ba`; selected native acceptance source is Frank-approved `x:broadcast:2rJapEXbVkKRAR`. Prior 294-pass/four-skip evidence establishes only its recorded local scope. Source changes require affected checks to run again; skipped optional assistant tests do not expand this assignment.
 
