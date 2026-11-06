@@ -1,3 +1,57 @@
+## Engineering integration verification — 2026-11-06
+
+PR #15 was merged through the ordinary GitHub merge API with expected head `21fd6e2213894d21cfc12d0e6b9c8e4e3b07d9cd`; actual merge commit is `093aa5bb47ebda345746ebc5d2fe7d5d0656fbb5`. Readback confirms merged/closed and remote main at that commit. The merged tree is identical to the tested repair tree. Main reported no branch protection or rules; no required gate was bypassed. GitHub returned no check runs/statuses, which is **absent**, not a CI pass. Exact-head code/security reviews completed; independent local source/candidate review passed with no confirmed code blocker.
+
+All 12 finding dispositions remain evidenced: DA-01/DA-02 **SUPERSEDED_CRITERION** under REQUIREMENTS §§8/10, §§9/10, §11 and §20; DA-03–DA-09 repaired; DA-10 **WITHDRAWN / ALIGNED**; F04/F13 retain their separately **RESOLVED_AND_INDEPENDENTLY_VERIFIED** dispositions. The detailed historical evidence below is retained, not rerun or relabeled. No product requirements changed.
+
+Fresh engineering evidence root: `/Users/frank/Library/Caches/Joey-Engineering-Closeout-20261106/`. Canonical cwd: `/Users/frank/Documents/Joey`. Every test, build and executable diagnostic used `python3 Tools/run-local.py`; the runner set `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` and removed production/assistant opt-in inputs. Isolated scratch and derived-data directories were used.
+
+| Fresh check | Direct exit | Actual result |
+| --- | --- | --- |
+| Full Swift suite | 0 | 458 executed, 454 passed, 4 intentional skips, 0 failures |
+| Full Python suite | 0 | 22 passed, 0 failures/skips |
+| Joey Debug build | 0 | BUILD SUCCEEDED |
+| Joey Release build | 0 | BUILD SUCCEEDED |
+| Debug strict deep signature | 0 | Valid |
+| Release strict deep signature | 0 | Valid |
+| Independent focused Swift | 0 | 37 ownership/helper/inventory plus 9 process-capture tests passed, 0 failures/skips |
+| Independent Python prevention | 0 | 5 passed, 0 failures/skips; dummy canaries only |
+| Independent candidate verification | 0 | All eight bundle files equal Release; signature, metadata, helper hashes and runtime linkage pass |
+| Preservation verification | 0 | 6433 protected files unchanged; 32 copied checkpoints unchanged; no generated media |
+
+Exact full-suite/build/signature argv follows. Each phase's JSON retains timestamps, cwd, input hashes, direct exit, warnings and log path.
+
+```sh
+/opt/homebrew/opt/python@3.14/bin/python3.14 Tools/run-local.py /usr/bin/swift test --scratch-path /Users/frank/Library/Caches/Joey-Engineering-Closeout-20261106/parent/build --jobs 2
+/opt/homebrew/opt/python@3.14/bin/python3.14 Tools/run-local.py /opt/homebrew/bin/python3 -m unittest discover -s Tests -p 'test_*.py' -v
+/opt/homebrew/opt/python@3.14/bin/python3.14 Tools/run-local.py /usr/bin/xcodebuild -project Joey.xcodeproj -scheme Joey -configuration Debug -destination platform=macOS -derivedDataPath /Users/frank/Library/Caches/Joey-Engineering-Closeout-20261106/DebugDerivedData -jobs 2 CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual build
+/opt/homebrew/opt/python@3.14/bin/python3.14 Tools/run-local.py /usr/bin/xcodebuild -project Joey.xcodeproj -scheme Joey -configuration Release -destination platform=macOS -derivedDataPath /Users/frank/Library/Caches/Joey-Engineering-Closeout-20261106/ReleaseDerivedData -jobs 2 CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual build
+/opt/homebrew/opt/python@3.14/bin/python3.14 Tools/run-local.py /usr/bin/codesign --verify --deep --strict /Users/frank/Library/Caches/Joey-Engineering-Closeout-20261106/DebugDerivedData/Build/Products/Debug/Joey.app
+/opt/homebrew/opt/python@3.14/bin/python3.14 Tools/run-local.py /usr/bin/codesign --verify --deep --strict /Users/frank/Library/Caches/Joey-Engineering-Closeout-20261106/ReleaseDerivedData/Build/Products/Release/Joey.app
+```
+
+Four Swift skips: `LiveDriveRoutingTests.testAuthorizedLiveRootsAndExistingPackagePlacement` requires explicit routing-readback input; `LocalAssistantOfflineTests.testExplicitStartOfflineReplyAndOwnedStop` requires opt-in installed-model service startup; `LocalAssistantOfflineTests.testNetworkDeniedClientResponse` belongs to that owned-service harness; `RealMediaTests.testAuthorizedRealMediaRenderers` requires real-media inputs. None was silently passed. Existing AVAssetWriter deprecations, JobModel weak-capture warnings, SwiftUI State fixture warning and AppIntents metadata-extraction notice remain recorded.
+
+The 122 application/test/tool/project inputs retain SHA-256 `4704a7f83429314a1d1b2acbac9c87899283e3f58d255861a60b21817c0bd1f0`. Full-suite coverage includes historical contracts, RGB corruption, coverage, interrupted rendering/filing, cancellation, email startup/admission races, stale inventory, unknown objects, uncertain provider writes, exact register identities, helper filesystem/environment boundaries and process descendants. Full suites ran freshly before merge; equality of the merged inputs reuses that proof without pretending another full run occurred. Earlier red/green repair probes and owner/provider acceptance retain their original dates and scope.
+
+### Native candidate and active-history dependency
+
+The actual Release candidate launched independently of Xcode with Foundation-confirmed isolated home, no enabled automation, externally held processing/mail locks, network denial and production filesystem/credential/media denials. CUA observed native history, intake owner/workflow choices, recovery controls and explicit email Process wording. Thirty-two exact production checkpoint copies were preserved. One CANCELLED record, `dub-2ded57b978f7432e5c9d2141`, fails decoding at `request.productionWorkflow=dubBroadcast`. It also carries `profile.dubNativeMaster`; this separate unmerged branch contract exists at `92d2381`, not baseline `4307d93` or the integrated product. It has no accepted clips/companions/register evidence. This is not a repair regression and must not be silently mapped to `.link` or revived.
+
+With that one copy preserved outside active fixture jobs, the same unmodified candidate displayed **Ready**, retained the other 31 histories and exposed normal intake. Empty input correctly kept Start Processing disabled. No request was submitted. Both exact candidate processes were stopped by identity-checked SIGTERM (intentional process exit -15). All 32 copied checkpoints were restored byte-for-byte after observation; no fixture media was generated. The installed PID and production records were untouched. Evidence: `native-observation.json`, `native-launch*.json`, `preservation-after.json`, and `review/candidate-independent.json`.
+
+Production still contains the incompatible stopped record and therefore blocks new intake. `unsupported-checkpoint-proposal.json` specifies an intact same-volume directory rename from active `jobs` to `preserved-unsupported-workflows/20261106/`, including the 6,250,340,031-byte original. It records four metadata hashes plus original inode/size/mtime and exact rollback. Applying it requires explicit permission to quit the installed app and archive the record, followed by fresh quiescence, locking and preservation checks. No production archive was performed. This active-history dependency is separate from deferred owner media acceptance.
+
+### Taxstone and dependency reconciliation
+
+`taxstone/RECONCILIATION.md`, `reconciliation-inventory.json` and `commands.json` contain exact job/file identities, command arrays and exits. Twelve completed jobs are **VERIFIED COMPLETE** using retained full receipts, current predicates/local integrity and fresh provider identity readback. Nine are **PROVIDER ACCESS REQUIRED**: 138 receipts (102 clips, 36 companions) lack newer destination/permission-fingerprint evidence. All 466 expected objects (382 clips, 84 companions) exist once with matching names/sizes in the correct 21 creator-root folders. No provider metadata correction or missing file was established. All 393 accepted local clip hashes and 84 companion hashes match; all 24 originals exist. This is not fresh full remote checksum/access proof.
+
+**ALREADY RECONCILED:** DA-07 ownership classification code and expected provider placement. **METADATA CORRECTION REQUIRED:** none evidenced. **DEFERRED — OWNER ACCEPTANCE:** three unfinished jobs and 82 library episodes without current checkpoints. Episode 7 remains 11/26 QA, not COMPLETED. Exact cache-only reconciliation passes 24/24 in isolation; its 23-entry/45-field patch does not promote any job to COMPLETED. Application remains pending clean app quiescence because the running app can overwrite an external cache edit from memory. Full modern receipt enrichment requires provider metadata unavailable from the normalized connector; direct existing OAuth GET returned HTTP 401 without credential refresh/write. No provider mutation is proposed.
+
+`dependencies/inventory.json` records FFmpeg/FFprobe 8.1.2, yt-dlp 2026.08.19, rclone 1.74.4, Python 3.12.8, MLX Whisper 0.4.3, MLX 0.32.4, readable model weights (587 tensors), adapter and four configured artwork/branding hashes, storage ownership/access and installed identity. Required local tools are AVAILABLE. Other episode artwork, live Google/Sheets authority and installed-build Keychain continuity are CONFIGURED BUT UNVERIFIED. No model download, inference, credential change or dependency replacement occurred. Two corrected ASR diagnostic errors (optional safetensors import and inspector module shadowing) are retained as harness failures, not hidden or called product defects.
+
+Real-world acquisition, semantic transcripts, production rendering/delivery, platform ingestion, real sleep/wake, live mailbox and optional local-assistant acceptance are **DEFERRED — OWNER ACCEPTANCE**. They do not block code integration and never waive internal job evidence requirements. Candidate signing is local ad-hoc, not notarization/public distribution.
+
 ## Fresh pull request verification — 2026-11-06
 
 Frank authorized committing and pushing the existing repair branch and opening a PR against main; stop with the PR open. Merge, installation and production/provider operations remain excluded. The completed repair section below is the historical pre-publication snapshot; all 12 finding dispositions remain unchanged.
