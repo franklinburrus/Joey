@@ -1,5 +1,7 @@
 # Local media helpers
 
+Trusted bundled helper resources work from canonical cache directories and macOS temporary-directory aliases. Only the Bundle resource's parent is resolved with POSIX realpath. Managed current/prior helpers still require no-follow ancestor/leaf traversal, a single regular-file link, bounded reads and matching content hashes. Symlinks, hard links, FIFOs and changed managed bytes remain rejected; existing helpers and settings are preserved on failure.
+
 The application is native Swift/SwiftUI. Installed FFmpeg/FFprobe, yt-dlp and rclone are local executables, not services. The bundled ASR adapter is reused from Frank's existing DUB skill package (`runtime/x/scripts/transcribe_source.py`, version 1.3.5); original SHA-256: f41ff480247f1be47366b4a883964eb2f3e17ed085aa4b866cd6f13dc1d0722b. It invokes the existing local MLX Whisper/faster-whisper model with Hugging Face offline mode. No model, credentials or production media are included in Git.
 
 The approved DUB artwork is resolved from its exact Drive ID or a hash-verified existing asset, then copied into application-owned storage. The app does not need the Codex process, ChatGPT, GitHub or Xcode Cloud to run. Existing local Python/model paths are operational dependencies configurable in settings.

@@ -3,6 +3,45 @@ import Darwin
 @testable import JoeyCore
 
 final class HelperUpgradeTests: XCTestCase {
+    func testTrustedBundleResourceLoadsThroughMacOSTmpAliasAndCanonicalCache() throws {
+        for base in [URL(fileURLWithPath:"/private/tmp"), FileManager.default.urls(for:.cachesDirectory,in:.userDomainMask)[0]] {
+            let parent = base.appendingPathComponent("Joey-helper-fixture-" + UUID().uuidString)
+            defer {try? FileManager.default.removeItem(at:parent)}
+            let resources = parent.appendingPathComponent("Fixture.bundle/Contents/Resources")
+            try write("# trusted bundle fixture\n",to:resources.appendingPathComponent("transcribe_source.py"))
+            let info = resources.deletingLastPathComponent().appendingPathComponent("Info.plist")
+            try PropertyListSerialization.data(fromPropertyList:["CFBundleIdentifier":"test.joey.helper", "CFBundlePackageType":"BNDL"],format:.xml,options:0).write(to:info)
+            let bundle = try XCTUnwrap(Bundle(url:resources.deletingLastPathComponent().deletingLastPathComponent()))
+            let resource = try XCTUnwrap(bundle.url(forResource:"transcribe_source",withExtension:"py"))
+            var config = Configuration()
+            try FileManager.default.createDirectory(at:parent.appendingPathComponent("runtime"),withIntermediateDirectories:true)
+            try config.installTranscriptionHelper(from:resource,root:parent.appendingPathComponent("runtime"))
+            let installed = URL(fileURLWithPath:try XCTUnwrap(config.transcriptionScript))
+            XCTAssertEqual(try Data(contentsOf:installed),Data("# trusted bundle fixture\n".utf8))
+        }
+    }
+
+    func testPriorManagedHelperHardLinkOrAncestorSymlinkRemainsRejected() throws {
+        for hardLink in [false,true] {
+            let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+            let bundled = root.appendingPathComponent("bundle.py")
+            try write("# trusted fixture\n",to:bundled)
+            var config = Configuration()
+            try config.installTranscriptionHelper(from:bundled,root:root)
+            let previous = URL(fileURLWithPath:try XCTUnwrap(config.transcriptionScript))
+            if hardLink {
+                try FileManager.default.linkItem(at:previous,to:root.appendingPathComponent("extra-link.py"))
+            } else {
+                let directory = previous.deletingLastPathComponent()
+                let moved = root.appendingPathComponent("moved-version")
+                try FileManager.default.moveItem(at:directory,to:moved)
+                try FileManager.default.createSymbolicLink(at:directory,withDestinationURL:moved)
+            }
+            XCTAssertThrowsError(try config.installTranscriptionHelper(from:bundled,root:root))
+            XCTAssertEqual(config.transcriptionScript,previous.path)
+        }
+    }
+
     private func workspace() throws -> URL {
         let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)

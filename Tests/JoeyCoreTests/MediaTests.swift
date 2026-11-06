@@ -2,6 +2,118 @@ import XCTest
 @testable import JoeyCore
 
 final class MediaTests: XCTestCase {
+    func testNativeRGBSourceConversionAndReencodingPassColorQA() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("joey-color-conversion-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:directory)}
+        let original = directory.appendingPathComponent("rgb-source.mkv")
+        _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-f","lavfi","-i","testsrc=s=320x180:r=30:d=2",
+            "-an","-c:v","ffv1","-pix_fmt","bgr0",original.path])
+        let request = try Fixtures.request(dir:directory,path:original.path)
+        let source = try await Media.inspect(original,request:request)
+        XCTAssertEqual(source.streams.first?.pix_fmt,"bgr0","The control must exercise RGB-to-YUV conversion")
+        let clip = ClipRecord(id:1,title:"RGB conversion",intervals:[Interval(0,2)],filename:"converted.mp4")
+        let output = directory.appendingPathComponent(clip.filename)
+        let render = try await Media.render(source:source,clip:clip,profile:request.profile,artwork:nil,work:directory,output:output)
+        let qa = try await Media.validate(output:output,source:source,clip:clip,profile:request.profile,render:render,work:directory)
+        XCTAssertTrue(qa.passed)
+        let reencoded = directory.appendingPathComponent("reencoded.mp4")
+        _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-i",output.path,
+            "-an","-c:v","libx264","-preset","veryfast","-crf","18","-pix_fmt","yuv420p","-movflags","+faststart",reencoded.path])
+        let second = try await Media.validate(output:reencoded,source:source,clip:clip,profile:request.profile,render:render,work:directory)
+        XCTAssertTrue(second.passed,"Ordinary YUV420 encoding noise must remain within the color fidelity tolerance")
+    }
+
+    func testCoordinatorRepairsColorRejectedOutputBeforeAcceptingItsHash() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("joey-color-recovery-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:directory)}
+        let original = directory.appendingPathComponent("source.mp4")
+        _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-f","lavfi","-i","testsrc2=s=320x180:r=30:d=2",
+            "-an","-c:v","libx264","-pix_fmt","yuv420p",original.path])
+        var request = try Fixtures.request(dir:directory,path:original.path)
+        let transcriptURL = directory.appendingPathComponent("transcript.json")
+        try Persistence.save(Transcript(sourceID:request.sourceID,sourceSHA256:try Integrity.sha256(original),duration:2,
+            engine:"Synthetic test only",segments:[TranscriptSegment(start:0,end:2,text:"Complete synthetic source.")]),to:transcriptURL)
+        request.transcriptPath = transcriptURL.path
+        let root = directory.appendingPathComponent("runtime")
+        let coordinator = try Coordinator(root:root)
+        let corruption = ColorCorruptionEvidence()
+        let result = try await coordinator.run(request) {job in
+            guard job.stage == "QA clip 1", await corruption.hashes.isEmpty else {return}
+            let attempts = root.appendingPathComponent("jobs/\(job.id)/scratch/1")
+            let directories = try FileManager.default.contentsOfDirectory(at:attempts,includingPropertiesForKeys:nil)
+            let partial = try XCTUnwrap(directories.map {$0.appendingPathComponent("render.partial.mp4")}
+                .first {FileManager.default.fileExists(atPath:$0.path)})
+            let damaged = partial.deletingLastPathComponent().appendingPathComponent("color-corrupted.mp4")
+            _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-i",partial.path,"-vf","lutyuv=u=128:v=128",
+                "-an","-c:v","libx264","-preset","veryfast","-crf","18","-pix_fmt","yuv420p","-movflags","+faststart",damaged.path])
+            try FileManager.default.removeItem(at:partial)
+            try FileManager.default.moveItem(at:damaged,to:partial)
+            await corruption.record(try Integrity.sha256(partial))
+            XCTAssertNil(job.clips.first?.qa,"The pending candidate must not have accepted QA")
+            XCTAssertNil(job.clips.first?.drive)
+        }
+        let rejectedHashes = await corruption.hashes
+        XCTAssertEqual(rejectedHashes.count,1,"The test must alter the actual coordinator candidate before QA")
+        XCTAssertEqual(result.state,.qaPassed,result.error ?? "")
+        let accepted = try XCTUnwrap(result.clips.first)
+        XCTAssertTrue(accepted.qa?.passed == true)
+        XCTAssertFalse(rejectedHashes.contains(accepted.sha256 ?? ""),"Rejected color-corrupted bytes must never become accepted filing input")
+        var filed = accepted
+        let corruptReceipt = DriveReceipt(id:"synthetic-rejected-file",name:accepted.filename,parent:"synthetic-folder",
+            bytes:try XCTUnwrap(accepted.bytes),sha256:try XCTUnwrap(rejectedHashes.first),url:"https://example.invalid/rejected",
+            permissions:[],verifiedAt:Date())
+        XCTAssertThrowsError(try Coordinator.acceptDelivery(corruptReceipt,for:&filed),"Delivery must not bind the rejected candidate to the repaired clip")
+        XCTAssertNil(filed.drive)
+        let jobDirectory = await coordinator.directory(for:result.id)
+        XCTAssertTrue((result.storageWarnings ?? []).isEmpty,"RGB QA scratch must retain supported cleanup ownership")
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath:jobDirectory.appendingPathComponent("scratch/1").path).isEmpty)
+        let output = jobDirectory.appendingPathComponent(accepted.filename)
+        XCTAssertEqual(try Integrity.sha256(output),accepted.qa?.outputSHA256)
+        let render: RenderReceipt = try Persistence.load(jobDirectory.appendingPathComponent("evidence/1/render.json"))
+        _ = try await Media.validate(output:output,source:XCTUnwrap(result.source),clip:accepted,profile:request.profile,render:render,work:directory)
+    }
+
+    func testNativeColorLossAndHueCorruptionFailProductionQA() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("joey-color-fidelity-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:directory)}
+        let original = directory.appendingPathComponent("source.mp4")
+        _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-f","lavfi","-i","testsrc2=s=320x180:r=30:d=2",
+            "-an","-c:v","libx264","-pix_fmt","yuv420p",original.path])
+        let request = try Fixtures.request(dir:directory,path:original.path)
+        let source = try await Media.inspect(original,request:request)
+        let clip = ClipRecord(id:1,title:"Color fidelity",intervals:[Interval(0,2)],filename:"correct.mp4")
+        let output = directory.appendingPathComponent(clip.filename)
+        let render = try await Media.render(source:source,clip:clip,profile:request.profile,artwork:nil,work:directory,output:output)
+        let baseline = try await Media.validate(output:output,source:source,clip:clip,profile:request.profile,render:render,work:directory)
+        XCTAssertTrue(baseline.passed)
+        let sourceHash = try Integrity.sha256(original), outputHash = try Integrity.sha256(output)
+        // The small source picture is surrounded by black padding. A whole-
+        // composition average alone cannot establish color fidelity inside it.
+        for (name,filter) in [("chroma-loss","lutyuv=u=128:v=128"),("hue-change","hue=h=120")] {
+            let damaged = directory.appendingPathComponent(name+".mp4")
+            _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-i",output.path,"-vf",filter,
+                "-an","-c:v","libx264","-preset","veryfast","-crf","18","-pix_fmt","yuv420p","-movflags","+faststart",damaged.path])
+            do {
+                _ = try await Media.validate(output:damaged,source:source,clip:clip,profile:request.profile,render:render,work:directory)
+                XCTFail("Production QA accepted \(name) with unchanged luminance and timing")
+            } catch {
+                XCTAssertTrue(error.localizedDescription.lowercased().contains("picture"),"Expected picture rejection: \(error)")
+            }
+            do {
+                _ = try await Media.validateSourcePictureTiming(output:damaged,source:source,clip:clip,
+                    profile:request.profile.outputProfile(for:.nativeVideo),render:render)
+                XCTFail("Independent source-PTS QA accepted \(name) inside the picture rectangle")
+            } catch {
+                XCTAssertTrue(error.localizedDescription.contains("picture timeline"),"Expected source-PTS rejection: \(error)")
+            }
+        }
+        XCTAssertEqual(try Integrity.sha256(original),sourceHash)
+        XCTAssertEqual(try Integrity.sha256(output),outputHash)
+    }
+
     func testNativeLandscapeContractForDUBAndTaxstone() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
@@ -237,6 +349,11 @@ final class MediaTests: XCTestCase {
         XCTAssertGreaterThan(wave.levels[25],0.5)
         XCTAssertEqual(wave.shape.count,120)
     }
+}
+
+private actor ColorCorruptionEvidence {
+    private(set) var hashes: [String] = []
+    func record(_ hash: String) {hashes.append(hash)}
 }
 
 enum Fixtures {

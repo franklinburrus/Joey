@@ -61,8 +61,19 @@ public actor TaxstoneLibrary {
     private let root: URL
     private var state: TaxstoneLibraryState
     private var running = false
+    private let session: URLSession
+    private let helperRunner: @Sendable (String, [String], Int) async throws -> ProcessResult
+    private let loadEvidence: @Sendable () throws -> [TaxstoneEvidenceEntry]
     public init(root: URL) throws {
+        try self.init(root:root,session:.shared,
+            runHelper:{try await Processes.run($0,$1,maxOutput:$2)},loadEvidence:{try TaxstoneEvidence.load()})
+    }
+    /// Use the same read-only provider boundaries as DriveDelivery for isolated inventory checks.
+    init(root: URL, session: URLSession,
+         runHelper: @escaping @Sendable (String, [String], Int) async throws -> ProcessResult,
+         loadEvidence: @escaping @Sendable () throws -> [TaxstoneEvidenceEntry]) throws {
         self.root = root
+        self.session = session; self.helperRunner = runHelper; self.loadEvidence = loadEvidence
         let url = root.appendingPathComponent("taxstone-library.json")
         state = FileManager.default.fileExists(atPath:url.path) ? try Persistence.load(url) : TaxstoneLibraryState()
     }
@@ -142,7 +153,7 @@ public actor TaxstoneLibrary {
         state.status = "Reconciling archive and existing outputs";state.error = nil
         try save();await progress(state)
         let config = try Configuration.load(root:root)
-        let provider = try DriveDelivery(remote:config.rcloneRemote)
+        let provider = try DriveDelivery(remote:config.rcloneRemote,session:session,runHelper:helperRunner)
         let currentOriginals = try await provider.children(Self.archiveRoot)
         let legacyOriginals = try await provider.children(Self.legacyArchiveRoot)
         var seenOriginals = Set<String>()
@@ -150,10 +161,10 @@ public actor TaxstoneLibrary {
             guard let id = $0["id"] as? String,$0["mimeType"] as? String != "application/vnd.google-apps.folder" else {return false}
             return seenOriginals.insert(id).inserted
         }
-        let evidence = try TaxstoneEvidence.load()
+        let evidence = try loadEvidence()
         let byDrive = Dictionary(grouping:evidence,by:\.driveID)
         let outputListing = try await Processes.retry {
-            try await Processes.run("rclone",["lsjson",config.rcloneRemote+":","--drive-root-folder-id",DriveDestination.taxstoneClips.id,"--recursive","--hash","--retries","1","--low-level-retries","1"],maxOutput:16*1024*1024)
+            try await self.helperRunner("rclone",["lsjson",config.rcloneRemote+":","--drive-root-folder-id",DriveDestination.taxstoneClips.id,"--recursive","--hash","--retries","1","--low-level-retries","1"],16*1024*1024)
         }
         let remoteObjects = try JSONSerialization.jsonObject(with:outputListing.stdout) as? [[String:Any]] ?? []
         let mediaObjects = remoteObjects.filter {($0["Name"] as? String ?? "").lowercased().hasSuffix(".mp4")}
@@ -162,7 +173,7 @@ public actor TaxstoneLibrary {
         state.uncertainOutputCount = mediaObjects.filter {!knownIDs.contains($0["ID"] as? String ?? "")}.count
         try outputListing.stdout.write(to:root.appendingPathComponent("taxstone-legacy-drive-inventory.json"),options:.atomic)
         let appleURL = URL(string:"https://itunes.apple.com/lookup?id=978037629&entity=podcastEpisode&limit=200")!
-        let (data,response) = try await URLSession.shared.data(from:appleURL)
+        let (data,response) = try await session.data(from:appleURL)
         guard (response as? HTTPURLResponse)?.statusCode == 200,
               let json = try JSONSerialization.jsonObject(with:data) as? [String:Any],
               let rows = json["results"] as? [[String:Any]] else {throw JoeyError.dependency("Tax Season episode identity/artwork feed unavailable")}
@@ -211,6 +222,7 @@ public actor TaxstoneLibrary {
         }
         try Persistence.save(technical,to:technicalURL)
         var episodes: [TaxstoneLibraryEpisode] = []
+        var currentOutputIDs = Set<String>()
         for file in original where (file["mimeType"] as? String ?? "").hasPrefix("audio/") {
             try Task.checkCancellation()
             guard let driveID = file["id"] as? String else {continue}
@@ -240,6 +252,26 @@ public actor TaxstoneLibrary {
             if matches.count != 1 || episode.artworkURL == nil {
                 episode.status = "BLOCKED";episode.error = "Exact episode GUID and episode-specific artwork unresolved"
             }
+            // Current checkpoint ownership precedes legacy classification. A
+            // canonical Joey filename is not a legacy interval hint, and must
+            // not hide an otherwise resumable or complete accepted package.
+            let inventoryError = episode.status == "BLOCKED" ? episode.error : nil
+            let matching = jobs.filter {$0.request.owner == .taxstone && $0.request.sourceID == id && $0.request.mode == .fullShow && $0.request.fileToDrive}
+            var currentJob: JobRecord?
+            var recognizedIDs = Set<String>()
+            if matching.count > 1 {episode.status = "BLOCKED";episode.error = "Multiple production job identities require reconciliation; no new job created"}
+            else if let job = matching.first {
+                // Remote receipt ownership is independent of local cache
+                // availability. A missing/changed cache can block recovery,
+                // but cannot turn this verified provider identity into legacy.
+                recognizedIDs = Self.currentOutputIDs(job:job,sourceID:id,sourceSHA256:hash,mediaObjects:mediaObjects)
+                currentOutputIDs.formUnion(recognizedIDs)
+                do {
+                    try Self.reconcile(&episode,job:job,directory:root.appendingPathComponent("jobs/"+job.id))
+                    currentJob = job
+                } catch {episode.status = "BLOCKED";episode.error = error.localizedDescription}
+            }
+            if let inventoryError {episode.status = "BLOCKED";episode.error = inventoryError}
             // Metadata rules out known incompatible files. Other objects are
             // candidates only: actual source-audio and presentation QA is required.
             var candidates: [TaxstoneReuseInput] = []
@@ -251,7 +283,7 @@ public actor TaxstoneLibrary {
                     sourceSHA256:hash,md5:receipt.md5,evidence:clip.evidencePath))
             }
             let unknownRelated = mediaObjects.filter {file in
-                !knownIDs.contains(file["ID"] as? String ?? "") && technical[file["ID"] as? String ?? ""]?.incompatible(limit:legacyLimit) != true && (file["Path"] as? String ?? "").contains(entry.trackID)
+                !knownIDs.contains(file["ID"] as? String ?? "") && !recognizedIDs.contains(file["ID"] as? String ?? "") && technical[file["ID"] as? String ?? ""]?.incompatible(limit:legacyLimit) != true && (file["Path"] as? String ?? "").contains(entry.trackID)
             }
             var unresolved = 0
             for file in unknownRelated {
@@ -272,12 +304,9 @@ public actor TaxstoneLibrary {
             episode.reuseCandidates = candidates
             if !candidates.isEmpty {episode.notes.append("\(candidates.count) legacy candidates require full source/presentation QA before adoption; candidate filenames are not acceptance evidence.")}
             let blockingError = episode.status == "BLOCKED" ? episode.error : nil
-            let matching = jobs.filter {$0.request.owner == .taxstone && $0.request.sourceID == id && $0.request.mode == .fullShow && $0.request.fileToDrive}
-            if matching.count > 1 {episode.status = "BLOCKED";episode.error = "Multiple production job identities require reconciliation; no new job created"}
-            else if let job = matching.first {
+            if let job = currentJob,job.state == .completed {
                 do {
-                    try Self.reconcile(&episode,job:job,directory:root.appendingPathComponent("jobs/"+job.id))
-                    if job.state == .completed {try await verifyDelivery(job,provider:provider);episode.status = "COMPLETED";episode.error = nil}
+                    try await verifyDelivery(job,provider:provider);episode.status = "COMPLETED";episode.error = nil
                 } catch {episode.status = "BLOCKED";episode.error = error.localizedDescription}
             }
             if let blockingError {episode.status = "BLOCKED";episode.error = blockingError}
@@ -293,9 +322,42 @@ public actor TaxstoneLibrary {
             guard props["joeyOwner"] == "taxstone",let source = props["joeySourceID"],let i = episodes.firstIndex(where:{$0.id == source}) else {continue}
             if episodes[i].jobID == nil {episodes[i].status = "BLOCKED";episodes[i].error = "Existing Joey Drive package requires checkpoint recovery; no duplicate production"}
         }
+        state.uncertainOutputCount = mediaObjects.filter {
+            let id = $0["ID"] as? String ?? ""
+            return !knownIDs.contains(id) && !currentOutputIDs.contains(id)
+        }.count
         state.episodes = Self.ordered(episodes); state.inventoriedAt = Date()
         state.status = "Inventory reconciled — \(state.remainingCount) episodes remaining"
         try save();await progress(state);return state
+    }
+    /// This recognizes ownership only. Historical receipts can omit the later
+    /// destination field, but an explicit conflicting destination is rejected.
+    /// Completion still requires the full independent package readback, and
+    /// partial jobs still resume delivery.
+    static func currentOutputIDs(job: JobRecord, sourceID: String, sourceSHA256: String,
+                                 mediaObjects: [[String:Any]]) -> Set<String> {
+        guard job.request.owner == .taxstone,job.request.sourceID == sourceID,
+              job.request.mode == .fullShow,job.request.fileToDrive,
+              let source = job.source,source.owner == .taxstone,source.id == sourceID,
+              source.sha256 == sourceSHA256,sourceSHA256.count == 64,
+              let folder = job.folderID,!folder.isEmpty,
+              let route = try? DestinationResolver.resolve(source:source,request:job.request,asset:.clip) else {return []}
+        let listing = Dictionary(grouping:mediaObjects,by:{$0["ID"] as? String ?? ""})
+        let receipts = Dictionary(grouping:job.clips.compactMap(\.drive),by:\.id)
+        return Set(job.clips.compactMap {clip in
+            guard let receipt = clip.drive,!receipt.id.isEmpty,receipts[receipt.id]?.count == 1,
+                  clip.qa?.passed == true,let hash = clip.sha256,hash.count == 64,
+                  clip.qa?.outputSHA256 == hash,receipt.sha256 == hash,
+                  let bytes = clip.bytes,bytes > 0,receipt.bytes == bytes,
+                  receipt.name == clip.filename,receipt.parent == folder,
+                  receipt.destination == nil || receipt.destination == route,
+                  let md5 = receipt.md5,md5.count == 32,
+                  let objects = listing[receipt.id],objects.count == 1,let file = objects.first,
+                  file["Name"] as? String == clip.filename,
+                  (file["Size"] as? NSNumber)?.int64Value == bytes,
+                  (file["Hashes"] as? [String:String])?["md5"] == md5 else {return nil}
+            return receipt.id
+        })
     }
     public static func knownIncompatible(_ clip: TaxstoneLegacyClip) -> Bool {
         if let fps = clip.fps, fps < 30 {return true}

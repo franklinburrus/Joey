@@ -35,6 +35,24 @@ public struct Configuration: Codable, Sendable {
             return error.localizedDescription
         }
     }
+    public func resumeIssue(for job: JobRecord) -> String? {
+        do {
+            let renewed = try renewingCapabilities(in:job.request)
+            let accepted = !job.clips.isEmpty && job.clips.allSatisfy {
+                $0.qa?.passed == true && $0.qa?.outputSHA256 == $0.sha256
+            }
+            if accepted {
+                for clip in job.clips {
+                    if let canvas = clip.qa?.acceptedCanvas {
+                        _ = try renewed.profile.acceptedOutputProfile(width:canvas.width,height:canvas.height)
+                    }
+                }
+                // Missing historical dimensions are measured by the async
+                // coordinator under its lock, before any delivery operation.
+            } else if let kind = job.source?.kind {_ = try renewed.profile.outputProfile(for:kind)}
+            return nil
+        } catch {return error.localizedDescription}
+    }
     /// Install only the application's adapter. A settings pointer changes after
     /// verified publication, while legacy files and all older versions remain.
     mutating func installTranscriptionHelper(from bundled: URL, root: URL) throws {
@@ -51,7 +69,12 @@ public struct Configuration: Codable, Sendable {
         let migration = prior?.contains("/.build/") == true || prior?.contains("/.codex/plugins/") == true
         guard prior == nil || prior == legacy.path || managed || migration else {return}
 
-        let bytes = try Self.helperBytes(at:bundled)
+        // Bundle resource URLs may use macOS's /tmp or /var aliases. Resolve
+        // only this trusted source's parent, retaining no-follow leaf checks.
+        // Prior managed helpers below must retain strict ancestor traversal.
+        let bundledSource = try StorageManager.canonicalRoot(bundled.deletingLastPathComponent())
+            .appendingPathComponent(bundled.lastPathComponent)
+        let bytes = try Self.helperBytes(at:bundledSource)
         let hash = SHA256.hash(data:bytes).map {String(format:"%02x",$0)}.joined()
         if let prior {
             let previous = URL(fileURLWithPath:prior)

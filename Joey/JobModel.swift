@@ -36,16 +36,20 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
     private var automationStateReadable = true
     private var recovering = true
     private var coordinator: Coordinator?
+    private(set) var startupTask: Task<Void,Never>?
+    private let recentJoeEpisodes: () async throws -> [DiscoveredSource]
     var task: Task<Void,Never>?
     let root: URL
     let email: EmailIntakeModel
-    init(root: URL = Persistence.defaultRoot, startsAutomatically: Bool = true) {
+    init(root: URL = Persistence.defaultRoot, startsAutomatically: Bool = true,
+         recentJoeEpisodes: @escaping () async throws -> [DiscoveredSource] = {try await SourceDiscovery.recentJoeEpisodes()}) {
         self.root = root
+        self.recentJoeEpisodes = recentJoeEpisodes
         self.email = EmailIntakeModel(root:root)
         do {coordinator = try Coordinator(root:root); configuration = try Configuration.load(root:root)}
         catch {self.error = error.localizedDescription}
         guard startsAutomatically else {return}
-        Task {
+        startupTask = Task {
             await refresh()
             do {try email.store?.reconcile(jobs);email.publish()} catch {email.failedPersistence(error)}
             // Recover interrupted valid jobs once at launch. Explicitly
@@ -59,7 +63,10 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             catch {self.error = "Taxstone library state unreadable: "+error.localizedDescription}
             let queuedIDs = Set(joeAutomation.queue.map(\.id)).union(taxstoneLibrary.episodes.map(\.id))
             let emailJobs = Set(email.state.work.compactMap(\.jobID))
-            let pending = jobs.filter { $0.resumesAutomatically && !queuedIDs.contains($0.request.sourceID) && !emailJobs.contains($0.id) }
+            // An unavailable ledger is unknown ownership, not an empty queue.
+            // Explicit manual recovery and independently owned automation remain
+            // available; unclassified startup recovery waits for a readable ledger.
+            let pending = email.available ? jobs.filter { $0.resumesAutomatically && !queuedIDs.contains($0.request.sourceID) && !emailJobs.contains($0.id) } : []
             for job in pending {
                 start(job.request)
                 await task?.value
@@ -104,7 +111,9 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
                 let source = try await lookup(raw)
                 let request = try ProductionIntake.request(source:source,content:content,mode:mode,sharedProfile:content == .taxstone ? configuration?.taxstoneProfile : configuration?.profile,
                     archive:archive.isEmpty ? nil:archive,archiveRoot:archiveRoot.isEmpty ? nil:archiveRoot,transcript:transcript.isEmpty ? nil:transcript)
-                start(request)
+                // Fresh manual discovery shares locked compatible admission
+                // with email; explicit imported/frozen requests retain identity.
+                start(request,admitLink:{_ in})
             } catch {self.error = error.localizedDescription}
         }
     }
@@ -115,7 +124,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         Task {
             defer {scanningJoe = false}
             do {
-                let episodes = try await SourceDiscovery.recentJoeEpisodes()
+                let episodes = try await recentJoeEpisodes()
                 latestJoe = episodes.first
                 let completed = Set(jobs.filter {$0.state == .completed && $0.hasRequiredCompletionEvidence && $0.request.productionWorkflow == .joeBudden}.map {$0.request.sourceID})
                 joeAutomation.reconcile(episodes,completed:completed)
@@ -243,7 +252,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         do {
             let url = root.appendingPathComponent("settings.json")
             let config: Configuration = try Persistence.load(url)
-            return config.resumeIssue(for:job.request,sourceKind:job.source?.kind)
+            return config.resumeIssue(for:job)
         } catch {
             return "Saved production settings could not be read. Open Settings and restore the existing verified configuration, then Check Again."
         }
@@ -275,14 +284,15 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         }
         return start(job.request)
     }
-    @discardableResult func start(_ request: JobRequest, automatic: Bool = false) -> JobAcceptance {
+    @discardableResult func start(_ request: JobRequest, automatic: Bool = false,
+                                 admitLink: (@Sendable (JobRequest) async throws -> Void)? = nil) -> JobAcceptance {
         guard !cancelling, !busy, (!libraryBusy || automatic), (!automationRunning || automatic) else {return .deferred}
         guard let coordinator else {return .unavailable}
         busy = true; error = nil
         task = Task {
             defer {busy = false; task = nil;if !automatic {resumeJoeQueue()}}
             do {
-                let result = try await coordinator.run(request) { [weak self] job in
+                let result = try await coordinator.run(request,admitLink:admitLink) { [weak self] job in
                     await self?.receive(job)
                 }
                 receive(result)
@@ -299,7 +309,12 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
     func runEmailItem(interleaved: Bool = false, now: Date = Date()) async {
         guard !cancelling, !busy, !preparingSource, (!libraryBusy || interleaved),
               email.available, !email.dispatching, let store = email.store else {return}
-        do {try store.reconcile(jobs);email.publish()} catch {email.failedPersistence(error);return}
+        let inventory: JobInventory
+        do {
+            guard let coordinator else {return}
+            inventory = try await coordinator.inventory()
+            try store.reconcile(inventory.jobs);email.publish()
+        } catch {email.failedPersistence(error);return}
         guard let work = email.state.nextRequestedWork(now:now) else {return}
         email.dispatching = true;preparingSource = true
         defer {email.dispatching = false;preparingSource = false}
@@ -310,11 +325,15 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         do {
             var request = work.request
             if request == nil {
+                guard inventory.failures.isEmpty else {
+                    throw JoeyError.dependency("Unreadable checkpoint identities prevent admitting this email link. Restore the reported checkpoints and retry Process; saved mail and media are preserved.")
+                }
                 // Reuse a matching prior manual/automatic contract before
                 // looking up mutable provider titles or constructing a new ID.
                 if let prior = try ProductionIntake.existingRequest(for: work.source.url,
-                    content: work.workflow.content, mode: work.workflow.mode, requests: jobs.map(\.request),
-                    archiveRoot: work.workflow.archiveRoot.isEmpty ? nil : work.workflow.archiveRoot) {request = prior}
+                    content: work.workflow.content, mode: work.workflow.mode, requests: inventory.jobs.map(\.request),
+                    archiveRoot: work.workflow.archiveRoot.isEmpty ? nil : work.workflow.archiveRoot,
+                    sharedProfile:work.workflow.content == .taxstone ? configuration?.taxstoneProfile:configuration?.profile) {request = prior}
                 else {
                     let source = try await email.lookup(work.source.url)
                     guard source.id == work.source.id else {throw JoeyError.invalid("Email source identity changed during discovery")}
@@ -324,11 +343,17 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
                 }
                 try Task.checkCancellation()
                 guard email.available, !cancelling else {throw CancellationError()}
-                try store.freeze(work.id,request:request!);email.publish()
             }
             guard email.available, !cancelling, let request else {throw CancellationError()}
             try Task.checkCancellation()
-            let acceptance = start(request,automatic:true)
+            let admission: (@Sendable (JobRequest) async throws -> Void)?
+            if work.request == nil {
+                admission = { [weak self] accepted in
+                    guard let self else {throw CancellationError()}
+                    try await self.freezeEmail(work.id,request:accepted)
+                }
+            } else {admission = nil}
+            let acceptance = start(request,automatic:true,admitLink:admission)
             guard acceptance == .accepted, let processing = task else {
                 try store.updateWork(work.id,status:acceptance == .deferred ? .queued:.retryable,reason:"Processing owner is unavailable")
                 if acceptance == .deferred {try store.requestProcessing(work.id,workflow:work.workflow)}
@@ -351,6 +376,12 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             do {try store.updateWork(work.id,status:.retryable,reason:error.localizedDescription);email.publish()}
             catch {email.failedPersistence(error)}
         }
+    }
+    private func freezeEmail(_ id: String, request: JobRequest) throws {
+        try Task.checkCancellation()
+        guard email.available, !cancelling, let store = email.store else {throw CancellationError()}
+        do {try store.freeze(id,request:request);email.publish()}
+        catch {email.failedPersistence(error);throw error}
     }
     func receive(_ job: JobRecord) {
         jobs.removeAll {$0.id == job.id}; jobs.insert(job,at:0); selected = job.id

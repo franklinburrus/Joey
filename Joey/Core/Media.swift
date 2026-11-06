@@ -623,13 +623,13 @@ public enum Media {
         let work = FileManager.default.temporaryDirectory.appendingPathComponent("joey-picture-clock-"+UUID().uuidString)
         try FileManager.default.createDirectory(at:work,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
         defer {try? FileManager.default.removeItem(at:work)}
-        let pixels = work.appendingPathComponent("frames.gray"), clock = work.appendingPathComponent("frames.framecrc")
+        let pixels = work.appendingPathComponent("frames.rgb"), clock = work.appendingPathComponent("frames.framecrc")
         let sourceTime = interval.start+firstTime
         // Retain the preceding keyframe instead of accurate-seek's first frame
         // after the requested time. Only original timestamps and pixel fitting
         // are used here: no fps/setpts, renderer graph, or image-based search.
         let seek = max(0,sourceTime-1), end = min(interval.end,interval.start+lastTime+1.0/30)
-        let maximumFrames = 4096, frameBytes = 160*90
+        let maximumFrames = 4096, frameBytes = 160*90*3
         let filter = "[0:v:0]trim=start=\(origin+interval.start):end=\(origin+end),scale=\(width):\(height),\(comparison),split[pixels][clock]"
         _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-threads","1","-filter_complex_threads","1",
             "-copyts","-noaccurate_seek","-ss",String(seek),"-i",source.path,"-filter_complex",filter,
@@ -717,7 +717,9 @@ public enum Media {
         let first = videoStart-origin, last = first+videoDuration
         let picture = try fittedPictureDimensions(video,profile:profile)
         guard width == picture.width, height == picture.height else {throw JoeyError.failed("Source picture timeline geometry conflicts with display metadata")}
-        var comparison = "scale=160:90,format=gray"
+        // Keep color in the independent source reference. Luminance alone
+        // cannot detect desaturation or hue changes with unchanged timing.
+        var comparison = "scale=160:90,format=rgb24"
         if render.joeBranding != nil {
             // Map only the approved logo footprint into the fitted picture
             // rectangle. Apply the identical mask before sampling both images;
@@ -772,7 +774,7 @@ public enum Media {
                 let actual = try await Processes.run("ffmpeg",["-nostdin","-v","error","-ss",String(batch[0]),"-i",output.path,
                     "-frames:v",String(batch.count),"-vf","select='\(selection)',crop=\(width):\(height):(iw-\(width))/2:(ih-\(height))/2,\(comparison)",
                     "-fps_mode","passthrough","-an","-f","rawvideo","-"])
-                let frameBytes = 160*90
+                let frameBytes = 160*90*3
                 guard actual.stdout.count == batch.count*frameBytes else {throw JoeyError.failed("Source picture timeline sample coverage mismatch")}
                 var sourceIndex = 0
                 for index in batch.indices {
@@ -782,17 +784,24 @@ public enum Media {
                         sourceIndex += 1
                     }
                     let pixels = actual.stdout[(index*frameBytes)..<((index+1)*frameBytes)]
-                    let mean = zip(pixels,expected).reduce(0.0) {$0+abs(Double($1.0)-Double($1.1))}/Double(frameBytes)
+                    let mean = maximumRGBMeanError(Data(pixels),expected)
                     // Retain the existing picture-fidelity bound; source PTS must
                     // establish which frame is compared before examining pixels.
-                    guard mean <= 16 else {throw JoeyError.failed("Source picture timeline differs at output \(batch[index])s: mean pixel error \(mean)")}
+                    guard mean <= 16 else {throw JoeyError.failed("Source picture timeline differs at output \(batch[index])s: maximum RGB channel mean pixel error \(mean)")}
                     comparisons += 1
                 }
             }
             offset += interval.duration
         }
-        return "\(comparisons) independent source-PTS/output-frame comparisons inside the picture rectangle at 2fps plus interval samples, each mean error at most 16/255; common file origin and interval positions checked"
+        return "\(comparisons) independent source-PTS/output-frame RGB comparisons inside the picture rectangle at 2fps plus interval samples, each channel mean error at most 16/255; common file origin and interval positions checked"
             + (render.joeBranding == nil ? "" : "; only the approved logo footprint masked during source content; outro checked separately")
+    }
+    /// Both inputs use packed RGB24. Bound each channel independently so a
+    /// changed color channel cannot hide behind two unchanged channels.
+    private static func maximumRGBMeanError(_ a: Data, _ b: Data) -> Double {
+        var errors = [Double](repeating:0,count:3)
+        for (index,pair) in zip(a,b).enumerated() {errors[index%3] += abs(Double(pair.0)-Double(pair.1))}
+        return (errors.max() ?? 0)/Double(min(a.count,b.count)/3)
     }
     public static func validate(output: URL, source: SourceRecord, clip: ClipRecord, profile: SharedProfile, render: RenderReceipt, work: URL) async throws -> QAReport {
         try validateVideoMapping(source.streams)
@@ -838,17 +847,17 @@ public enum Media {
             checks["audio_fidelity_sync"] = "Independent source-PTS oracle; "+(try validateAudioSamples(a,b,channels:channels,duration:outputDuration))
         }
         if source.kind == .nativeVideo {
-            let expected = work.appendingPathComponent("expected-picture.gray")
+            let expected = work.appendingPathComponent("expected-picture.rgb")
             var filter = compositionFilter(source,clip,outputProfile,branding:branding)
             if source.hasAudio { filter += ";[a]anullsink" }
-            filter += ";[v]fps=2,scale=160:284,format=gray[q]"
+            filter += ";[v]fps=2,scale=160:284,format=rgb24[q]"
             _ = try await Processes.run("ffmpeg",["-nostdin","-v","error"]+compositionInputs(source:source,clip:clip,branding:branding)+["-filter_complex",filter,"-map","[q]","-t",String(outputDuration),"-f","rawvideo","-"],output:expected)
-            let actual = work.appendingPathComponent("actual-picture.gray")
-            _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-i",output.path,"-vf","fps=2,scale=160:284,format=gray","-an","-f","rawvideo","-"],output:actual)
+            let actual = work.appendingPathComponent("actual-picture.rgb")
+            _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-i",output.path,"-vf","fps=2,scale=160:284,format=rgb24","-an","-f","rawvideo","-"],output:actual)
             let a = try Data(contentsOf:expected,options:.mappedIfSafe), b = try Data(contentsOf:actual,options:.mappedIfSafe)
-            guard !a.isEmpty, abs(a.count-b.count) <= 160*284 else { throw JoeyError.failed("Picture sample coverage mismatch") }
-            let mean = zip(a,b).reduce(0.0) {$0+abs(Double($1.0)-Double($1.1))}/Double(min(a.count,b.count))
-            guard mean <= 6 else { throw JoeyError.failed("Source-only picture fidelity failed: mean pixel error \(mean)") }
+            guard !a.isEmpty, !b.isEmpty, abs(a.count-b.count) <= 160*284*3 else { throw JoeyError.failed("Picture sample coverage mismatch") }
+            let mean = maximumRGBMeanError(a,b)
+            guard mean <= 6 else { throw JoeyError.failed("Source-only picture fidelity failed: maximum RGB channel mean pixel error \(mean)") }
             // Check padding locally at each sampled frame. A short overlay
             // must not disappear into a clip-wide or padding-wide average.
             // Exclude a two-sample border around the source picture to avoid
@@ -857,31 +866,31 @@ public enum Media {
             let right = 160-left
             let top = Double(outputProfile.height-render.pictureHeight)/2/Double(outputProfile.height)*284-2
             let bottom = 284-top
-            let frameBytes = 160*284, frames = min(a.count,b.count)/frameBytes
+            let frameBytes = 160*284*3, frames = min(a.count,b.count)/frameBytes
             guard a.count%frameBytes == 0,b.count%frameBytes == 0 else {throw JoeyError.failed("Picture sample geometry mismatch")}
             var maximumPaddingError = 0.0
             for frame in 0..<frames {
                 try Task.checkCancellation()
                 for y in stride(from:0,to:284,by:16) {
                     for x in stride(from:0,to:160,by:16) {
-                        var error = 0.0, samples = 0
+                        var errors = [Double](repeating:0,count:3), samples = 0
                         for row in y..<min(y+16,284) {
                             for column in x..<min(x+16,160) {
                                 if Double(column) >= left,Double(column) <= right,Double(row) >= top,Double(row) <= bottom {continue}
-                                let index = frame*frameBytes+row*160+column
-                                error += abs(Double(a[index])-Double(b[index]))
+                                let index = frame*frameBytes+(row*160+column)*3
+                                for channel in 0..<3 {errors[channel] += abs(Double(a[index+channel])-Double(b[index+channel]))}
                                 samples += 1
                             }
                         }
                         if samples > 0 {
-                            let localMean = error/Double(samples)
+                            let localMean = (errors.max() ?? 0)/Double(samples)
                             guard localMean <= 16 else {throw JoeyError.failed("Source-only picture padding fidelity failed at sampled frame \(frame): local mean pixel error \(localMean)")}
                             maximumPaddingError = max(maximumPaddingError,localMean)
                         }
                     }
                 }
             }
-            checks["picture_fidelity"] = "2fps whole-frame 160x284 grayscale comparison; mean pixel error \(mean)/255; includes padding and source graphics; per-frame 16x16 padding tiles at most 16/255, observed maximum \(maximumPaddingError)"
+            checks["picture_fidelity"] = "2fps whole-frame 160x284 RGB comparison; maximum channel mean pixel error \(mean)/255; includes padding and source graphics; per-frame 16x16 padding tiles each channel at most 16/255, observed maximum \(maximumPaddingError)"
             checks["source_picture_timeline"] = try await validateSourcePictureTiming(output:output,source:source,clip:clip,profile:outputProfile,render:render)
             checks["unrequested_additions"] = branding == nil ? "Source-only render recipe and whole-frame comparison; no added artwork, captions, logos or outro" : "Only hash-pinned DUB logo at x34 y866 size180×180, plus the full approved 7.300-second outro; whole-composition picture and audio comparison passed"
             if let branding {
