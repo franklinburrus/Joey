@@ -1,5 +1,13 @@
 # Main audit repair task — 2026-11-05
 
+### Publication, canonical update and task cleanup
+
+Frank requested push, commit, update and clear after PR completion. PR #14 is MERGED at `5ecbdb0e48464f05b78d4287846f5a3f831027e3`, with reviewed head `ebd62f5cc767d729620a33149baa06e83af49bff`. GitHub code/security reviews completed on that head. No open Joey PRs remained at readback. The complete merged tree equals the reviewed head, and all 121 source/test/project inputs match accepted application evidence. Fresh isolated post-merge checks passed 64 Swift tests, 22 Python tests, CLI dispatch and both native signatures. Existing full-suite/native build proof is reused for identical inputs.
+
+The clean canonical checkout `/Users/frank/Documents/Joey` was fast-forwarded from `e7d974990a5e905df25f0287d3e0e059d02c6ccc` to the verified merge. Its source update is intentional and authorized by the latest instruction. Runtime and audit identities remain protected. After exact clean/fully-merged checks, both task-owned repair/post-merge source worktrees and the local/remote `codex/main-audit-repairs` branch were cleared through ordinary Git operations. The audit worktree, private evidence and unrelated `codex/dub-broadcast-ingestion` branch are retained. No force removal, reset or broad clean was used.
+
+This final update changes documentation only. Its commit/push and canonical/local/origin/live-main agreement are recorded in `/Users/frank/Library/Caches/Joey-Audit-Repairs-20261105/publication-clear/completed.json`, alongside exact cleanup results, unchanged 121 code inputs and protected runtime/audit readback. The earlier 194-identity preservation records remain valid for their pre-update timestamps. Canonical source files now intentionally follow the merged repair tree. Installation, F04 capability renewal, F13 provider/register reconciliation and full real-provider application acceptance retain their separately reported scopes.
+
 ### Authorized completion of remaining Joey PRs
 
 Frank explicitly approved completing all remaining Joey pull requests, including ordinary merge and necessary post-merge verification. Fresh GitHub inventory found only PR #14 open. PR #11 is already closed and PR #13 is already merged. The reviewed repair source and all 121 current source/test/project hashes match the existing source-bound evidence. All 194 monitored original/audit/runtime identities match the preservation baseline.
