@@ -1,3 +1,11 @@
+## Main audit repairs — 2026-11-05
+
+Current tested source is `a12520e4776e459235cf1d0dc6c730ea8033ae37` on `codex/main-audit-repairs`, based on fetched main `e7d974990a5e905df25f0287d3e0e059d02c6ccc`. Final Swift ran 441 tests, with 437 passed, four intentional skips and zero failures. Python passed 22 tests. Debug/Release native builds and their strict deep signatures returned exit 0. Final source/test/project identities cover 121 files. All commands used `Tools/run-local.py` and isolated storage. Complete source binding, F01–F13/U01–U16 tables, original red cases, review corrections, actual commands/results and acceptance boundaries are in [Repair closure](reviews/main-2026-11-05-e7d9749/REPAIR_CLOSURE.md). Private receipts are under `/Users/frank/Library/Caches/Joey-Audit-Repairs-20261105/`.
+
+The actual final candidate app's isolated fixture recap and Resume are observed, with accepted bytes/mtime preserved, 1/1 QA and accurate pending Drive/register status. Six retained generated 600-second outputs have fresh current QA and exact coverage, followed by unchanged final-head coordinator reuse. One new private 15-second real DUB calibration passes current QA. These bounded checks do not establish a fresh full native-video/DUB-audio/Taxstone-audio provider workflow. F03's new-job presentation decision, F04 production evidence renewal and F13's exact provider/register authority remain open. F13's version-2 read-only plan covers 83 names, two parents and 35 typed string cells, with no target formulas or companion/media/sharing writes.
+
+This repair task replaces no installed app, merges no PR and performs no corrective production mutation. The installation record below is historical evidence for its recorded source and scope.
+
 ## Publication and installation binding — 2026-11-05
 
 Fresh closeout verification matches 100 source/test files and all ten installed bundle files to the final app-reliability viewport build. Strict deep signature returned direct exit 0. The installed app already contains the final reviewed source. This documentation-only closeout reuses that verified installation and its rollback receipts. Existing test results remain bound to their recorded inputs and are not claimed as a new test run.
