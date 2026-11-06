@@ -495,7 +495,6 @@ public struct JobRecord: Codable, Identifiable, Sendable {
         }
         try Media.validateSourceDuration(source.duration,expected:request.expectedDuration)
         var previousEnd = 0.0
-        let policy = DurationPolicy(profile:request.profile)
         for clip in clips {
             guard !clip.filename.isEmpty, clip.filename == URL(fileURLWithPath:clip.filename).lastPathComponent,
                   !clip.intervals.isEmpty, clip.qa?.passed == true,
@@ -513,7 +512,14 @@ public struct JobRecord: Codable, Identifiable, Sendable {
                 previousEnd = interval.end
             }
             let expected = clip.expectedDuration + (request.productionWorkflow == .joeBudden ? 7.3 : 0)
-            try policy.validateMeasured(measured,expected:expected)
+            // Reopening uses the immutable saved hard limit. New encodes also
+            // reserve DurationPolicy's current planning/Buffer margins, which
+            // must not retroactively reject accepted historical 140s outputs.
+            guard measured.isFinite, measured > 0,
+                  measured <= request.profile.maxDuration+Planning.tolerance,
+                  abs(measured-expected) <= DurationPolicy.encodingTolerance+Planning.tolerance else {
+                throw JoeyError.failed("Saved measured duration conflicts with its accepted intervals or original hard limit")
+            }
         }
         if request.mode == .fullShow {
             try Planning.validateCoverage(duration:source.duration,exclusions:exclusions.map(\.interval),clips:clips.map(\.intervals))

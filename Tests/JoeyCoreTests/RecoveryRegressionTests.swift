@@ -3,6 +3,32 @@ import Darwin
 @testable import JoeyCore
 
 final class RecoveryRegressionTests: XCTestCase {
+    func testHistoricalAcceptedDurationRetainsSavedHardLimitWithoutNewEncodingMargin() async throws {
+        let root = try workspace()
+        defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.profile.x!.surface = "Buffer X video"
+        request.profile.instagram!.surface = "Buffer Instagram Reel"
+        request.profile.x!.maxDuration = 140
+        request.profile.instagram!.maxDuration = 140
+        var (saved,directory) = try completed(request,root:root)
+        saved.source!.duration = 140
+        saved.transcript!.duration = 140
+        saved.transcript!.segments[0].end = 140
+        saved.clips[0].intervals = [Interval(0,140)]
+        saved.clips[0].measuredDuration = 140
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        XCTAssertThrowsError(try DurationPolicy(profile:request.profile).validateMeasured(140,expected:140),
+            "New exports retain their measured ceiling margin")
+        XCTAssertTrue(saved.hasRequiredCompletionEvidence)
+        let result = try await Coordinator(root:root).run(request)
+        XCTAssertEqual(result.state,.completed,result.error ?? "")
+        XCTAssertEqual(result.clips[0].sha256,saved.clips[0].sha256)
+        var outside = saved
+        outside.clips[0].measuredDuration = 140.001
+        XCTAssertFalse(outside.hasRequiredCompletionEvidence,"A historical receipt cannot exceed its saved hard ceiling")
+    }
+
     func testNoncompletedAcceptedPlanRejectionPreservesCompanionsOnRepeatedResume() async throws {
         let root = try workspace()
         defer {try? FileManager.default.removeItem(at:root)}
