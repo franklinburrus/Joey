@@ -219,6 +219,7 @@ Check disk space, bound concurrency and support cancellation. Use application-ow
 15. COMPLETION STATES
 
 Normal progression: PLANNED, PROCESSING, QA_PASSED, FILED, COMPLETED.
+2026-11-05 repair clarification. FILED is an interim checkpoint after every accepted clip has a verified media receipt. Companion reconciliation, required register readback and final package verification can still be pending. COMPLETED requires the complete package evidence described below.
 Failure reports preserve the exact stage, affected item, error and recovery status.
 A filing outage leaves accepted media as QA_PASSED — NOT FILED.
 

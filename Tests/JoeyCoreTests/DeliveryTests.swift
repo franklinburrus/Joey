@@ -2,6 +2,38 @@ import XCTest
 @testable import JoeyCore
 
 final class DeliveryTests: XCTestCase {
+    func testOAuthConfigurationFailureDoesNotExposeHelperDiagnostics() async throws {
+        let canary = "JOEY_DUMMY_OAUTH_DIAGNOSTIC_DO_NOT_USE"
+        let delivery = try DriveDelivery(remote: "fixture", runHelper: { _, arguments, _ in
+            if arguments.first == "lsjson" { return ProcessResult(stdout: Data("[]".utf8), stderr: "", status: 0) }
+            throw JoeyError.failed(canary)
+        })
+        do {
+            _ = try await delivery.request("files/dummy-only")
+            XCTFail("Failed configuration was accepted")
+        } catch {
+            XCTAssertFalse(error.localizedDescription.contains(canary))
+            XCTAssertTrue(error.localizedDescription.contains("OAuth configuration"))
+        }
+    }
+
+    func testRcloneHelpersDisableBothInternalRetryLevels() async throws {
+        let delivery = try DriveDelivery(remote: "fixture", runHelper: { _, arguments, _ in
+            if arguments.first == "config" { throw JoeyError.failed("Dummy configuration refusal") }
+            for flag in ["--retries", "--low-level-retries"] {
+                guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else {
+                    XCTFail("Missing bounded rclone flag \(flag)")
+                    continue
+                }
+                XCTAssertEqual(arguments[index + 1], "1")
+            }
+            if arguments.first == "lsjson" { return ProcessResult(stdout: Data("[]".utf8), stderr: "", status: 0) }
+            throw JoeyError.failed("Dummy configuration refusal")
+        })
+        do { _ = try await delivery.request("files/dummy-only"); XCTFail("Expected dummy failure") }
+        catch {}
+    }
+
     func testAuthoritativeDUBRootsReplaceRetiredJoeyFolders() {
         XCTAssertEqual(DriveDelivery.videoRoot, "1380CHJ3a3kl7fXNIKWqUM7_DeTZUwxsy")
         XCTAssertEqual(DriveDelivery.audioRoot, "1FRi-yy2D9yenjQRailTA2iAbPaqAEPXm")

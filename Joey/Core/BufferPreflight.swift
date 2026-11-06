@@ -223,7 +223,10 @@ public enum BufferPreflight {
             throw JoeyError.dependency("Buffer preflight: current Drive identity, integrity, placement or source/owner metadata does not match the accepted receipt")
         }
         let current = permissions.map {"\($0["type"] as? String ?? "unknown"):\($0["role"] as? String ?? "unknown")"}.sorted()
-        guard current == receipt.permissions.sorted() else {throw JoeyError.dependency("Buffer preflight: Drive access changed since accepted filing; reconcile existing permissions without expanding sharing")}
+        guard current == receipt.permissions.sorted(), let fingerprint = receipt.permissionFingerprint,
+              try DriveDelivery.permissionFingerprint(file) == fingerprint else {
+            throw JoeyError.dependency("Buffer preflight: Drive access changed or lacks accepted permission evidence; reconcile existing permissions without expanding sharing")
+        }
     }
 
     static func validDriveID(_ value: String) -> Bool {value.range(of:"^[A-Za-z0-9_-]{10,}$",options:.regularExpression) != nil}

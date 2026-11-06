@@ -152,7 +152,7 @@ public actor Coordinator {
         }
         var job = matches.first ?? JobRecord(id:id,request:supplied)
         var request = job.request
-        let config = try Configuration.load(root:root,discoverTranscription:job.state != .completed && request.transcriptPolicy != .modelIndependent)
+        let config = try Configuration.load(root:root,discoverTranscription:job.state != .completed && job.completionReconciliationRequired != true && request.transcriptPolicy != .modelIndependent)
         let storage = try StorageManager(root:root,lock:lock)
         if job.state != .completed,StorageManager.automaticCleanupEnabled(root:root) {_ = try? storage.clean()}
         try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
@@ -169,23 +169,35 @@ public actor Coordinator {
             try request.profile.validate()
         }
         var completedReadbackPassed = false
+        let reopeningCompleted = job.state == .completed || job.completionReconciliationRequired == true
         var sourceValidationSnapshot = job
         var validatingSource = false
         do {
-            if job.state == .completed {
+            if reopeningCompleted {
                 guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Completed checkpoint lacks required delivery evidence")}
+                try Records.validateSavedManifest(job:job,directory:dir)
                 for clip in job.clips {
-                    guard try Integrity.sha256(dir.appendingPathComponent(clip.filename)) == clip.sha256 else {throw JoeyError.failed("Completed output changed: \(clip.filename)")}
+                    let local = dir.appendingPathComponent(clip.filename)
+                    if FileManager.default.fileExists(atPath:local.path) {
+                        guard try Integrity.sha256(local) == clip.sha256 else {throw JoeyError.failed("Completed output changed: \(clip.filename)")}
+                    }
                 }
-                // Current local bytes match accepted receipts. Reopening does
-                // not claim a new provider readback or require network access.
+                // Available local bytes match accepted receipts. Missing caches
+                // do not prove a remote copy is absent. Reopening does not claim
+                // a new provider readback or require network access.
                 completedReadbackPassed = true
                 let previous = job.request
                 try renewCapabilityEvidence(requireCurrent:false)
-                if job.request != previous {try await save()}
+                let reconciled = job.completionReconciliationRequired == true
+                job.completionReconciliationRequired = nil
+                job.state = .completed;job.stage = "complete";job.error = nil
+                if job.request != previous || reconciled {try await save()}
                 try await progress(job); return job
             }
             job.stage = "capability verification"
+            if !job.clips.isEmpty, job.clips.allSatisfy({$0.qa?.passed == true}) {
+                try job.validateAcceptedPlan()
+            }
             try renewCapabilityEvidence(requireCurrent:true)
             sourceValidationSnapshot = job
             let delivery: any CoordinatorDelivery = try Self.deliveryOverride ?? DriveDelivery(remote:config.rcloneRemote)
@@ -299,6 +311,9 @@ public actor Coordinator {
                 try Task.checkCancellation()
                 let clip = job.clips[index], output = dir.appendingPathComponent(clip.filename)
                 if clip.qa?.passed == true, let sha = clip.sha256, (try? Integrity.sha256(output)) == sha {continue}
+                // The saved contract was checked before entering processing.
+                // A supported re-encode issues fresh QA and a new final binding.
+                job.acceptedPlanSHA256 = nil
                 if source.kind == .audio, !artworkValidated {
                     job.stage = "artwork"; try await save()
                     try authorizeNewOperation()
@@ -389,6 +404,8 @@ public actor Coordinator {
             }
             guard failures.isEmpty, job.clips.allSatisfy({$0.qa?.passed == true}) else {throw JoeyError.failed(failures.joined(separator:"\n"))}
             if request.mode == .fullShow {try Planning.validateCoverage(duration:source.duration,exclusions:job.exclusions.map(\.interval),clips:job.clips.map(\.intervals))}
+            try job.validateAcceptedPlan()
+            job.acceptedPlanSHA256 = try job.acceptancePlanHash()
             job.state = .qaPassed; job.stage = "local package"; try await save()
             _ = try Records.write(job:job,directory:dir)
             if !request.fileToDrive {return job}
@@ -464,6 +481,7 @@ public actor Coordinator {
                 return job
             }
             let hasAccepted = !job.clips.isEmpty && job.clips.allSatisfy {$0.qa?.passed == true}
+            if reopeningCompleted {job.completionReconciliationRequired = true}
             job.state = error is CancellationError ? .cancelled : (hasAccepted ? .qaPassed : .failed)
             if let blocked = error as? StorageBlocked {
                 job.state = .processing;job.stage = "Storage blocked — capacity recheck in 60 seconds"
@@ -471,7 +489,7 @@ public actor Coordinator {
             } else {job.storageRequiredBytes = nil}
             job.error = error is CancellationError ? "Cancelled; progress preserved for resume" : error.localizedDescription
             try await save()
-            if job.source != nil {_ = try? Records.write(job:job,directory:dir)}
+            if job.source != nil, !reopeningCompleted {_ = try? Records.write(job:job,directory:dir)}
             return job
         }
     }

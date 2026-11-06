@@ -107,4 +107,24 @@ final class AudioFidelityTests: XCTestCase {
             XCTAssertTrue($0.localizedDescription.contains("75ms encoding tolerance"), $0.localizedDescription)
         }
     }
+
+    func testShortWindowsRetainSourceSilenceQuietAudioAndEndpointAllowance() throws {
+        var source = tone(count: rate * 2)
+        for index in 4_800..<6_000 { source[index] = 0 }
+        for index in 12_000..<15_000 { source[index] *= 0.0001 }
+        XCTAssertNoThrow(try Media.validateAudioSamples(source, source, channels: 1, duration: 2))
+        XCTAssertNoThrow(try Media.validateAudioSamples(source, Array(source.dropLast(900)), channels: 1, duration: 2))
+    }
+
+    func testShortDropoutAtFractionalWindowPositionFailsInEitherChannel() {
+        let signal = tone(count: rate * 2)
+        var damaged = signal
+        for index in 5_136..<6_336 { damaged[index] = 0 }
+        XCTAssertThrowsError(try Media.validateAudioSamples(signal, damaged, channels: 1, duration: 2)) {
+            XCTAssertTrue($0.localizedDescription.contains("short-window"), $0.localizedDescription)
+        }
+        for output in [stereo(signal, damaged), stereo(damaged, signal)] {
+            XCTAssertThrowsError(try Media.validateAudioSamples(stereo(signal, signal), output, channels: 2, duration: 2))
+        }
+    }
 }

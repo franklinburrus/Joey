@@ -3,6 +3,124 @@ import Darwin
 @testable import JoeyCore
 
 final class RecoveryRegressionTests: XCTestCase {
+    func testAcceptedPlanBindingRejectsChangedSourceProfileQAAndIntervals() throws {
+        let root = try workspace()
+        defer {try? FileManager.default.removeItem(at:root)}
+        let request = try Fixtures.request(dir:root,path:"unused")
+        let (saved,_) = try completed(request,root:root)
+        var bound = saved
+        bound.acceptedPlanSHA256 = try bound.acceptancePlanHash()
+        XCTAssertTrue(bound.hasRequiredCompletionEvidence)
+        for fault in ["source", "profile", "qa", "interval", "title"] {
+            var changed = bound
+            switch fault {
+            case "source": changed.source!.duration = 101
+            case "profile": changed.request.profile.x!.maxFPS = 31
+            case "qa": changed.clips[0].qa!.checks["changed"] = "Different QA input"
+            case "interval": changed.clips[0].intervals = [Interval(0,50),Interval(50,100)]
+            default: changed.clips[0].title = "Revised title requires reconciled evidence"
+            }
+            XCTAssertFalse(changed.hasRequiredCompletionEvidence,fault)
+        }
+        var wrongHash = saved
+        wrongHash.request.expectedSourceSHA256 = String(repeating:"b",count:64)
+        XCTAssertFalse(wrongHash.hasRequiredCompletionEvidence)
+        var wrongDuration = saved
+        wrongDuration.request.expectedDuration = 200
+        XCTAssertFalse(wrongDuration.hasRequiredCompletionEvidence)
+    }
+
+    func testLegitimateRevisedFractionalPlanReopensWithManifestAndWithoutCache() async throws {
+        let root = try workspace()
+        defer {try? FileManager.default.removeItem(at:root)}
+        let request = try Fixtures.request(dir:root,path:"unused")
+        var (saved,directory) = try completed(request,root:root)
+        saved.clips[0].intervals = [Interval(0,37.125),Interval(37.125,100)]
+        saved.acceptedPlanSHA256 = try saved.acceptancePlanHash()
+        var manifestJob = saved
+        manifestJob.state = .filed
+        _ = try Records.write(job:manifestJob,directory:directory)
+        let manifest = directory.appendingPathComponent("clip_manifest.json")
+        saved.companions[manifest.lastPathComponent]!.sha256 = try Integrity.sha256(manifest)
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let first = try await Coordinator(root:root).run(request)
+        XCTAssertEqual(first.state,.completed,first.error ?? "")
+        let before = try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename))
+        try FileManager.default.removeItem(at:manifest)
+        try FileManager.default.removeItem(at:URL(fileURLWithPath:saved.source!.path))
+        let offline = try await Coordinator(root:root).run(request)
+        XCTAssertEqual(offline.state,.completed,offline.error ?? "")
+        XCTAssertEqual(try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename)),before)
+        try FileManager.default.removeItem(at:directory.appendingPathComponent(saved.clips[0].filename))
+        let evicted = try await Coordinator(root:root).run(request)
+        XCTAssertEqual(evicted.state,.completed,evicted.error ?? "")
+        XCTAssertEqual(evicted.clips[0].drive,first.clips[0].drive)
+    }
+
+    func testCompletedReopenPreservesConflictingManifest() async throws {
+        let root = try workspace()
+        defer {try? FileManager.default.removeItem(at:root)}
+        let request = try Fixtures.request(dir:root,path:"unused")
+        var (saved,directory) = try completed(request,root:root)
+        var stale = saved
+        stale.clips[0].intervals = [Interval(0,50)]
+        _ = try Records.write(job:stale,directory:directory)
+        let manifest = directory.appendingPathComponent("clip_manifest.json")
+        let bytes = try Data(contentsOf:manifest)
+        saved.companions[manifest.lastPathComponent]!.sha256 = try Integrity.sha256(manifest)
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let result = try await Coordinator(root:root).run(request)
+        XCTAssertNotEqual(result.state,.completed)
+        XCTAssertEqual(try Data(contentsOf:manifest),bytes)
+        XCTAssertFalse(result.resumesAutomatically)
+        let retried = try await Coordinator(root:root).run(request)
+        XCTAssertNotEqual(retried.state,.completed)
+        XCTAssertEqual(try Data(contentsOf:manifest),bytes)
+        XCTAssertFalse(retried.resumesAutomatically)
+        // Restoring independently verified original evidence permits a local
+        // reconciliation retry without a render, upload or approval gate.
+        var corrected = saved
+        corrected.state = .filed
+        _ = try Records.write(job:corrected,directory:directory)
+        saved.companions[manifest.lastPathComponent]!.sha256 = try Integrity.sha256(manifest)
+        saved.state = .qaPassed
+        saved.completionReconciliationRequired = true
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let reconciled = try await Coordinator(root:root).run(request)
+        XCTAssertEqual(reconciled.state,.completed,reconciled.error ?? "")
+        XCTAssertNil(reconciled.completionReconciliationRequired)
+    }
+
+    func testCompletedReopenRejectsReducedCoverageAndChangedNumbering() async throws {
+        for fault in ["omitted-source-half", "clip-number-seven", "duplicate-name", "duplicate-number"] {
+            let root = try workspace()
+            defer {try? FileManager.default.removeItem(at:root)}
+            let request = try Fixtures.request(dir:root,path:"unused")
+            var (saved,directory) = try completed(request,root:root)
+            if fault == "omitted-source-half" {saved.clips[0].intervals = [Interval(0,50)]}
+            if fault == "clip-number-seven" {saved.clips[0].id = 7}
+            if fault.hasPrefix("duplicate") {
+                saved.clips[0].intervals = [Interval(0,50)]
+                var second = saved.clips[0]
+                second.id = fault == "duplicate-number" ? 1 : 2
+                second.intervals = [Interval(50,100)]
+                if fault == "duplicate-number" {second.filename = "second.mp4"}
+                second.drive!.id = "second-synthetic-drive-id"
+                second.drive!.name = second.filename
+                saved.clips.append(second)
+                saved.registerRows.append("second-fixture-row")
+            }
+            try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+            let persisted: JobRecord = try Persistence.load(directory.appendingPathComponent("job.json"))
+            let before = try Data(contentsOf:directory.appendingPathComponent(saved.clips[0].filename))
+            XCTAssertFalse(saved.hasRequiredCompletionEvidence,fault)
+            let result = try await Coordinator(root:root).run(request)
+            XCTAssertNotEqual(result.state,.completed,fault)
+            XCTAssertEqual(result.clips,persisted.clips,fault)
+            XCTAssertEqual(try Data(contentsOf:directory.appendingPathComponent(saved.clips[0].filename)),before,fault)
+        }
+    }
+
     func testIncompleteNativeJobWithUnsupportedDimensionsCannotResumeProviderWrites() async throws {
         let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
         var request = try Fixtures.request(dir:root,path:"unused")
@@ -133,7 +251,7 @@ final class RecoveryRegressionTests: XCTestCase {
         job.planningBasis = .transcriptAssisted
         job.folderID = receipt.parent
         job.clips = [ClipRecord(id:1,title:"Synthetic",intervals:[Interval(0,100)],filename:output.lastPathComponent,
-            measuredDuration:100,bytes:bytes,sha256:hash,qa:QAReport(checkedAt:Date(),checks:[:],outputSHA256:hash,passed:true,
+            measuredDuration:request.productionWorkflow == .joeBudden ? 107.3 : 100,bytes:bytes,sha256:hash,qa:QAReport(checkedAt:Date(),checks:[:],outputSHA256:hash,passed:true,
                 limitations:["Synthetic checkpoint fixture; no media or provider acceptance"]),drive:receipt)]
         let destination = try DestinationResolver.resolve(source:job.source!,request:request,asset:.clip)
         job.clips[0].drive!.destination = destination

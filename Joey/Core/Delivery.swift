@@ -21,7 +21,19 @@ public actor DriveDelivery {
         self.remote = remote; self.session = session; self.helperRunner = runHelper
     }
     private func runHelper(_ executable: String, _ arguments: [String], maxOutput: Int = 16*1024*1024) async throws -> ProcessResult {
-        try await helperRunner(executable,arguments,maxOutput)
+        var boundedArguments = arguments
+        if executable == "rclone", arguments.first != "config" {
+            // Native readers or mutation reconciliation own the attempt budget.
+            for flag in ["--retries", "--low-level-retries"] where !boundedArguments.contains(flag) {
+                boundedArguments += [flag, "1"]
+            }
+        }
+        return try await helperRunner(executable,boundedArguments,maxOutput)
+    }
+    private func runReadHelper(_ executable: String, _ arguments: [String], maxOutput: Int = 16*1024*1024) async throws -> ProcessResult {
+        try await Processes.retry {
+            try await self.runHelper(executable,arguments,maxOutput:maxOutput)
+        }
     }
     public func preflight(tab: String) async throws -> [String:String] {
         var result: [String:String] = [:]
@@ -40,14 +52,24 @@ public actor DriveDelivery {
     private func authenticate() async throws {
         // Let the already authorized rclone remote refresh its own token. Secrets
         // stay in process memory and its existing config, never job records/logs.
-        _ = try await runHelper("rclone",["lsjson",remote+":","--drive-root-folder-id",DestinationResolver.dubRoot,"--max-depth","1"])
-        let config = try await runHelper("rclone",["config","dump"],maxOutput:1024*1024)
-        guard let root = try JSONSerialization.jsonObject(with:config.stdout) as? [String:Any],
-              let entry = root[remote] as? [String:Any], entry["type"] as? String == "drive",
-              let raw = entry["token"] as? String, let data = raw.data(using:.utf8),
-              let value = try JSONSerialization.jsonObject(with:data) as? [String:Any],
-              let access = value["access_token"] as? String, !access.isEmpty else { throw JoeyError.dependency("Existing rclone remote does not expose a usable authorized Drive OAuth token") }
-        token = access
+        _ = try await runReadHelper("rclone",["lsjson",remote+":","--drive-root-folder-id",DestinationResolver.dubRoot,"--max-depth","1"])
+        do {
+            let config = try await runHelper("rclone",["config","dump"],maxOutput:1024*1024)
+            guard config.status == 0,
+                  let root = try JSONSerialization.jsonObject(with:config.stdout) as? [String:Any],
+                  let entry = root[remote] as? [String:Any], entry["type"] as? String == "drive",
+                  let raw = entry["token"] as? String, let data = raw.data(using:.utf8),
+                  let value = try JSONSerialization.jsonObject(with:data) as? [String:Any],
+                  let access = value["access_token"] as? String, !access.isEmpty else {
+                throw JoeyError.dependency("Existing rclone remote does not expose a usable authorized Drive OAuth token")
+            }
+            token = access
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // A malformed dump or helper error may contain token material.
+            throw JoeyError.dependency("Existing rclone OAuth configuration could not be read; check the authorized remote")
+        }
     }
     func request(_ path: String, method: String = "GET", query: [String:String] = [:], body: Any? = nil, sheets: Bool = false) async throws -> [String:Any] {
         if token == nil { try await authenticate() }
@@ -197,7 +219,7 @@ public actor DriveDelivery {
                 defer {try? FileManager.default.removeItem(at:temporary)}
                 let info = try await metadata(manifestID)
                 guard info["parents"] as? [String] == [id],info["trashed"] as? Bool == false else {throw JoeyError.failed("Existing manifest location changed")}
-                _ = try await runHelper("rclone",["copyto",remote+":clip_manifest.json",temporary.path,"--drive-root-folder-id",id,"--retries","1"])
+                _ = try await runReadHelper("rclone",["copyto",remote+":clip_manifest.json",temporary.path,"--drive-root-folder-id",id,"--retries","1"])
                 guard try Integrity.md5(temporary) == info["md5Checksum"] as? String else {throw JoeyError.failed("Existing manifest integrity readback failed")}
                 let prior: JobRecord = try Persistence.load(temporary)
                 guard prior.source?.id == source.id,prior.source?.owner == source.owner,prior.source?.sha256 == source.sha256,
@@ -416,7 +438,7 @@ public actor DriveDelivery {
     private func readCompanion(local: URL, receipt: DriveReceipt) async throws {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("joey-drive-readback-"+UUID().uuidString)
         defer {try? FileManager.default.removeItem(at:temporary)}
-        _ = try await runHelper("rclone",["copyto",remote+":"+receipt.name,temporary.path,"--drive-root-folder-id",receipt.parent,"--retries","1","--transfers","1","--checkers","1"])
+        _ = try await runReadHelper("rclone",["copyto",remote+":"+receipt.name,temporary.path,"--drive-root-folder-id",receipt.parent,"--retries","1","--transfers","1","--checkers","1"])
         guard try Integrity.sha256(temporary) == receipt.sha256 else {throw JoeyError.failed("Downloaded companion bytes differ: \(receipt.name)")}
     }
     public func verifyPackage(job: JobRecord, directory: URL) async throws {
@@ -444,7 +466,7 @@ public actor DriveDelivery {
             let meta = try await metadata(id)
             guard let parent = (meta["parents"] as? [String])?.first, let name = meta["name"] as? String else { throw JoeyError.dependency("Approved DUB art metadata unavailable") }
             let local = root.appendingPathComponent("approved-dub-art.png")
-            _ = try await runHelper("rclone",["copyto",remote+":"+name,local.path,"--drive-root-folder-id",parent])
+            _ = try await runReadHelper("rclone",["copyto",remote+":"+name,local.path,"--drive-root-folder-id",parent])
             let sha = try Integrity.sha256(local)
             guard sha == "1522d2fbbbb6d943cd08cb07b617212be4fafcb841c7dcdba713fe81c4fdc790" else { throw JoeyError.failed("Approved DUB artwork bytes changed") }
             return Artwork(owner:.dub,sourceID:nil,driveID:id,file:EvidenceFile(path:local.path,sha256:sha,basis:"Exact approved Drive artwork"))
@@ -458,7 +480,7 @@ public actor DriveDelivery {
             }
             if matches.count == 1, let name = matches[0]["name"] as? String, let id = matches[0]["id"] as? String {
                 let local = root.appendingPathComponent("taxstone-"+Persistence.safeName(source.id)+".art")
-                _ = try await runHelper("rclone",["copyto",remote+":"+name,local.path,"--drive-root-folder-id",parent])
+                _ = try await runReadHelper("rclone",["copyto",remote+":"+name,local.path,"--drive-root-folder-id",parent])
                 return Artwork(owner:.taxstone,sourceID:source.id,driveID:id,file:EvidenceFile(path:local.path,sha256:try Integrity.sha256(local),basis:"Unique source-ID-matching image in established Taxstone archive"))
             }
         }

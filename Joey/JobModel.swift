@@ -79,7 +79,8 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             }
         }
     }
-    func startLink(_ raw: String, content: LinkContent, mode: JobMode, archive: String, archiveRoot: String, transcript: String) {
+    func startLink(_ raw: String, content: LinkContent, mode: JobMode, archive: String, archiveRoot: String, transcript: String,
+                   lookup: @escaping (String) async throws -> DiscoveredSource = {try await SourceDiscovery.lookup($0)}) {
         guard checkpointFailures.isEmpty else {
             error = "Restore the reported unreadable checkpoints and Refresh history before importing a new job. Existing readable jobs remain available."
             return
@@ -89,7 +90,18 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         Task {
             defer {preparingSource = false}
             do {
-                let source = try await SourceDiscovery.lookup(raw.trimmingCharacters(in:.whitespacesAndNewlines))
+                let raw = raw.trimmingCharacters(in:.whitespacesAndNewlines)
+                let inventory = try await coordinator?.inventory()
+                guard inventory?.failures.isEmpty != false else {
+                    throw JoeyError.dependency("Restore the reported unreadable checkpoints and Refresh history before importing a new job. Existing readable jobs remain available.")
+                }
+                if let prior = try ProductionIntake.existingRequest(for: raw, content: content, mode: mode,
+                    requests: (inventory?.jobs ?? jobs).map(\.request), archive: archive.isEmpty ? nil : archive,
+                    archiveRoot: archiveRoot.isEmpty ? nil : archiveRoot, transcript: transcript.isEmpty ? nil : transcript) {
+                    start(prior)
+                    return
+                }
+                let source = try await lookup(raw)
                 let request = try ProductionIntake.request(source:source,content:content,mode:mode,sharedProfile:content == .taxstone ? configuration?.taxstoneProfile : configuration?.profile,
                     archive:archive.isEmpty ? nil:archive,archiveRoot:archiveRoot.isEmpty ? nil:archiveRoot,transcript:transcript.isEmpty ? nil:transcript)
                 start(request)
@@ -300,18 +312,9 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             if request == nil {
                 // Reuse a matching prior manual/automatic contract before
                 // looking up mutable provider titles or constructing a new ID.
-                let matches = jobs.filter {
-                    $0.request.sourceID == work.source.id &&
-                    $0.request.owner == (work.workflow.content == .taxstone ? .taxstone:.dub) &&
-                    ($0.request.productionWorkflow == .link || $0.request.productionWorkflow == .joeBudden) &&
-                    $0.request.mode == (work.workflow.content == .joeBudden ? .fullShow:work.workflow.mode) &&
-                    $0.request.fixedIntervals == nil && $0.request.requestedCount == nil && $0.request.adExclusions.isEmpty &&
-                    $0.request.preferredDuration == nil && $0.request.transcriptPolicy == nil &&
-                    ($0.request.productionWorkflow == .joeBudden || ($0.request.archiveRootID ?? "") == work.workflow.archiveRoot) &&
-                    (work.workflow.content != .joeBudden || $0.request.productionWorkflow == .joeBudden)
-                }
-                guard matches.count <= 1 else {throw JoeyError.dependency("Multiple existing source contracts match; select the existing job instead of creating another")}
-                if let prior = matches.first {request = prior.request}
+                if let prior = try ProductionIntake.existingRequest(for: work.source.url,
+                    content: work.workflow.content, mode: work.workflow.mode, requests: jobs.map(\.request),
+                    archiveRoot: work.workflow.archiveRoot.isEmpty ? nil : work.workflow.archiveRoot) {request = prior}
                 else {
                     let source = try await email.lookup(work.source.url)
                     guard source.id == work.source.id else {throw JoeyError.invalid("Email source identity changed during discovery")}

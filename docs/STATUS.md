@@ -1,3 +1,19 @@
+# Main audit repair task — 2026-11-05
+
+## Mission and authorized boundary
+
+Repair confirmed actionable F01–F13 findings against freshly fetched main, account for U01–U16, verify production entry points, and deliver one reviewed remediation PR with terminal checks. The preserved audit at `/Users/frank/Documents/Joey-reviews/main-2026-11-05-e7d9749/docs/reviews/main-2026-11-05-e7d9749/` remains historical evidence. REQUIREMENTS.md remains the product specification.
+
+Base is `e7d974990a5e905df25f0287d3e0e059d02c6ccc`. Original checkout is clean on main at that SHA. Origin is `https://github.com/franklinburrus/Joey.git`. Fresh fetch returned exit 0 and unchanged main. No matching remediation PR exists. Repair worktree is `/Users/frank/Documents/Joey-repairs/main-audit-2026-11-05`, branch `codex/main-audit-repairs`.
+
+Authorized deliverables are scoped production fixes, regression tests, local builds and isolated acceptance, documentation, commits/push/PR, independent review and CI monitoring, plus read-only operational checks. Provider mutations, merge, installation, public distribution, sharing and credential changes require applicable exact authority. Preserve original/audit worktrees, runtime identities, originals, accepted media, receipts, models and OAuth. Private evidence belongs under `/Users/frank/Library/Caches/Joey-Audit-Repairs-20261105/`.
+
+Completion requires evidenced dispositions for every finding and uncertainty, corrected original reproductions, applicable full Swift/Python suites and Debug/Release builds, review corrections, terminal available PR checks, aligned final head/evidence, and preservation readback. Code, operational reconciliation, PR, installation and real application acceptance remain separate. Exact unavailable acceptance inputs remain dependencies.
+
+Execution follows audit roadmap A00–A13. Start read-only F13 ledger revalidation. Then content/plan integrity, fidelity, admission evidence, boundaries/intake, retry/capture and permission fixes. Finish uncertainty characterization, candidate/native acceptance where authorized, broad review, push/PR and terminal checks. F03 presentation choice is pending Frank's precise response. Optional extensions and speculative power-loss proof are outside mandatory core repair gates.
+
+Current progress is baseline verified and repair isolation created. Original file/runtime and audit identity snapshot is `preservation-before.json` in the private repair cache. Next work is read-only provider reconciliation and original failing reproductions. Canonical dispositions and command evidence will be maintained in `docs/reviews/main-2026-11-05-e7d9749/REPAIR_CLOSURE.md`.
+
 ## Final source and installed-app record — 2026-11-05
 
 Frank authorized updating, committing, pushing and installing all current Joey work. The five application repairs and native installation are verified at code commit `261c894bed9a5649e3af0fbecb8900d710384cab`. The remaining three historical audit documents are included in this closeout, with their November 4 claims explicitly scoped to that snapshot. Current app-only scope continues to exclude content processing and provider writes.
