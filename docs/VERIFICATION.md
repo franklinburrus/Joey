@@ -1,3 +1,11 @@
+## Operational F04/F13 closure — 2026-11-06
+
+Frank explicitly authorized both operational findings. F04 now has actual connected/unlocked DUB/Taxstone account/surface observations and five current official-document reads, persistent hash-bound evidence, current admission/renewal PASS and unchanged immutable/unknown settings. checkedAt is 2026-11-06T11:33:25Z and validUntil is 2026-11-07T11:33:25Z. Exactly 20 approved observation leaf values changed. The 24-hour validity window retains the established operational pattern.
+
+F13 applied the approved 83 metadata name patches, two exact episode-parent moves and 35 conditional timestamp-string corrections. Conditional strong-ETag Drive v2 requests and production v3 readback preserve identities/access/bytes, with all 83 names, both parents, eight unchanged companion byte hashes, 83 unique register rows and 1660 required fields verified. Each Sheet reply changed one cell and zero formulas. Independent full-register comparison finds only R4417:R4451 changed. All 38 other runtime records match. Production verifyPackage/manifest/native predicates pass, followed by actual candidate UI showing the two original job recap copies Completed at 48/48 and 35/35 in isolated read-only storage.
+
+No application implementation changed. All diagnostics used Tools/run-local.py and existing authorized OAuth, with secret-bearing output in bounded process memory. Independent readback at 2026-11-06T12:25:55Z and the owned native recap observation close both findings. Current private receipts are under operational-closure-20261106 in the existing repair cache. New source-to-provider acceptance, optional downstream ingestion and installed-app replacement retain their separate scopes. [Repair closure](reviews/main-2026-11-05-e7d9749/REPAIR_CLOSURE.md)
+
 ## Final publication and cleanup — 2026-11-05
 
 PR #14 merged as `5ecbdb0e48464f05b78d4287846f5a3f831027e3`. Its complete tree matches reviewed head `ebd62f5cc767d729620a33149baa06e83af49bff`. All 121 accepted source/test/project hashes match. Fresh post-merge isolated verification passed 64 Swift tests, 22 Python tests, actual CLI dispatch and both native signatures. Full-suite/native-build evidence below remains source-bound and is reused for unchanged inputs. Exact merge/readback results are in the private `pr-integration/merge-closure.json` receipt.

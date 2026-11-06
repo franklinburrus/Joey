@@ -1,3 +1,7 @@
+## Approved operational follow-through — 2026-11-06
+
+F04 evidence renewal and the exact F13 plan are executed and independently verified under Frank's explicit approval. Actual owner-bound evidence is current until 2026-11-07T11:33:25Z. Both native admission/renewal checks pass. The two historical DUB packages now have all 83 expected names, correct root parents, intact bytes/access/companions and exact required register values, with 35 typed cells corrected and zero formula changes. Current candidate recap copies display Completed at 48/48 and 35/35. Documentation/source publication follows the existing closeout authority. Remaining fresh application/provider scenarios are evidence limitations, separately scoped from these completed operational findings. [Repair closure](reviews/main-2026-11-05-e7d9749/REPAIR_CLOSURE.md)
+
 ## Main audit repair task — 2026-11-05
 
 The current authorized repair task follows the preserved main audit roadmap A00–A13 on an isolated worktree. REQUIREMENTS.md remains the sole product specification. F01/F02/F05–F12 code repairs are verified at `a12520e4776e459235cf1d0dc6c730ea8033ae37`, with 437 Swift passes/four intentional skips/zero failures, 22 Python passes, Debug/Release builds, strict signatures and independent review. The code preserves accepted historical hard limits and evidence while enforcing current new-render QA. Full finding/uncertainty dispositions and primary proof are in [Repair closure](reviews/main-2026-11-05-e7d9749/REPAIR_CLOSURE.md).
