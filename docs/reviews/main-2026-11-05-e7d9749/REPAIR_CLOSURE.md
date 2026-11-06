@@ -16,7 +16,7 @@ The authorized objective is scoped repairs, regressions, isolated native builds/
 
 Production/provider/register mutations, sharing changes, credential reconfiguration, merge, installation and distribution require applicable exact authority. No new such authority was inferred from historical delivery or setup reports. Operational dependencies remain separate from code repair. Optional assistant/mail/downstream execution and speculative power-loss guarantees are outside mandatory core repair gates.
 
-Git closure requires the actual PR, final head/base and terminal available checks to be read back. Source, operational reconciliation, native/provider acceptance and installation are separately reported below. Original worktrees, accepted media, originals, transcripts, receipts, models, OAuth and unrelated work remain protected.
+The focused PR is [#14](https://github.com/franklinburrus/Joey/pull/14), targeting main and remaining OPEN/unmerged. Its exact final documentation head, base, terminal available checks/review state and unchanged tested-input verification are read back into private pr-closure.json and its description. Initial readback at creation returned MERGEABLE/CLEAN, no CI checks, no repository rulesets and running code/security review automation. Independent local review is complete. Source, operational reconciliation, native/provider acceptance and installation are separately reported below. Original worktrees, accepted media, originals, transcripts, receipts, models, OAuth and unrelated work remain protected.
 
 ## Finding-disposition table
 
@@ -117,7 +117,7 @@ The independent ledger checks all 83 clips, 8 rehashed companions, 91 permission
 | Required real DUB audio production path | UNVERIFIED | Only a compliant 15-second local calibration is current. Full selected source/transcript/provider acceptance missing |
 | Required real Taxstone audio production path | UNVERIFIED | Selected eligible episode/original/matching art and provider-operation scope missing |
 | Existing two DUB package reconciliation | OPEN | Exact provider/register authority pending, prepared read-only plan above |
-| PR/push/terminal checks | Git closure in progress | Actual URL/head/check readback will be recorded after creation |
+| PR/push/terminal checks | PR #14 OPEN, branch published | Initial checks list empty, code/security automation started. Final exact head/base and terminal state are in the PR description and private pr-closure.json, with 121 tested-input equivalence |
 | Merge | Not authorized | No merge performed |
 | Installation/distribution | Outside current action authority | Installed app not replaced. Candidate builds remain private local artifacts |
 | Original/audit/runtime preservation | VERIFIED monitored scope | All 194 tracked/audit/runtime identities match original hash/size/nanosecond mtime. All 121 tested source/test/project inputs match. Accepted fixture/source/art hash/mtime checks pass. No comprehensive production-media or OAuth-config rehash claimed |
