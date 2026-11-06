@@ -2,6 +2,37 @@ import XCTest
 @testable import JoeyCore
 
 final class MediaTests: XCTestCase {
+    func testNativeLandscapeContractForDUBAndTaxstone() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:directory)}
+        let original = directory.appendingPathComponent("native-source.mp4")
+        _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-f","lavfi","-i","testsrc2=s=320x180:r=30:d=2",
+            "-an","-c:v","libx264","-pix_fmt","yuv420p",original.path])
+        let originalHash = try Integrity.sha256(original)
+        for owner in [Owner.dub,.taxstone] {
+            var request = try Fixtures.request(dir:directory,path:original.path)
+            request.owner = owner
+            let source = try await Media.inspect(original,request:request)
+            let clip = ClipRecord(id:1,title:"Landscape contract",intervals:[Interval(0,2)],filename:owner.rawValue+"-landscape.mp4")
+            let work = directory.appendingPathComponent(owner.rawValue)
+            try FileManager.default.createDirectory(at:work,withIntermediateDirectories:true)
+            let output = work.appendingPathComponent(clip.filename)
+            let render = try await Media.render(source:source,clip:clip,profile:request.profile,artwork:nil,work:work,output:output)
+            let qa = try await Media.validate(output:output,source:source,clip:clip,profile:request.profile,render:render,work:work)
+            let measured = try await Media.probe(output)
+            XCTAssertTrue(qa.passed,owner.rawValue)
+            XCTAssertEqual(measured.video?.width,1920,owner.rawValue)
+            XCTAssertEqual(measured.video?.height,1080,owner.rawValue)
+            XCTAssertEqual(render.pictureWidth,320,owner.rawValue)
+            XCTAssertEqual(render.pictureHeight,180,owner.rawValue)
+            XCTAssertNil(qa.checks["approved_logo"],owner.rawValue)
+            XCTAssertNil(qa.checks["approved_outro"],owner.rawValue)
+            XCTAssertTrue(qa.checks["unrequested_additions"]?.contains("Source-only") == true,owner.rawValue)
+        }
+        XCTAssertEqual(try Integrity.sha256(original),originalHash)
+    }
+
     func testNativeExportAndQARejectDimensionsOutsideEitherSharedCapability() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
