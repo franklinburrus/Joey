@@ -46,10 +46,10 @@ Joey’s everyday operation must not depend on Codex, a ChatGPT conversation, Gi
 
 Automatically acquire or import authorized DUB and Taxstone media, plan clips, render, perform QA, file verified outputs and produce complete delivery records.
 
-Native video: cut the original footage into clips without added video templates or branding.
+Native DUB and Taxstone video uses source-only landscape clips. Joe Budden uses the landscape Drive-only workflow and its approved logo/outro exception in section 20.
 Audio: render the approved audio artwork/template with a moving soundwave generated from the final clip audio.
 
-Produce ONE shared MP4 per clip satisfying both X and Instagram. There are no separate X and Instagram clip versions, rendering jobs or platform output folders. This applies to native video clips and audio-template MP4s.
+Produce ONE shared MP4 per DUB or Taxstone clip satisfying both X and Instagram. This applies to native video and audio-template MP4s. Keep one rendering job and one episode package per clip. Joe Budden's separate Drive-only contract is defined in section 20.
 
 TikTok is eliminated. Keep DUB and Taxstone source identities, artwork, manifests, histories and records separate. Do not schedule or publish social posts.
 
@@ -112,7 +112,11 @@ This exception permits local planning, rendering, technical/coverage QA and loca
 
 For native DUB, Joe Budden and Taxstone video, cut the original footage. Preserve original audio, picture proportions, synchronization and existing graphics, logos and subtitles already within the source.
 
-Add no video template, artwork panel, logo, waveform, title overlay, speech captions or separate outro. Do not stretch footage or crop essential content. Older Joe Budden logo/outro additions and separate platform video templates are superseded for these jobs.
+Frank's explicit F03 choice of Landscape on 2026-11-05 settles the new-job contract. Use the existing 1920×1080 landscape canvas for native DUB, Taxstone and Joe Budden video, subject to the applicable saved export contract and verified upload-surface support. Fit the complete source picture proportionally with plain black padding, without quality-upscaling claims or cropping essential content.
+
+DUB and Taxstone native video adds no template, artwork panel, logo, waveform, title overlay, speech captions or separate outro. Joe Budden retains only the approved lower-left DUB logo and complete approved outro under section 20. Existing source graphics, logos and subtitles remain part of the source picture.
+
+Accepted historical outputs and immutable requests retain their original contracts, including valid historical portrait jobs. Reopening follows their saved acceptance evidence and hard limits. This decision alone does not authorize rerendering, migrating or reclassifying accepted media.
 
 9. AUDIO PRESENTATION
 
@@ -142,9 +146,9 @@ If an expected asset cannot be retrieved, automatically inspect established asse
 
 Export MP4 with H.264, yuv420p, progressive scan, square pixels, 30 fps, AAC-LC audio where present and web playback support.
 
-Use a portrait 1080×1920 canvas when verified for both upload destinations. Use 720×1280 for both when the verified common profile requires it. Never produce a second platform version.
+New native-video jobs use the landscape contract in section 8. Audio-template jobs use portrait 1080×1920 when verified for both upload destinations, or 720×1280 when required by their verified common profile. Each clip has one output file for its applicable delivery contract.
 
-Fit complete native landscape frames proportionally with plain black padding. This preserves the frame but reduces its visible size inside a portrait canvas. Report source resolution and effective picture dimensions; do not label this preserved full-frame 1080p landscape detail. Do not upscale poor source footage and claim native quality.
+Fit complete native frames proportionally inside the 1920×1080 landscape canvas with plain black padding. Report source resolution and effective picture dimensions. A small or portrait source keeps its actual picture proportions and detail, with padding where needed. Do not upscale poor source footage and claim native quality.
 
 Verify current duration, dimensions, frame-rate and file-size limits for the actual X account and Instagram upload surface. Record the profile, account capability evidence and official sources. Do not assume account eligibility or treat a legacy profile’s verified flag as current evidence.
 
@@ -219,6 +223,7 @@ Check disk space, bound concurrency and support cancellation. Use application-ow
 15. COMPLETION STATES
 
 Normal progression: PLANNED, PROCESSING, QA_PASSED, FILED, COMPLETED.
+2026-11-05 repair clarification. FILED is an interim checkpoint after every accepted clip has a verified media receipt. Companion reconciliation, required register readback and final package verification can still be pending. COMPLETED requires the complete package evidence described below.
 Failure reports preserve the exact stage, affected item, error and recovery status.
 A filing outage leaves accepted media as QA_PASSED — NOT FILED.
 
@@ -257,7 +262,9 @@ https://drive.google.com/file/d/1EdeO03nq5f_GI9uy4Wbka_gGWVCIArWa/view
 https://drive.google.com/file/d/1g89EodIK589vFBpnJZVxtaLCXcD0azTO/view
 https://drive.google.com/file/d/1tWi7UuDnUmmOF0qlBVW9hDaPXGPt58Eg/view
 
-17. HISTORICAL ASSETS — DO NOT APPLY TO NATIVE-VIDEO CLIPS
+17. RETAINED ASSETS — JOE EXCEPTION AND HISTORICAL REFERENCES
+
+The DUB Primary Logo and Joe Budden outro below remain active only for the Joe Budden workflow in section 20. The other video templates are historical references. DUB and Taxstone native-video clips use the source-only landscape contract in section 8.
 
 DUB Primary Logo:
 https://drive.google.com/file/d/1rOBwiIFLGvglfDye1hlMh2HrL1PqRdfl/view

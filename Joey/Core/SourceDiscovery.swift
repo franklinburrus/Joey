@@ -39,7 +39,9 @@ public enum SourceDiscovery {
     static func command(_ arguments: [String]) async throws -> Data {
         try await withThrowingTaskGroup(of:Data.self) { group in
             group.addTask {
-                try await Processes.run("yt-dlp",["--ignore-config","--socket-timeout","15","--retries","1","--extractor-retries","1"]+arguments,maxOutput:4*1024*1024).stdout
+                try await Processes.retry {
+                    try await Processes.run("yt-dlp",["--ignore-config","--socket-timeout","15","--retries","0","--fragment-retries","0","--extractor-retries","0"]+arguments,maxOutput:4*1024*1024).stdout
+                }
             }
             group.addTask {
                 try await Task.sleep(nanoseconds:60_000_000_000)

@@ -3,6 +3,34 @@ import Foundation
 public enum LinkContent: String, Codable, CaseIterable, Sendable {case dub, taxstone, joeBudden}
 
 public enum ProductionIntake {
+    /// Reuse the immutable contract before mutable provider metadata can create
+    /// a second identity. Manual and email intake share this reconciliation.
+    public static func existingRequest(for raw: String, content: LinkContent, mode: JobMode,
+                                       requests: [JobRequest], archive: String? = nil,
+                                       archiveRoot: String? = nil, transcript: String? = nil) throws -> JobRequest? {
+        let url = try Acquisition.validateOriginalURL(raw)
+        guard let sourceID = SourceIdentitySuggestion.from(url.absoluteString) else {
+            throw JoeyError.invalid("Unsupported source identity")
+        }
+        let matches = requests.filter { request in
+            let joe = request.productionWorkflow == .joeBudden
+            return request.sourceID == sourceID && request.owner == (content == .taxstone ? .taxstone : .dub) &&
+                (request.productionWorkflow == .link || joe) &&
+                request.mode == (content == .joeBudden || joe ? .fullShow : mode) &&
+                (content != .joeBudden || joe) &&
+                request.fixedIntervals == nil && request.requestedCount == nil && request.adExclusions.isEmpty &&
+                request.preferredDuration == nil && request.transcriptPolicy == nil &&
+                (archive == nil || request.archiveReference == archive) &&
+                (joe || (request.archiveRootID ?? "") == (archiveRoot ?? "")) &&
+                (transcript == nil || request.transcriptPath == transcript) &&
+                request.originalURL.flatMap(SourceIdentitySuggestion.from) == sourceID
+        }
+        guard matches.count <= 1 else {
+            throw JoeyError.dependency("Multiple existing source contracts match; select the existing job instead of creating another")
+        }
+        return matches.first
+    }
+
     public static func request(source: DiscoveredSource, content: LinkContent, mode: JobMode,
                                sharedProfile: SharedProfile?, archive: String? = nil,
                                archiveRoot: String? = nil, transcript: String? = nil) throws -> JobRequest {

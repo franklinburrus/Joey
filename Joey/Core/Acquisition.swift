@@ -2,10 +2,10 @@ import Foundation
 
 public enum Acquisition {
     static func metadataArguments(for url: URL) -> [String] {
-        ["--ignore-config","--no-playlist","--skip-download","--dump-single-json",url.absoluteString]
+        ["--ignore-config","--no-playlist","--retries","0","--fragment-retries","0","--extractor-retries","0","--skip-download","--dump-single-json",url.absoluteString]
     }
     static func downloadArguments(for url: URL, directory: URL) -> [String] {
-        ["--ignore-config","--no-playlist","--continue","--no-overwrites","--retries","3","--fragment-retries","3",
+        ["--ignore-config","--no-playlist","--continue","--no-overwrites","--retries","0","--fragment-retries","0","--extractor-retries","0",
          "--abort-on-unavailable-fragments","--write-info-json","--merge-output-format","mp4","-o",directory.appendingPathComponent("original.%(ext)s").path,url.absoluteString]
     }
     static func sourceMetadata(_ data: Data, request: JobRequest,

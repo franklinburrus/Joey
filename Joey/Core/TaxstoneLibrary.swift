@@ -152,7 +152,9 @@ public actor TaxstoneLibrary {
         }
         let evidence = try TaxstoneEvidence.load()
         let byDrive = Dictionary(grouping:evidence,by:\.driveID)
-        let outputListing = try await Processes.run("rclone",["lsjson",config.rcloneRemote+":","--drive-root-folder-id",DriveDestination.taxstoneClips.id,"--recursive","--hash"],maxOutput:16*1024*1024)
+        let outputListing = try await Processes.retry {
+            try await Processes.run("rclone",["lsjson",config.rcloneRemote+":","--drive-root-folder-id",DriveDestination.taxstoneClips.id,"--recursive","--hash","--retries","1","--low-level-retries","1"],maxOutput:16*1024*1024)
+        }
         let remoteObjects = try JSONSerialization.jsonObject(with:outputListing.stdout) as? [[String:Any]] ?? []
         let mediaObjects = remoteObjects.filter {($0["Name"] as? String ?? "").lowercased().hasSuffix(".mp4")}
         let knownIDs = Set(evidence.flatMap { $0.legacyClips.map(\.driveID) })

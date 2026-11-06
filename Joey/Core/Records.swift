@@ -1,6 +1,25 @@
 import Foundation
 
 public enum Records {
+    /// Cached companion absence is not evidence that a verified remote object
+    /// disappeared. When the manifest is present, its receipt and acceptance
+    /// inputs must agree before the completed fast path can reuse it offline.
+    static func validateSavedManifest(job: JobRecord, directory: URL) throws {
+        let url = directory.appendingPathComponent("clip_manifest.json")
+        guard FileManager.default.fileExists(atPath:url.path) else {return}
+        guard let receipt = job.companions[url.lastPathComponent],
+              try Integrity.sha256(url) == receipt.sha256 else {
+            throw JoeyError.failed("Saved manifest differs from its verified receipt; preserved for reconciliation")
+        }
+        let manifest: JobRecord = try Persistence.load(url)
+        try manifest.validateAcceptedPlan()
+        let object = try JSONSerialization.jsonObject(with:Data(contentsOf:url)) as? [String:Any]
+        let mappings = object?["intervalMappings"] as? [[String:Any]]
+        guard try manifest.acceptancePlanHash() == job.acceptancePlanHash(),
+              let mappings, NSArray(array:mappings).isEqual(to:intervalMappings(job)) else {
+            throw JoeyError.failed("Saved manifest disagrees with the complete accepted plan; preserved for reconciliation")
+        }
+    }
     public static func columnName(_ index: Int) -> String {
         var n = index+1, name = ""
         while n > 0 { n -= 1; name = String(UnicodeScalar(65+n%26)!)+name; n /= 26 }; return name
@@ -87,7 +106,20 @@ public enum Records {
         let manifest = directory.appendingPathComponent("clip_manifest.json")
         // Explicit interval mapping also records output offsets across ad joins.
         var object = try JSONSerialization.jsonObject(with:Persistence.encoder.encode(job)) as! [String:Any]
-        object["intervalMappings"] = job.clips.map { clip -> [String:Any] in
+        object["intervalMappings"] = intervalMappings(job)
+        object["encodingToleranceSeconds"] = 0.075
+        object["coverageArithmeticToleranceSeconds"] = Planning.tolerance
+        object["unavailableTranscriptFeatures"] = job.unavailableTranscriptFeatures
+        object["productionEditorialRequirementsMet"] = job.unavailableTranscriptFeatures.isEmpty
+        var companions = object["companions"] as? [String:Any] ?? [:]
+        companions.removeValue(forKey:"clip_manifest.json"); companions.removeValue(forKey:"RECONCILE.md")
+        object["companions"] = companions
+        try JSONSerialization.data(withJSONObject:object,options:[.prettyPrinted,.sortedKeys,.withoutEscapingSlashes]).write(to:manifest,options:.atomic)
+        return files+[reconcile,manifest]
+    }
+
+    private static func intervalMappings(_ job: JobRecord) -> [[String:Any]] {
+        job.clips.map { clip -> [String:Any] in
             var cursor = 0.0
             let ranges = clip.intervals.map { range -> [String:Double] in
                 defer {cursor += range.duration}
@@ -102,14 +134,5 @@ public enum Records {
             }
             return mapping
         }
-        object["encodingToleranceSeconds"] = 0.075
-        object["coverageArithmeticToleranceSeconds"] = Planning.tolerance
-        object["unavailableTranscriptFeatures"] = job.unavailableTranscriptFeatures
-        object["productionEditorialRequirementsMet"] = job.unavailableTranscriptFeatures.isEmpty
-        var companions = object["companions"] as? [String:Any] ?? [:]
-        companions.removeValue(forKey:"clip_manifest.json"); companions.removeValue(forKey:"RECONCILE.md")
-        object["companions"] = companions
-        try JSONSerialization.data(withJSONObject:object,options:[.prettyPrinted,.sortedKeys,.withoutEscapingSlashes]).write(to:manifest,options:.atomic)
-        return files+[reconcile,manifest]
     }
 }

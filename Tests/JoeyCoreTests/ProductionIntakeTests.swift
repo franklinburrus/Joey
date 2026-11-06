@@ -73,7 +73,10 @@ final class ProductionIntakeTests: XCTestCase {
         let input = DiscoveredSource(id:"youtube:abcdefghijk",title:"Example",url:"https://www.youtube.com/watch?v=abcdefghijk",duration:1801)
         let request = try ProductionIntake.request(source:input,content:.dub,mode:.highlights,sharedProfile:profile)
         let source = SourceRecord(id:input.id,owner:.dub,title:input.title,path:"fixture",bytes:1,sha256:"fixture",duration:1801,width:320,height:180,fps:30,hasAudio:true,kind:.nativeVideo,streams:[],authorizationBasis:"fixture",classificationEvidence:"fixture")
-        let transcript = Transcript(sourceID:source.id,sourceSHA256:source.sha256,duration:1801,engine:"fixture",segments:[TranscriptSegment(start:0,end:1801,text:"Complete source.")])
+        let transcript = Transcript(sourceID:source.id,sourceSHA256:source.sha256,duration:1801,engine:"fixture",segments:[
+            TranscriptSegment(start:0,end:900,text:"Complete first-block discussion."),
+            TranscriptSegment(start:900,end:1800,text:"Complete second-block discussion."),
+            TranscriptSegment(start:1800,end:1801,text:"Complete ending.")])
         let clips = try Editorial.plan(request:request,source:source,transcript:transcript,exclusions:[])
         XCTAssertEqual(clips.map(\.intervals),[[Interval(0,140)],[Interval(900,1040)],[Interval(1800,1801)]])
         XCTAssertEqual(try Planning.highlightCount(duration:1800),2)
@@ -101,6 +104,10 @@ final class JoeCompositionTests: XCTestCase {
         let qa = try await Media.validate(output:output,source:source,clip:clip,profile:.joeBuddenDrive,render:render,work:dir)
         XCTAssertTrue(qa.passed)
         let probe = try await Media.probe(output)
+        XCTAssertEqual(probe.video?.width,1920)
+        XCTAssertEqual(probe.video?.height,1080)
+        XCTAssertEqual(render.pictureWidth,320)
+        XCTAssertEqual(render.pictureHeight,180)
         XCTAssertEqual(probe.duration,9.3,accuracy:0.075)
         XCTAssertNotNil(qa.checks["approved_logo"])
         XCTAssertNotNil(qa.checks["approved_outro"])

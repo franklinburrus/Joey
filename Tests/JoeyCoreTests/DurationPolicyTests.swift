@@ -52,6 +52,10 @@ final class DurationPolicyTests: XCTestCase {
     func testAutomaticHighlightRemainderKeepsSourceEndingWithinCompliantSelection() throws {
         var (request,source,transcript) = try fixture(1801)
         request.mode = .highlights;request.productionWorkflow = .link
+        transcript.segments = [
+            TranscriptSegment(start:0,end:900,text:"Complete first-block discussion."),
+            TranscriptSegment(start:900,end:1796,text:"Complete second-block discussion."),
+            TranscriptSegment(start:1796,end:1801,text:"Complete ending.")]
         let clips = try Editorial.plan(request:request,source:source,transcript:transcript,exclusions:[])
         XCTAssertEqual(clips.count,3)
         XCTAssertEqual(clips.last?.intervals,[Interval(1796,1801)])

@@ -3,6 +3,54 @@ import Darwin
 
 public struct ProcessResult: Sendable { public var stdout: Data; public var stderr: String; public var status: Int32 }
 public enum Processes {
+    /// Anonymous capture retains at most its byte budget. One 16 KiB read may
+    /// detect overflow; remaining producer bytes stay in finite kernel pipes
+    /// under backpressure while the existing supervisor stops the process group.
+    private struct Capture {
+        let pipe = Pipe()
+        let limit: Int
+        let tailOnly: Bool
+        var bytes = Data()
+        var total = 0
+        var ended = false
+
+        init(limit: Int, tailOnly: Bool = false) throws {
+            self.limit = limit
+            self.tailOnly = tailOnly
+            let descriptor = pipe.fileHandleForReading.fileDescriptor
+            let flags = fcntl(descriptor, F_GETFL)
+            guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) == 0 else {
+                throw JoeyError.failed("Unable to create private process capture")
+            }
+        }
+        mutating func drain() throws -> Bool {
+            guard !ended else { return false }
+            var buffer = [UInt8](repeating: 0, count: 16 * 1024)
+            var progressed = false
+            // A finite turn services both streams and cancellation fairly.
+            for _ in 0..<16 {
+                let count = Darwin.read(pipe.fileHandleForReading.fileDescriptor, &buffer, buffer.count)
+                if count == 0 { ended = true; break }
+                if count < 0 {
+                    if errno == EINTR { continue }
+                    if errno == EAGAIN { break }
+                    throw JoeyError.failed("Private process capture failed")
+                }
+                guard count <= limit - total else {
+                    throw JoeyError.failed("Command output exceeded bounded capture limit")
+                }
+                total += count
+                bytes.append(contentsOf: buffer.prefix(count))
+                if tailOnly, bytes.count > 6000 { bytes.removeFirst(bytes.count - 6000) }
+                progressed = true
+            }
+            return progressed
+        }
+        func close() {
+            try? pipe.fileHandleForReading.close()
+            try? pipe.fileHandleForWriting.close()
+        }
+    }
     /// Helpers need local paths/locale, not the desktop or developer's API keys.
     /// Explicit overrides pass through the same allowlist as inherited values.
     static func childEnvironment(_ parent: [String:String], overrides: [String:String] = [:]) -> [String:String] {
@@ -24,12 +72,14 @@ public enum Processes {
         }
         throw JoeyError.dependency("Required local executable unavailable: \(name)")
     }
+    /// maxOutput bounds each captured stream while the helper runs. Stderr
+    /// retains its final 6000 bytes. Explicit stdout files bypass capture only.
     public static func run(_ executable: String, _ arguments: [String], directory: URL? = nil,
                            output: URL? = nil, maxOutput: Int = 16*1024*1024,
                            environment: [String:String] = [:], input: Data? = nil,
                            timeout: TimeInterval? = nil) async throws -> ProcessResult {
         try Task.checkCancellation()
-        guard (input?.count ?? 0) <= 16384, timeout == nil || (timeout!.isFinite && timeout! > 0) else {
+        guard maxOutput >= 0, (input?.count ?? 0) <= 16384, timeout == nil || (timeout!.isFinite && timeout! > 0) else {
             throw JoeyError.invalid("Invalid bounded process input or deadline")
         }
         let storageRoot = StorageManager.processingRoot
@@ -38,18 +88,22 @@ public enum Processes {
             (toolName == "rclone" && arguments.first == "copyto" && arguments.count > 2 && arguments[2].hasPrefix("/"))
         let storageLease = try storageRoot.map {try ProcessingLock(directory:$0,name:"storage-workers.lock",shared:true)}
         defer {withExtendedLifetime(storageLease) {}}
-        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("joey-process-"+UUID().uuidString)
-        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true, attributes: [.posixPermissions:0o700])
-        defer { try? FileManager.default.removeItem(at: temp) }
-        let stdoutURL = output ?? temp.appendingPathComponent("stdout")
-        let stderrURL = temp.appendingPathComponent("stderr")
-        FileManager.default.createFile(atPath: stdoutURL.path, contents: nil, attributes: [.posixPermissions:0o600])
-        FileManager.default.createFile(atPath: stderrURL.path, contents: nil, attributes: [.posixPermissions:0o600])
-        let out = try FileHandle(forWritingTo: stdoutURL), err = try FileHandle(forWritingTo: stderrURL)
-        defer { try? out.close(); try? err.close() }
+        var stdout = try Capture(limit: maxOutput)
+        defer { stdout.close() }
+        var stderr = try Capture(limit: maxOutput, tailOnly: true)
+        defer { stderr.close() }
+        var outputFile: FileHandle?
+        if let output {
+            FileManager.default.createFile(atPath: output.path, contents: nil, attributes: [.posixPermissions:0o600])
+            outputFile = try FileHandle(forWritingTo: output)
+            stdout.ended = true
+        }
+        defer { try? outputFile?.close() }
         let process = Process(); process.executableURL = try ProcessSupervisor.executable()
         process.arguments = ["--supervise",String(getpid())]+(storageRoot.map {["--storage-root",$0.path]} ?? [])+[try self.executable(executable)]+arguments; process.currentDirectoryURL = directory
-        process.standardOutput = out; process.standardError = err; process.standardInput = FileHandle.nullDevice
+        process.standardOutput = outputFile ?? stdout.pipe.fileHandleForWriting
+        process.standardError = stderr.pipe.fileHandleForWriting
+        process.standardInput = FileHandle.nullDevice
         let inputPipe = input.map {_ in Pipe()}
         var inputOpen = inputPipe != nil
         var written = 0
@@ -68,12 +122,24 @@ public enum Processes {
         }
         process.environment = childEnvironment(ProcessInfo.processInfo.environment,overrides:environment)
         try process.run()
-        try inputPipe?.fileHandleForReading.close()
         let deadline = timeout.map {ProcessInfo.processInfo.systemUptime + $0}
         do {
+            try stdout.pipe.fileHandleForWriting.close()
+            try stderr.pipe.fileHandleForWriting.close()
+            try inputPipe?.fileHandleForReading.close()
             var nextCapacityCheck = Date()
-            while process.isRunning {
+            var drainDeadline: TimeInterval?
+            while process.isRunning || !stdout.ended || !stderr.ended {
+                try Task.checkCancellation()
                 if let deadline, ProcessInfo.processInfo.systemUptime >= deadline {throw JoeyError.failed("Local helper timed out")}
+                if !process.isRunning {
+                    if drainDeadline == nil { drainDeadline = ProcessInfo.processInfo.systemUptime + 2 }
+                    if ProcessInfo.processInfo.systemUptime >= drainDeadline! {
+                        throw JoeyError.failed("Local helper output did not close")
+                    }
+                }
+                let stdoutProgress = try stdout.drain()
+                let stderrProgress = try stderr.drain()
                 if inputOpen, let input, let pipe = inputPipe {
                     if written < input.count {
                         let count = input.withUnsafeBytes {bytes in
@@ -85,7 +151,10 @@ public enum Processes {
                     }
                     if written == input.count {try pipe.fileHandleForWriting.close();inputOpen = false}
                 }
-                try await Task.sleep(nanoseconds: 50_000_000)
+                if stdoutProgress || stderrProgress { await Task.yield() }
+                else if process.isRunning || !stdout.ended || !stderr.ended {
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                }
                 if writesMedia,let storageRoot, Date() >= nextCapacityCheck {
                     // Stop before consuming the OS reserve. Partial attempt stays
                     // owned and recoverable; no new worker starts during cleanup.
@@ -107,15 +176,11 @@ public enum Processes {
         }
         // isRunning becoming false establishes termination. waitUntilExit spins
         // a thread-local run loop and can deadlock after async thread migration.
-        let errors = try FileHandle(forReadingFrom: stderrURL); defer { try? errors.close() }
-        let end = try errors.seekToEnd(); try errors.seek(toOffset: end > 6000 ? end-6000 : 0)
-        let diagnostic = String(decoding: try errors.readToEnd() ?? Data(), as: UTF8.self)
+        let diagnostic = String(decoding: stderr.bytes, as: UTF8.self)
         guard process.terminationStatus == 0 else {
             throw JoeyError.failed("\(URL(fileURLWithPath:executable).lastPathComponent) exit \(process.terminationStatus): \(diagnostic)")
         }
-        let bytes = ((try FileManager.default.attributesOfItem(atPath: stdoutURL.path))[.size] as? NSNumber)?.intValue ?? 0
-        guard output != nil || bytes <= maxOutput else { throw JoeyError.failed("Command output exceeded bounded capture limit") }
-        return ProcessResult(stdout: output == nil ? try Data(contentsOf: stdoutURL) : Data(), stderr: diagnostic, status: process.terminationStatus)
+        return ProcessResult(stdout: stdout.bytes, stderr: diagnostic, status: process.terminationStatus)
     }
     public static func retry<T>(_ action: () async throws -> T) async throws -> T {
         for attempt in 0..<3 {

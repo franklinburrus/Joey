@@ -125,8 +125,10 @@ final class BufferPreflightTests: XCTestCase {
     }
 
     func testDriveReadbackRejectsWrongOwnerFolderHashDuplicatesAndAccessChanges() throws {
-        let job = try completedJob(temporaryDirectory()), clip = job.clips[0], source = job.source!
-        let file: [String:Any] = ["id":"accepted-output-id","name":"clip.mp4","mimeType":"video/mp4","trashed":false,"parents":["episode-folder-id"],"size":"1000000","md5Checksum":String(repeating:"b",count:32),"permissions":[["type":"anyone","role":"reader"],["type":"user","role":"owner"]]]
+        let job = try completedJob(temporaryDirectory()), source = job.source!
+        var clip = job.clips[0]
+        let file: [String:Any] = ["id":"accepted-output-id","name":"clip.mp4","mimeType":"video/mp4","trashed":false,"parents":["episode-folder-id"],"size":"1000000","md5Checksum":String(repeating:"b",count:32),"permissions":[["id":"link","type":"anyone","role":"reader","allowFileDiscovery":false],["id":"owner","type":"user","role":"owner","emailAddress":"owner@example.invalid"]]]
+        clip.drive!.permissionFingerprint = try DriveDelivery.permissionFingerprint(file)
         let folder: [String:Any] = ["id":"episode-folder-id","mimeType":"application/vnd.google-apps.folder","trashed":false,"parents":[DriveDelivery.videoRoot],"appProperties":["joeySourceID":source.id,"joeyOwner":"dub"]]
         XCTAssertNoThrow(try BufferPreflight.validateDrive(file:file,folder:folder,source:source,request:job.request,clip:clip,folderID:"episode-folder-id",md5:String(repeating:"b",count:32)))
         for change: [String:Any] in [["id":"other-output-id"],["md5Checksum":"different"],["parents":[DriveDelivery.audioRoot]],["trashed":true],["permissions":[["type":"anyone","role":"writer"]]]] {
@@ -134,6 +136,20 @@ final class BufferPreflightTests: XCTestCase {
         }
         var wrongOwner = folder; wrongOwner["appProperties"] = ["joeySourceID":source.id,"joeyOwner":"taxstone"]
         XCTAssertThrowsError(try BufferPreflight.validateDrive(file:file,folder:wrongOwner,source:source,request:job.request,clip:clip,folderID:"episode-folder-id",md5:String(repeating:"b",count:32)))
+        let baseline = file["permissions"] as! [[String:Any]]
+        for field in ["id", "emailAddress", "domain", "allowFileDiscovery"] {
+            var permissions = baseline
+            let permissionIndex = field == "allowFileDiscovery" ? 0 : 1
+            permissions[permissionIndex][field] = field == "allowFileDiscovery" ? true : "changed.invalid" as Any
+            var changed = file
+            changed["permissions"] = permissions
+            XCTAssertThrowsError(try BufferPreflight.validateDrive(file:changed,folder:folder,source:source,request:job.request,clip:clip,folderID:"episode-folder-id",md5:String(repeating:"b",count:32)), field)
+        }
+        var reordered = file
+        reordered["permissions"] = Array(baseline.reversed())
+        XCTAssertNoThrow(try BufferPreflight.validateDrive(file:reordered,folder:folder,source:source,request:job.request,clip:clip,folderID:"episode-folder-id",md5:String(repeating:"b",count:32)))
+        clip.drive!.permissionFingerprint = nil
+        XCTAssertThrowsError(try BufferPreflight.validateDrive(file:file,folder:folder,source:source,request:job.request,clip:clip,folderID:"episode-folder-id",md5:String(repeating:"b",count:32)))
     }
 
     func testAcceptedOutputPathRejectsTraversalAndSymbolicLinks() throws {

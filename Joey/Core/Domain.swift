@@ -430,6 +430,13 @@ public struct JobRecord: Codable, Identifiable, Sendable {
     public var folderID: String?
     public var companions: [String: DriveReceipt] = [:]
     public var registerRows: [String] = []
+    /// Binds the reconciled plan and accepted QA to their immutable inputs.
+    /// Absent on historical checkpoints, whose available manifests are checked
+    /// during reopening without requiring a network connection or cache refill.
+    public var acceptedPlanSHA256: String?
+    /// A rejected historical completion retries its evidence reconciliation
+    /// without entering processing or overwriting contradictory companions.
+    public var completionReconciliationRequired: Bool?
     public var storageRequiredBytes: Int64?
     public var storageWarnings: [String]?
     public var error: String?
@@ -459,6 +466,7 @@ public struct JobRecord: Codable, Identifiable, Sendable {
     /// also checks current local bytes before reopening a completed checkpoint.
     public var hasRequiredCompletionEvidence: Bool {
         guard !clips.isEmpty, unavailableTranscriptFeatures.isEmpty,
+              (try? validateAcceptedPlan()) != nil,
               verifiedDriveClipCount == clips.count,let source,let folderID,
               let destination = try? DestinationResolver.resolve(source:source,request:request,asset:.clip),
               Set(clips.compactMap { $0.drive?.id }).count == clips.count,
@@ -474,8 +482,91 @@ public struct JobRecord: Codable, Identifiable, Sendable {
             !$0.permissions.isEmpty && $0.permissionFingerprint?.count == 64
         } && companions.allSatisfy {$0.key == $0.value.name}
     }
-    public var resumesAutomatically: Bool {
-        state == .processing || state == .planned || state == .filed ||
-        (state == .qaPassed && request.fileToDrive && unavailableTranscriptFeatures.isEmpty)
+
+    /// Validate the saved plan itself, independently of its receipt count.
+    /// This accepts legitimate revised boundaries when their new QA is bound
+    /// explicitly, rather than regenerating an old planner's preferred cuts.
+    func validateAcceptedPlan() throws {
+        guard let source, source.id == request.sourceID, source.owner == request.owner,
+              source.sha256.count == 64, source.duration.isFinite, source.duration > 0,
+              !clips.isEmpty, clips.map(\.id) == Array(1...clips.count),
+              Set(clips.map(\.filename)).count == clips.count else {
+            throw JoeyError.failed("Saved accepted plan has conflicting source, numbering or filenames")
+        }
+        try Media.validateSourceDuration(source.duration,expected:request.expectedDuration)
+        var previousEnd = 0.0
+        for clip in clips {
+            guard !clip.filename.isEmpty, clip.filename == URL(fileURLWithPath:clip.filename).lastPathComponent,
+                  !clip.intervals.isEmpty, clip.qa?.passed == true,
+                  clip.qa?.outputSHA256 == clip.sha256, clip.sha256?.count == 64,
+                  let bytes = clip.bytes, bytes > 0, bytes <= request.profile.maxBytes,
+                  let measured = clip.measuredDuration else {
+                throw JoeyError.failed("Saved accepted plan lacks matching clip and QA identities")
+            }
+            for interval in clip.intervals {
+                guard interval.start.isFinite, interval.end.isFinite, interval.duration > 0,
+                      interval.start >= previousEnd-Planning.tolerance,
+                      interval.end <= source.duration+Planning.tolerance else {
+                    throw JoeyError.failed("Saved accepted plan has invalid or overlapping source intervals")
+                }
+                previousEnd = interval.end
+            }
+            let expected = clip.expectedDuration + (request.productionWorkflow == .joeBudden ? 7.3 : 0)
+            // Reopening uses the immutable saved hard limit. New encodes also
+            // reserve DurationPolicy's current planning/Buffer margins, which
+            // must not retroactively reject accepted historical 140s outputs.
+            guard measured.isFinite, measured > 0,
+                  measured <= request.profile.maxDuration+Planning.tolerance,
+                  abs(measured-expected) <= DurationPolicy.encodingTolerance+Planning.tolerance else {
+                throw JoeyError.failed("Saved measured duration conflicts with its accepted intervals or original hard limit")
+            }
+        }
+        if request.mode == .fullShow {
+            try Planning.validateCoverage(duration:source.duration,exclusions:exclusions.map(\.interval),clips:clips.map(\.intervals))
+        } else {
+            if let requested = request.requestedCount, requested != clips.count {
+                throw JoeyError.failed("Saved highlights disagree with the explicit requested count")
+            }
+            if let fixed = request.fixedIntervals {
+                guard clips.map(\.intervals) == fixed.map({[$0]}) else {
+                    throw JoeyError.failed("Saved highlights disagree with the explicit intervals")
+                }
+            } else if let count = request.productionWorkflow == .link ? try Planning.highlightCount(duration:source.duration) : request.requestedCount,
+                      clips.count != count {
+                throw JoeyError.failed("Saved highlights do not contain every required selection")
+            }
+        }
+        if let acceptedPlanSHA256, try acceptancePlanHash() != acceptedPlanSHA256 {
+            throw JoeyError.failed("Saved source, profile, plan or QA changed after acceptance; reconcile preserved evidence")
+        }
     }
+
+    func acceptancePlanHash() throws -> String {
+        guard let source else {throw JoeyError.failed("Cannot bind an absent source")}
+        // Delivery metadata is renewable. The source, selected intervals,
+        // technical contract, measured bytes and QA remain acceptance inputs.
+        let binding = AcceptedPlanBinding(request:try request.identityData(),sourceID:source.id,
+            sourceSHA256:source.sha256,sourceDuration:source.duration,sourceKind:source.kind,
+            planningBasis:planningBasis,exclusions:exclusions,clips:clips.map { clip in
+                var accepted = clip
+                accepted.drive = nil;accepted.failureStage = nil;accepted.error = nil;accepted.resolvedFailures = nil
+                return accepted
+            })
+        return Integrity.textHash(String(decoding:try Persistence.encoder.encode(binding),as:UTF8.self))
+    }
+    public var resumesAutomatically: Bool {
+        completionReconciliationRequired != true && (state == .processing || state == .planned || state == .filed ||
+        (state == .qaPassed && request.fileToDrive && unavailableTranscriptFeatures.isEmpty))
+    }
+}
+
+private struct AcceptedPlanBinding: Encodable {
+    let request: Data
+    let sourceID: String
+    let sourceSHA256: String
+    let sourceDuration: Double
+    let sourceKind: MediaKind
+    let planningBasis: PlanningBasis?
+    let exclusions: [AdExclusion]
+    let clips: [ClipRecord]
 }

@@ -490,9 +490,35 @@ public enum Media {
                 }
             }
         }
+        var shortComparisons = 0
+        // A one-second correlation can hide 100 ms of missing speech. Compare
+        // overlapping 50 ms windows at zero lag against the independent source
+        // oracle. Retain the same absolute quiet budget and allow 50% relative
+        // error energy for codec transients, without shifting either signal.
+        // Only the shared planned span is examined, preserving AAC priming and
+        // the existing 75 ms endpoint allowance.
+        for channel in 0..<channels {
+            for start in stride(from:channel,to:count,by:300*channels) {
+                let end = min(count,start+600*channels)
+                var sourceEnergy = 0.0, errorEnergy = 0.0, sampleCount = 0
+                for index in stride(from:start,to:end,by:channels) {
+                    let source = Double(a[index]), difference = source-Double(b[index])
+                    sourceEnergy += source*source
+                    errorEnergy += difference*difference
+                    sampleCount += 1
+                }
+                let quietBudget = 0.001*Double(sampleCount)/12000
+                if sourceEnergy > quietBudget {
+                    guard errorEnergy <= max(quietBudget,sourceEnergy*0.5) else {
+                        throw JoeyError.failed("Audio short-window fidelity failed at sample \(start): error energy \(errorEnergy), source energy \(sourceEnergy)")
+                    }
+                    shortComparisons += 1
+                }
+            }
+        }
         let relative = comparisons == 0 ? "0 relative-fidelity channel windows"
             : "\(comparisons) relative-fidelity channel windows; minimum zero-lag correlation \(minimum); gain 0.7–1.4"
-        return "\(relative); \(quietComparisons) quiet channel windows with source, output and zero-lag error energies below sample-scaled budget (0.001 per 12000 channel samples); checked within the planned interval at 12kHz"
+        return "\(relative); \(quietComparisons) quiet channel windows with source, output and zero-lag error energies below sample-scaled budget (0.001 per 12000 channel samples); checked within the planned interval at 12kHz; \(shortComparisons) audible overlapping 50 ms channel windows at 25 ms spacing, relative error energy at most 0.5 or the absolute quiet budget"
     }
     static func sourceTimelineAudio(source: SourceRecord, intervals: [Interval], channels: Int, work: URL) async throws -> [Float] {
         try Task.checkCancellation()
@@ -591,17 +617,18 @@ public enum Media {
         if reference.count < expectedCount {reference += [Float](repeating:0,count:expectedCount-reference.count)}
         return reference
     }
-    private static func sourcePictureFrame(source: SourceRecord, origin: Double, interval: Interval,
-                                           localTime: Double, width: Int, height: Int, comparison: String) async throws -> Data {
+    private static func sourcePictureFrames(source: SourceRecord, origin: Double, interval: Interval,
+                                            localTimes: [Double], width: Int, height: Int, comparison: String) async throws -> [Data] {
+        guard let firstTime = localTimes.first, let lastTime = localTimes.last else {return []}
         let work = FileManager.default.temporaryDirectory.appendingPathComponent("joey-picture-clock-"+UUID().uuidString)
         try FileManager.default.createDirectory(at:work,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
         defer {try? FileManager.default.removeItem(at:work)}
         let pixels = work.appendingPathComponent("frames.gray"), clock = work.appendingPathComponent("frames.framecrc")
-        let sourceTime = interval.start+localTime
+        let sourceTime = interval.start+firstTime
         // Retain the preceding keyframe instead of accurate-seek's first frame
         // after the requested time. Only original timestamps and pixel fitting
         // are used here: no fps/setpts, renderer graph, or image-based search.
-        let seek = max(0,sourceTime-1), end = min(interval.end,sourceTime+1.0/30)
+        let seek = max(0,sourceTime-1), end = min(interval.end,interval.start+lastTime+1.0/30)
         let maximumFrames = 4096, frameBytes = 160*90
         let filter = "[0:v:0]trim=start=\(origin+interval.start):end=\(origin+end),scale=\(width):\(height),\(comparison),split[pixels][clock]"
         _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-threads","1","-filter_complex_threads","1",
@@ -615,13 +642,13 @@ public enum Media {
             throw JoeyError.failed("Source picture timeline frame coverage is invalid")
         }
         var timebase: Double?, previous = -Double.infinity
-        var frames = 0, selected: Int?, reachedLaterFrame = false
+        var ticks: [Double] = []
         // Round source presentation times to the fixed output grid, with exact
         // half-frame ties away from zero. When several source frames map to the
         // same output tick, the last frame wins. A fractional interval offset
         // may place the requested output time between local ticks; never select
         // a source frame assigned to a later tick.
-        let target = localTime*30
+        let target = lastTime*30
         try lines(in:clock) { line in
             if line.hasPrefix("#tb 0:") {
                 let terms = line.dropFirst(6).trimmingCharacters(in:.whitespaces).split(separator:"/").compactMap {Double($0)}
@@ -631,26 +658,36 @@ public enum Media {
             if line.isEmpty || line.hasPrefix("#") {return}
             let fields = line.split(separator:",").map {$0.trimmingCharacters(in:.whitespaces)}
             guard fields.count >= 6, fields[0] == "0", let base = timebase,base.isFinite,base > 0,
-                  let ticks = Double(fields[2]),ticks.isFinite, Int(fields[4]) == frameBytes,
-                  (frames+1)*frameBytes <= data.count else {
+                  let timestampTicks = Double(fields[2]),timestampTicks.isFinite, Int(fields[4]) == frameBytes,
+                  (ticks.count+1)*frameBytes <= data.count else {
                 throw JoeyError.failed("Source picture timeline frame metadata is invalid")
             }
-            let pts = ticks*base-origin
+            let pts = timestampTicks*base-origin
             guard pts.isFinite,pts >= previous else {throw JoeyError.failed("Source picture timeline timestamps are not ordered")}
             previous = pts
-            let outputTick = ((pts-interval.start)*30).rounded(.toNearestOrAwayFromZero)
+            // Subtract on the native tick clock before converting to seconds.
+            // Subtracting large floating-point seconds first can move an exact
+            // 60 fps half-tie to the preceding output tick. Snap only numerical
+            // roundoff at a half-tick, never a neighboring source frame.
+            let localTick = (timestampTicks-(origin+interval.start)/base)*base*30
             // The numerical allowance is a few floating-point ulps, not a
             // temporal tolerance or permission to choose an adjacent frame.
-            if outputTick <= target+max(target.ulp,outputTick.ulp)*4 {selected = frames}
-            else {reachedLaterFrame = true}
-            frames += 1
+            let halfTick = (localTick*2).rounded()/2
+            let stableTick = abs(localTick-halfTick) <= max(localTick.ulp,halfTick.ulp)*4 ? halfTick : localTick
+            ticks.append(stableTick.rounded(.toNearestOrAwayFromZero))
         }
-        guard frames*frameBytes == data.count, frames < maximumFrames || reachedLaterFrame else {
+        let reachedLaterFrame = ticks.last.map {$0 > target+max(target.ulp,$0.ulp)*4} ?? false
+        guard ticks.count*frameBytes == data.count, ticks.count < maximumFrames || reachedLaterFrame else {
             throw JoeyError.failed("Source picture timeline bounded decode did not establish the sampled frame")
         }
-        if let selected {return data.subdata(in:selected*frameBytes..<(selected+1)*frameBytes)}
-        guard reachedLaterFrame else {throw JoeyError.failed("Source picture timeline has no frame coverage at the requested time")}
-        return Data(repeating:0,count:frameBytes)
+        var cursor = 0
+        return try localTimes.map {time in
+            let target = time*30
+            while cursor < ticks.count, ticks[cursor] <= target+max(target.ulp,ticks[cursor].ulp)*4 {cursor += 1}
+            if cursor > 0 {return data.subdata(in:(cursor-1)*frameBytes..<cursor*frameBytes)}
+            guard !ticks.isEmpty else {throw JoeyError.failed("Source picture timeline has no frame coverage at the requested time")}
+            return Data(repeating:0,count:frameBytes)
+        }
     }
     static func validateSourcePictureTiming(output: URL, source: SourceRecord, clip: ClipRecord, profile: SharedProfile, render: RenderReceipt) async throws -> String {
         let sourceURL = URL(fileURLWithPath:source.path)
@@ -696,33 +733,65 @@ public enum Media {
             // Compare only the picture rectangle so black portrait padding
             // cannot hide a shift. Source frames are selected independently by
             // original PTS, not by forward-seek behavior at fractional cuts.
-            for fraction in [0.1,0.5,0.9] {
-                let outputTime = floor((offset+interval.duration*fraction)*30)/30
-                let localTime = outputTime-offset, localTick = localTime*30
-                let actual = try await Processes.run("ffmpeg",["-nostdin","-v","error","-ss",String(outputTime),"-i",output.path,"-frames:v","1",
-                    "-vf","crop=\(width):\(height):(iw-\(width))/2:(ih-\(height))/2,\(comparison)","-an","-f","rawvideo","-"])
-                var expected = Data(repeating:0,count:160*90)
+            // Retain the previous three interval samples, adding every half-
+            // second output tick. Batches cap decoded source pixels at 4096
+            // frames and output samples at 16, independent of clip duration.
+            var outputTicks = Set([0.1,0.5,0.9].map {Int(floor((offset+interval.duration*$0)*30))})
+            for tick in stride(from:Int(ceil(offset*2))*15,to:Int(ceil((offset+interval.duration)*30)),by:15) {
+                let time = Double(tick)/30, end = offset+interval.duration
+                // A fractional concat boundary can assign its crossing video
+                // frame to either neighboring interval while audio keeps the
+                // exact sample boundary. Retain the original interval probes;
+                // omit an added grid sample only within that one-frame region.
+                let fractionalStart = abs(offset*30-(offset*30).rounded()) > max(1,(offset*30).ulp)*1e-9
+                let fractionalEnd = abs(end*30-(end*30).rounded()) > max(1,(end*30).ulp)*1e-9
+                if fractionalStart && time-offset < 1.0/30 {continue}
+                if fractionalEnd && end-time < 1.0/30 {continue}
+                outputTicks.insert(tick)
+            }
+            let times = outputTicks.sorted().map {Double($0)/30}
+            for start in stride(from:0,to:times.count,by:16) {
+                try Task.checkCancellation()
+                let batch = Array(times[start..<min(start+16,times.count)])
+                let localTimes = batch.map {$0-offset}
+                let firstTick = ((first-interval.start)*30).rounded(.toNearestOrAwayFromZero)
+                let lastTick = ((last-interval.start)*30).rounded(.toNearestOrAwayFromZero)
                 // The source's first/end timestamps bound its presence on the
                 // same 30 fps grid. After an early video EOF the canvas remains
                 // black while longer source audio continues; never freeze the
                 // final frame merely because a backward decode can find it.
-                let firstTick = ((first-interval.start)*30).rounded(.toNearestOrAwayFromZero)
-                let lastTick = ((last-interval.start)*30).rounded(.toNearestOrAwayFromZero)
-                let epsilon = max(localTick.ulp,max(firstTick.ulp,lastTick.ulp))*4
-                if localTick+epsilon >= firstTick,localTick+epsilon < lastTick {
-                    expected = try await sourcePictureFrame(source:source,origin:origin,interval:interval,
-                        localTime:localTime,width:width,height:height,comparison:comparison)
+                let present = localTimes.indices.filter {index in
+                    let localTick = localTimes[index]*30
+                    let epsilon = max(localTick.ulp,max(firstTick.ulp,lastTick.ulp))*4
+                    return localTick+epsilon >= firstTick && localTick+epsilon < lastTick
                 }
-                guard actual.stdout.count == expected.count else {throw JoeyError.failed("Source picture timeline sample coverage mismatch")}
-                let mean = zip(actual.stdout,expected).reduce(0.0) {$0+abs(Double($1.0)-Double($1.1))}/Double(expected.count)
-                // Retain the existing picture-fidelity bound; source PTS must
-                // establish which frame is compared before examining pixels.
-                guard mean <= 16 else {throw JoeyError.failed("Source picture timeline differs at output \(outputTime)s: mean pixel error \(mean)")}
-                comparisons += 1
+                let sourceFrames = try await sourcePictureFrames(source:source,origin:origin,interval:interval,
+                    localTimes:present.map {localTimes[$0]},width:width,height:height,comparison:comparison)
+                let firstOutputTick = Int((batch[0]*30).rounded())
+                let selection = batch.map {"eq(n,\(Int(($0*30).rounded())-firstOutputTick))"}.joined(separator:"+")
+                let actual = try await Processes.run("ffmpeg",["-nostdin","-v","error","-ss",String(batch[0]),"-i",output.path,
+                    "-frames:v",String(batch.count),"-vf","select='\(selection)',crop=\(width):\(height):(iw-\(width))/2:(ih-\(height))/2,\(comparison)",
+                    "-fps_mode","passthrough","-an","-f","rawvideo","-"])
+                let frameBytes = 160*90
+                guard actual.stdout.count == batch.count*frameBytes else {throw JoeyError.failed("Source picture timeline sample coverage mismatch")}
+                var sourceIndex = 0
+                for index in batch.indices {
+                    var expected = Data(repeating:0,count:frameBytes)
+                    if present.contains(index) {
+                        expected = sourceFrames[sourceIndex]
+                        sourceIndex += 1
+                    }
+                    let pixels = actual.stdout[(index*frameBytes)..<((index+1)*frameBytes)]
+                    let mean = zip(pixels,expected).reduce(0.0) {$0+abs(Double($1.0)-Double($1.1))}/Double(frameBytes)
+                    // Retain the existing picture-fidelity bound; source PTS must
+                    // establish which frame is compared before examining pixels.
+                    guard mean <= 16 else {throw JoeyError.failed("Source picture timeline differs at output \(batch[index])s: mean pixel error \(mean)")}
+                    comparisons += 1
+                }
             }
             offset += interval.duration
         }
-        return "\(comparisons) independent source-PTS/output-frame comparisons inside the picture rectangle; common file origin and interval positions checked"
+        return "\(comparisons) independent source-PTS/output-frame comparisons inside the picture rectangle at 2fps plus interval samples, each mean error at most 16/255; common file origin and interval positions checked"
             + (render.joeBranding == nil ? "" : "; only the approved logo footprint masked during source content; outro checked separately")
     }
     public static func validate(output: URL, source: SourceRecord, clip: ClipRecord, profile: SharedProfile, render: RenderReceipt, work: URL) async throws -> QAReport {
@@ -780,7 +849,39 @@ public enum Media {
             guard !a.isEmpty, abs(a.count-b.count) <= 160*284 else { throw JoeyError.failed("Picture sample coverage mismatch") }
             let mean = zip(a,b).reduce(0.0) {$0+abs(Double($1.0)-Double($1.1))}/Double(min(a.count,b.count))
             guard mean <= 6 else { throw JoeyError.failed("Source-only picture fidelity failed: mean pixel error \(mean)") }
-            checks["picture_fidelity"] = "2fps whole-frame 160x284 grayscale comparison; mean pixel error \(mean)/255; includes padding and source graphics"
+            // Check padding locally at each sampled frame. A short overlay
+            // must not disappear into a clip-wide or padding-wide average.
+            // Exclude a two-sample border around the source picture to avoid
+            // attributing scaling/chroma edge interpolation to added graphics.
+            let left = Double(outputProfile.width-render.pictureWidth)/2/Double(outputProfile.width)*160-2
+            let right = 160-left
+            let top = Double(outputProfile.height-render.pictureHeight)/2/Double(outputProfile.height)*284-2
+            let bottom = 284-top
+            let frameBytes = 160*284, frames = min(a.count,b.count)/frameBytes
+            guard a.count%frameBytes == 0,b.count%frameBytes == 0 else {throw JoeyError.failed("Picture sample geometry mismatch")}
+            var maximumPaddingError = 0.0
+            for frame in 0..<frames {
+                try Task.checkCancellation()
+                for y in stride(from:0,to:284,by:16) {
+                    for x in stride(from:0,to:160,by:16) {
+                        var error = 0.0, samples = 0
+                        for row in y..<min(y+16,284) {
+                            for column in x..<min(x+16,160) {
+                                if Double(column) >= left,Double(column) <= right,Double(row) >= top,Double(row) <= bottom {continue}
+                                let index = frame*frameBytes+row*160+column
+                                error += abs(Double(a[index])-Double(b[index]))
+                                samples += 1
+                            }
+                        }
+                        if samples > 0 {
+                            let localMean = error/Double(samples)
+                            guard localMean <= 16 else {throw JoeyError.failed("Source-only picture padding fidelity failed at sampled frame \(frame): local mean pixel error \(localMean)")}
+                            maximumPaddingError = max(maximumPaddingError,localMean)
+                        }
+                    }
+                }
+            }
+            checks["picture_fidelity"] = "2fps whole-frame 160x284 grayscale comparison; mean pixel error \(mean)/255; includes padding and source graphics; per-frame 16x16 padding tiles at most 16/255, observed maximum \(maximumPaddingError)"
             checks["source_picture_timeline"] = try await validateSourcePictureTiming(output:output,source:source,clip:clip,profile:outputProfile,render:render)
             checks["unrequested_additions"] = branding == nil ? "Source-only render recipe and whole-frame comparison; no added artwork, captions, logos or outro" : "Only hash-pinned DUB logo at x34 y866 size180×180, plus the full approved 7.300-second outro; whole-composition picture and audio comparison passed"
             if let branding {

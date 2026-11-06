@@ -1,3 +1,9 @@
+## Main audit repair task — 2026-11-05
+
+The current authorized repair task follows the preserved main audit roadmap A00–A13 on an isolated worktree. REQUIREMENTS.md remains the sole product specification. F01/F02/F05–F12 code repairs are verified at `a12520e4776e459235cf1d0dc6c730ea8033ae37`, with 437 Swift passes/four intentional skips/zero failures, 22 Python passes, Debug/Release builds, strict signatures and independent review. The code preserves accepted historical hard limits and evidence while enforcing current new-render QA. Full finding/uncertainty dispositions and primary proof are in [Repair closure](reviews/main-2026-11-05-e7d9749/REPAIR_CLOSURE.md).
+
+Frank settled F03 by choosing Landscape. Reuse the existing native 1920×1080 path, source-only for DUB/Taxstone and with the approved Joe logo/full outro. Specification/setup reconciliation and all-owner/historical-compatibility verification are complete. Current proof uses full c7249fa and final wording a470792, with source-bound results in the closure record. F04 remains production capability-evidence renewal. F13 has a reviewed exact read-only reconciliation plan, with corrective authority pending. Native fixture UI/Resume and local renderer/coverage proof remain separate from required real native/provider acceptance. Complete the focused PR, terminal available check readback and final preservation record. Merge, installation and production/provider mutations require applicable exact authority. Earlier implementation/installation sections retain their historical source and scope.
+
 ## App reliability repair plan — delivered 2026-11-05
 
 Frank approved the five-fix application plan and excluded content. All five implementation items are delivered and verified in the installed native app. Current REQUIREMENTS remain the product authority. The former content-run priority below is historical for this assignment.

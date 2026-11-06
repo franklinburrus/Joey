@@ -20,9 +20,11 @@ public enum Editorial {
         var found = request.adExclusions.filter { $0.confidence >= 0.99 && !$0.evidence.isEmpty }
         var start: TranscriptSegment?
         for segment in transcript.segments {
-            let text = segment.text.lowercased()
-            if start == nil && (text.contains("this episode is sponsored by") || text.contains("this is a paid advertisement")) { start = segment }
-            if let opening = start, text.contains("back to the show") || text.contains("back to the episode") {
+            let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if start != nil && uncertainAdContext(text) { start = nil }
+            if start == nil && confidentAdOpening(text) { start = segment }
+            let returnStatement = #"^(?:(?:and )?now[, ]+|(?:okay|ok|alright)[, ]+)?back to the (?:show|episode)[.!]*$"#
+            if let opening = start, text.range(of: returnStatement, options: .regularExpression) != nil {
                 if segment.start > opening.start && segment.start-opening.start <= 300 {
                     let range = Interval(opening.start,segment.start)
                     if !found.contains(where: { $0.interval.start < range.end && $0.interval.end > range.start }) {
@@ -34,6 +36,26 @@ public enum Editorial {
             if let opening = start, segment.end-opening.start > 300 { start = nil }
         }
         return found.sorted { $0.interval.start < $1.interval.start }
+    }
+    private static func confidentAdOpening(_ text: String) -> Bool {
+        guard text.hasPrefix("this episode is sponsored by ") || text.hasPrefix("this is a paid advertisement"),
+              !text.contains(where: { "\"“”`?".contains($0) }) else { return false }
+        // These qualifiers make a phrase uncertain even when it begins with
+        // the familiar sponsorship wording. Uncertain program material stays.
+        let uncertain = #"\b(?:no|not|never|nobody|none|without|if|whether|say|said|says|quot\w*|phrase|discuss\w*|fictional|hypothetical)\b|n['’]t\b"#
+        return text.range(of: uncertain, options: .regularExpression) == nil
+    }
+    private static func uncertainAdContext(_ text: String) -> Bool {
+        // A later segment can retract a standalone-looking opening or identify
+        // a quotation split by transcription. Keep that whole candidate read.
+        let uncertainty = [
+            #"\b(?:no|not|never|without)\b.{0,80}\b(?:sponsor\w*|paid|advertisement|ad read)\b"#,
+            #"\b(?:sponsor\w*|paid|advertisement)\b.{0,40}\b(?:not|never|nobody|none)\b"#,
+            #"n['’]t\b.{0,60}\b(?:sponsor\w*|paid|advertisement)\b"#,
+            #"\b(?:quot\w*|fictional|hypothetical)\b"#,
+            #"\b(?:discuss\w*|analy[sz]\w*)\b.{0,80}\b(?:sponsor\w*|advertisement|phrase|wording)\b"#
+        ].joined(separator: "|")
+        return text.range(of: uncertainty, options: .regularExpression) != nil
     }
     public static func plan(request: JobRequest, source: SourceRecord, transcript: Transcript, exclusions: [AdExclusion]) throws -> [ClipRecord] {
         let ranges: [[Interval]]
@@ -48,16 +70,30 @@ public enum Editorial {
         } else {
             if request.productionWorkflow == .link {
                 let count = try Planning.highlightCount(duration:source.duration)
-                ranges = (0..<count).map { index in
+                guard request.requestedCount == nil || request.requestedCount == count else {
+                    throw JoeyError.invalid("Requested \(request.requestedCount!) highlights conflicts with one selection per 900-second source block (\(count) required)")
+                }
+                let sentenceStarts = transcript.segments.enumerated().compactMap { index, segment -> Double? in
+                    index == 0 || ".!?".contains(transcript.segments[index-1].text.trimmingCharacters(in: .whitespacesAndNewlines).last ?? " ") ? segment.start : nil
+                }
+                var previousEnd = 0.0
+                ranges = try (0..<count).map { index in
                     let blockStart = Double(index)*900, blockEnd = min(source.duration,blockStart+900)
                     // A short final block may borrow preceding unselected content;
                     // keep its ending and count without emitting an invalid fragment.
-                    let start = max(0,min(blockStart,blockEnd-policy.minimum))
+                    let maximum = min(limit,600)
+                    let starts = sentenceStarts.filter { $0 >= previousEnd && $0 < blockEnd && blockEnd-$0 >= policy.minimum }
+                    let withinBlock = starts.first { $0 >= blockStart }
+                    let precedingContext = blockEnd-blockStart < 900 ? starts.last { $0 < blockStart && blockEnd-$0 <= maximum } : nil
+                    guard let start = withinBlock ?? precedingContext else {
+                        throw JoeyError.invalid("No complete sentence start fits source block \(blockStart)–\(blockEnd)s within the shared duration policy")
+                    }
                     // One chronological selection per source block. Prefer a
                     // sentence endpoint without crossing the block or hard limit.
-                    let end = min(blockEnd,start+min(limit,600))
+                    let end = min(blockEnd,start+maximum)
                     let boundary = transcript.segments.filter { $0.end > start && $0.end <= end && $0.end >= start+(end-start)*0.8 && ".!?".contains($0.text.last ?? " ") }.map(\.end).max()
-                    return [Interval(start,boundary ?? end)]
+                    previousEnd = boundary ?? end
+                    return [Interval(start,previousEnd)]
                 }
             } else {
                 let candidates = try Planning.fullShow(duration:source.duration,limit:min(limit,120),boundaries:transcript.segments.map(\.end),minimumDuration:policy.minimum)
