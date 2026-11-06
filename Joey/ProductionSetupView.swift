@@ -28,7 +28,7 @@ struct ProductionSetupView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:14) {
             Text(owner == .taxstone ? "Taxstone production setup" : "DUB production setup").font(.title.bold())
-            Text("Record current limits for your actual accounts and upload surfaces. Attach existing account evidence and official sources. Encoder tests do not prove account eligibility. Native video uses a 1920×1080 landscape canvas; audio uses the approved portrait canvas. Each clip has one shared X/Instagram file and must fit both surfaces. No JSON is required.")
+            Text("Record current limits for your actual accounts and upload surfaces. Attach existing account evidence and official sources. Encoder tests do not prove account eligibility. Native video uses a 1920×1080 landscape canvas. Audio uses the approved portrait canvas. Each clip has one shared X/Instagram file and must fit both surfaces. No JSON is required.")
                 .font(.callout)
             TabView {
                 capabilityForm($x).tabItem {Text("X account")}
