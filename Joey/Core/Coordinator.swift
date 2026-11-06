@@ -172,6 +172,7 @@ public actor Coordinator {
         let reopeningCompleted = job.state == .completed || job.completionReconciliationRequired == true
         var sourceValidationSnapshot = job
         var validatingSource = false
+        var validatingAcceptedPlan = false
         do {
             if reopeningCompleted {
                 guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Completed checkpoint lacks required delivery evidence")}
@@ -195,9 +196,6 @@ public actor Coordinator {
                 try await progress(job); return job
             }
             job.stage = "capability verification"
-            if !job.clips.isEmpty, job.clips.allSatisfy({$0.qa?.passed == true}) {
-                try job.validateAcceptedPlan()
-            }
             try renewCapabilityEvidence(requireCurrent:true)
             sourceValidationSnapshot = job
             let delivery: any CoordinatorDelivery = try Self.deliveryOverride ?? DriveDelivery(remote:config.rcloneRemote)
@@ -256,6 +254,12 @@ public actor Coordinator {
             source = checked;job.source = source
             try await save()
             validatingSource = false
+            if !job.clips.isEmpty, job.clips.allSatisfy({$0.qa?.passed == true}) {
+                job.stage = "accepted plan verification"
+                validatingAcceptedPlan = true
+                try job.validateAcceptedPlan()
+                validatingAcceptedPlan = false
+            }
             if let transcript = reusableTranscript {
                 try transcript.validate(sourceID:source.id,sha256:source.sha256,duration:source.duration)
                 try Persistence.save(transcript,to:dir.appendingPathComponent("transcript.json"))
@@ -489,7 +493,7 @@ public actor Coordinator {
             } else {job.storageRequiredBytes = nil}
             job.error = error is CancellationError ? "Cancelled; progress preserved for resume" : error.localizedDescription
             try await save()
-            if job.source != nil, !reopeningCompleted {_ = try? Records.write(job:job,directory:dir)}
+            if job.source != nil, !reopeningCompleted, !validatingAcceptedPlan {_ = try? Records.write(job:job,directory:dir)}
             return job
         }
     }

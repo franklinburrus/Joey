@@ -3,6 +3,69 @@ import Darwin
 @testable import JoeyCore
 
 final class RecoveryRegressionTests: XCTestCase {
+    func testNoncompletedAcceptedPlanRejectionPreservesCompanionsOnRepeatedResume() async throws {
+        let root = try workspace()
+        defer {try? FileManager.default.removeItem(at:root)}
+        let request = try Fixtures.request(dir:root,path:"unused")
+        var (saved,directory) = try completed(request,root:root)
+        saved.state = .qaPassed
+        saved.clips[0].intervals = [Interval(0,50)]
+        let files = try Records.write(job:saved,directory:directory)
+        let before = try files.map {($0,try Data(contentsOf:$0))}
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        for _ in 0..<2 {
+            let result = try await Coordinator(root:root).run(request)
+            XCTAssertEqual(result.state,.qaPassed)
+            XCTAssertEqual(result.stage,"accepted plan verification")
+            for (file,data) in before {XCTAssertEqual(try Data(contentsOf:file),data,file.lastPathComponent)}
+        }
+    }
+
+    func testCompletedReopenRejectsConflictingHighlightCounts() async throws {
+        for fixed in [false,true] {
+            let root = try workspace()
+            defer {try? FileManager.default.removeItem(at:root)}
+            var request = try joeRequest(root:root)
+            request.productionWorkflow = .link
+            request.profile = try Fixtures.landscapeProfile(dir:root)
+            request.mode = .highlights
+            request.requestedCount = 2
+            request.fixedIntervals = fixed ? [Interval(0,100)] : nil
+            let (saved,_) = try completed(request,root:root)
+            XCTAssertFalse(saved.hasRequiredCompletionEvidence)
+            let result = try await Coordinator(root:root).run(request)
+            XCTAssertNotEqual(result.state,.completed)
+        }
+    }
+
+    func testCompletedReopenEnforcesSavedByteCeilingIncludingEquality() async throws {
+        for allowed in [Int64(1),Int64(44)] {
+            let root = try workspace()
+            defer {try? FileManager.default.removeItem(at:root)}
+            var request = try Fixtures.request(dir:root,path:"unused")
+            request.profile.x!.maxBytes = allowed
+            request.profile.instagram!.maxBytes = allowed
+            let (saved,_) = try completed(request,root:root)
+            XCTAssertEqual(saved.clips[0].bytes,44)
+            XCTAssertEqual(saved.hasRequiredCompletionEvidence,allowed == 44)
+            let result = try await Coordinator(root:root).run(request)
+            XCTAssertEqual(result.state == .completed,allowed == 44,result.error ?? "")
+        }
+    }
+
+    func testValidHistoricalPortraitContractReopensWithoutApplyingNewRenderRecipe() async throws {
+        let root = try workspace()
+        defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.profile = try Fixtures.profile(dir:root)
+        var (saved,directory) = try completed(request,root:root)
+        saved.clips[0].qa!.checks["framing"] = "Source 720x1280; effective picture 720x1280 inside 720x1280, no quality-upscale claim"
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let result = try await Coordinator(root:root).run(request)
+        XCTAssertEqual(result.state,.completed,result.error ?? "")
+        XCTAssertEqual(result.clips[0].sha256,saved.clips[0].sha256)
+    }
+
     func testAcceptedPlanBindingRejectsChangedSourceProfileQAAndIntervals() throws {
         let root = try workspace()
         defer {try? FileManager.default.removeItem(at:root)}

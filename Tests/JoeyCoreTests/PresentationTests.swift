@@ -172,7 +172,7 @@ final class PresentationTests: XCTestCase {
             let receipt = DriveReceipt(id:"fixture-file-\(number)",name:name,parent:job.folderID!,bytes:100,md5:String(repeating:"a",count:32),
                 sha256:hash,url:"https://example.invalid/fixture-\(number)",permissions:["user:owner"],verifiedAt:Date(),destination:destination,permissionFingerprint:String(repeating:"a",count:64))
             return ClipRecord(id:number,title:"Fixture \(number)",intervals:[Interval(Double(number-1)*5,Double(number)*5)],
-                filename:name,bytes:100,sha256:hash,
+                filename:name,measuredDuration:5,bytes:100,sha256:hash,
                 qa:QAReport(checkedAt:Date(),checks:[:],outputSHA256:hash,passed:true,limitations:["Synthetic only"]),drive:receipt)
         }
         for name in Records.companionNames(source:job.source!) {

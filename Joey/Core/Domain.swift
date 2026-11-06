@@ -500,7 +500,8 @@ public struct JobRecord: Codable, Identifiable, Sendable {
             guard !clip.filename.isEmpty, clip.filename == URL(fileURLWithPath:clip.filename).lastPathComponent,
                   !clip.intervals.isEmpty, clip.qa?.passed == true,
                   clip.qa?.outputSHA256 == clip.sha256, clip.sha256?.count == 64,
-                  let bytes = clip.bytes, bytes > 0, let measured = clip.measuredDuration else {
+                  let bytes = clip.bytes, bytes > 0, bytes <= request.profile.maxBytes,
+                  let measured = clip.measuredDuration else {
                 throw JoeyError.failed("Saved accepted plan lacks matching clip and QA identities")
             }
             for interval in clip.intervals {
@@ -517,6 +518,9 @@ public struct JobRecord: Codable, Identifiable, Sendable {
         if request.mode == .fullShow {
             try Planning.validateCoverage(duration:source.duration,exclusions:exclusions.map(\.interval),clips:clips.map(\.intervals))
         } else {
+            if let requested = request.requestedCount, requested != clips.count {
+                throw JoeyError.failed("Saved highlights disagree with the explicit requested count")
+            }
             if let fixed = request.fixedIntervals {
                 guard clips.map(\.intervals) == fixed.map({[$0]}) else {
                     throw JoeyError.failed("Saved highlights disagree with the explicit intervals")
