@@ -7,7 +7,8 @@ public enum ProductionIntake {
     /// a second identity. Manual and email intake share this reconciliation.
     public static func existingRequest(for raw: String, content: LinkContent, mode: JobMode,
                                        requests: [JobRequest], archive: String? = nil,
-                                       archiveRoot: String? = nil, transcript: String? = nil) throws -> JobRequest? {
+                                       archiveRoot: String? = nil, transcript: String? = nil,
+                                       sharedProfile: SharedProfile? = nil) throws -> JobRequest? {
         let url = try Acquisition.validateOriginalURL(raw)
         guard let sourceID = SourceIdentitySuggestion.from(url.absoluteString) else {
             throw JoeyError.invalid("Unsupported source identity")
@@ -20,6 +21,9 @@ public enum ProductionIntake {
                 (content != .joeBudden || joe) &&
                 request.fixedIntervals == nil && request.requestedCount == nil && request.adExclusions.isEmpty &&
                 request.preferredDuration == nil && request.transcriptPolicy == nil &&
+                request.localPath == nil && request.expectedSourceSHA256 == nil &&
+                request.artwork == nil && request.taxstoneReuse == nil &&
+                (joe || sharedProfile == nil || request.profile.identityContract == sharedProfile?.identityContract) &&
                 (archive == nil || request.archiveReference == archive) &&
                 (joe || (request.archiveRootID ?? "") == (archiveRoot ?? "")) &&
                 (transcript == nil || request.transcriptPath == transcript) &&
@@ -29,6 +33,25 @@ public enum ProductionIntake {
             throw JoeyError.dependency("Multiple existing source contracts match; select the existing job instead of creating another")
         }
         return matches.first
+    }
+
+    /// Repeat ordinary link adoption while the coordinator owns the processing
+    /// lock. Provider title/date/duration are discovery metadata, not permission
+    /// to create a second job. Explicit selections and account contracts remain
+    /// distinct, and a frozen request never uses this admission path.
+    static func existingRequest(matching proposed: JobRequest, requests: [JobRequest]) throws -> JobRequest? {
+        guard [.link, .joeBudden].contains(proposed.productionWorkflow),
+              let url = proposed.originalURL, proposed.localPath == nil,
+              proposed.fixedIntervals == nil, proposed.requestedCount == nil,
+              proposed.adExclusions.isEmpty, proposed.preferredDuration == nil,
+              proposed.transcriptPolicy == nil, proposed.taxstoneReuse == nil,
+              proposed.expectedSourceSHA256 == nil, proposed.artwork == nil else {return nil}
+        let content: LinkContent = proposed.productionWorkflow == .joeBudden ? .joeBudden :
+            (proposed.owner == .taxstone ? .taxstone : .dub)
+        return try existingRequest(for:url,content:content,mode:proposed.mode,
+            requests:requests.filter {$0.productionWorkflow == proposed.productionWorkflow},
+            archive:proposed.archiveReference,archiveRoot:proposed.archiveRootID,
+            transcript:proposed.transcriptPath,sharedProfile:proposed.profile)
     }
 
     public static func request(source: DiscoveredSource, content: LinkContent, mode: JobMode,

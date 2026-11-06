@@ -92,10 +92,18 @@ public actor Coordinator {
         return JobInventory(jobs:readable,failures:failures)
     }
     public func directory(for id: String) -> URL {root.appendingPathComponent("jobs").appendingPathComponent(id)}
-    public func run(_ request: JobRequest, estimatedDuration: Double? = nil, progress: @escaping @Sendable (JobRecord) async throws -> Void = {_ in}) async throws -> JobRecord {
+    public func run(_ request: JobRequest, estimatedDuration: Double? = nil,
+                    progress: @escaping @Sendable (JobRecord) async throws -> Void = {_ in}) async throws -> JobRecord {
+        try await run(request,estimatedDuration:estimatedDuration,admitLink:nil,progress:progress)
+    }
+    /// Fresh link admission reconciles under the processing lock before the
+    /// caller freezes ownership. Existing immutable callers use the overload above.
+    public func run(_ request: JobRequest, estimatedDuration: Double? = nil,
+                    admitLink: (@Sendable (JobRequest) async throws -> Void)?,
+                    progress: @escaping @Sendable (JobRecord) async throws -> Void = {_ in}) async throws -> JobRecord {
         try await StorageManager.$processingRoot.withValue(root) {
             while true {
-                let job = try await execute(request,estimatedDuration:estimatedDuration,progress:progress)
+                let job = try await execute(request,estimatedDuration:estimatedDuration,admitLink:admitLink,progress:progress)
                 guard let needed = job.storageRequiredBytes else {return job}
                 // Capacity polling does not retry rendering, provider writes or
                 // profile validation. Those resume only after capacity permits.
@@ -127,7 +135,9 @@ public actor Coordinator {
             }
         }
     }
-    private func execute(_ request: JobRequest, estimatedDuration: Double?, progress: @escaping @Sendable (JobRecord) async throws -> Void) async throws -> JobRecord {
+    private func execute(_ request: JobRequest, estimatedDuration: Double?,
+                         admitLink: (@Sendable (JobRequest) async throws -> Void)?,
+                         progress: @escaping @Sendable (JobRecord) async throws -> Void) async throws -> JobRecord {
         let supplied = try Persistence.decoder.decode(JobRequest.self,from:Persistence.encoder.encode(request))
         try supplied.validate(requireCurrentCapability:false)
         let lock = try ProcessingLock(directory:root)
@@ -137,7 +147,12 @@ public actor Coordinator {
         let identity = try supplied.identityData()
         let inventory = try inventory()
         let checkpoints = inventory.jobs
-        let matches = try checkpoints.filter {try $0.request.identityData() == identity}
+        var matches = try checkpoints.filter {try $0.request.identityData() == identity}
+        if matches.isEmpty, admitLink != nil,
+           let prior = try ProductionIntake.existingRequest(matching:supplied,requests:checkpoints.map(\.request)) {
+            let priorIdentity = try prior.identityData()
+            matches = try checkpoints.filter {try $0.request.identityData() == priorIdentity}
+        }
         guard matches.count <= 1 else {throw JoeyError.invalid("Multiple checkpoints match this job; reconcile existing identities before resume")}
         if matches.isEmpty,try checkpoints.contains(where:{try $0.request.identityData(ignoringProfile:true) == supplied.identityData(ignoringProfile:true)}) {
             throw JoeyError.invalid("Resume changes the saved account, upload surface or technical constraints; existing job preserved")
@@ -152,6 +167,10 @@ public actor Coordinator {
         }
         var job = matches.first ?? JobRecord(id:id,request:supplied)
         var request = job.request
+        // Save email ownership before creating or mutating the job checkpoint.
+        // Holding the processing lock across admission closes the discovery race
+        // without leaving a resumable checkpoint orphaned from its mail ledger.
+        try await admitLink?(request)
         let config = try Configuration.load(root:root,discoverTranscription:job.state != .completed && job.completionReconciliationRequired != true && request.transcriptPolicy != .modelIndependent)
         let storage = try StorageManager(root:root,lock:lock)
         if job.state != .completed,StorageManager.automaticCleanupEnabled(root:root) {_ = try? storage.clean()}
@@ -264,9 +283,32 @@ public actor Coordinator {
                 try transcript.validate(sourceID:source.id,sha256:source.sha256,duration:source.duration)
                 try Persistence.save(transcript,to:dir.appendingPathComponent("transcript.json"))
             }
-            // Accepted local QA from an older build does not authorize a new
-            // provider operation outside the actual source-kind export limits.
-            _ = try request.profile.outputProfile(for:source.kind)
+            // Accepted recovery follows each hash-bound saved canvas, not the
+            // recipe for a new render. Receipts predating framing evidence use
+            // the actual verified file dimensions. Validate before any provider
+            // operation and preserve accepted evidence if recovery fails.
+            job.stage = "accepted export verification"
+            validatingAcceptedPlan = true
+            var needsRender = job.clips.isEmpty
+            for clip in job.clips {
+                let output = dir.appendingPathComponent(clip.filename)
+                guard clip.qa?.passed == true,clip.qa?.outputSHA256 == clip.sha256,
+                      let hash = clip.sha256,(try? Integrity.sha256(output)) == hash else {
+                    needsRender = true;continue
+                }
+                if let canvas = clip.qa?.acceptedCanvas {
+                    _ = try request.profile.acceptedOutputProfile(width:canvas.width,height:canvas.height)
+                } else {
+                    let measured = try await Media.probe(output)
+                    guard let width = measured.video?.width,let height = measured.video?.height,
+                          try Integrity.sha256(output) == hash else {
+                        throw JoeyError.failed("Accepted output dimensions cannot be verified; existing media preserved")
+                    }
+                    _ = try request.profile.acceptedOutputProfile(width:width,height:height)
+                }
+            }
+            if needsRender {_ = try request.profile.outputProfile(for:source.kind)}
+            validatingAcceptedPlan = false
             let remaining = job.clips.isEmpty ? source.duration : job.clips.filter {$0.qa?.passed != true}.reduce(0) {$0+$1.expectedDuration}
             if remaining > 0 {
                 try Persistence.checkDisk(at:root,requiredBytes:StorageManager.peakBytes(duration:remaining,sourceBytes:0,clipDuration:min(remaining,request.profile.maxDuration),audio:source.kind == .audio))

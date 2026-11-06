@@ -158,6 +158,16 @@ public struct SharedProfile: Codable, Equatable, Sendable {
         if kind == .nativeVideo, driveOnlyJoe != true {
             output.width = 1920;output.height = 1080
         }
+        return try acceptedOutputProfile(width:output.width,height:output.height)
+    }
+    /// A saved acceptance may use an older supported canvas. Validate its own
+    /// dimensions without applying the recipe selected for a new native render.
+    func acceptedOutputProfile(width: Int, height: Int) throws -> SharedProfile {
+        guard [(720,1280),(1080,1920),(1920,1080)].contains(where:{$0.0 == width && $0.1 == height}),
+              driveOnlyJoe != true || (width == 1920 && height == 1080) else {
+            throw JoeyError.dependency("Unsupported accepted canvas \(width)×\(height); existing media preserved")
+        }
+        var output = self;output.width = width;output.height = height
         // Validate the resolved canvas, not only the portrait selection stored
         // in the request. A native-video override cannot expand account limits.
         if driveOnlyJoe != true {
@@ -403,6 +413,16 @@ public struct QAReport: Codable, Equatable, Sendable {
     public var outputSHA256: String
     public var passed: Bool
     public var limitations: [String]
+    /// Historical QA already binds this framing check to outputSHA256. Retain
+    /// its exact persisted format; older receipts without it require probing.
+    var acceptedCanvas: (width: Int, height: Int)? {
+        guard passed, let framing = checks["framing"],
+              let marker = framing.range(of:" inside ",options:.backwards),
+              framing.hasSuffix(", no quality-upscale claim") else {return nil}
+        let dimensions = framing[marker.upperBound...].split(separator:",",maxSplits:1)[0].split(separator:"x")
+        guard dimensions.count == 2, let width = Int(dimensions[0]),let height = Int(dimensions[1]) else {return nil}
+        return (width,height)
+    }
 }
 public struct DriveReceipt: Codable, Equatable, Sendable {
     public var id: String
@@ -464,6 +484,26 @@ public struct JobRecord: Codable, Identifiable, Sendable {
     }
     /// Shared completion evidence for recovery and presentation. The coordinator
     /// also checks current local bytes before reopening a completed checkpoint.
+    private var hasBoundRegisterReceipts: Bool {
+        let acceptedIDs = Set(clips.compactMap { $0.drive?.id })
+        guard registerRows.count == clips.count, acceptedIDs.count == clips.count else {return false}
+        var identities = Set<String>(), locations = Set<String>()
+        for receipt in registerRows {
+            // Preserve the writer's historical tab!row:DriveID representation.
+            // Split from the right so legal punctuation in sheet names survives.
+            guard let colon = receipt.lastIndex(of:":"),
+                  let bang = receipt[..<colon].lastIndex(of:"!") else {return false}
+            let tab = receipt[..<bang], rowText = receipt[receipt.index(after:bang)..<colon]
+            let id = String(receipt[receipt.index(after:colon)...])
+            guard !tab.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
+                  rowText.allSatisfy({$0 >= "0" && $0 <= "9"}),
+                  let row = Int(rowText), row >= 2, String(row) == rowText,
+                  acceptedIDs.contains(id), identities.insert(id).inserted,
+                  locations.insert(String(receipt[..<colon])).inserted else {return false}
+        }
+        return identities == acceptedIDs
+    }
+
     public var hasRequiredCompletionEvidence: Bool {
         guard !clips.isEmpty, unavailableTranscriptFeatures.isEmpty,
               (try? validateAcceptedPlan()) != nil,
@@ -471,7 +511,7 @@ public struct JobRecord: Codable, Identifiable, Sendable {
               let destination = try? DestinationResolver.resolve(source:source,request:request,asset:.clip),
               Set(clips.compactMap { $0.drive?.id }).count == clips.count,
               !DestinationResolver.requiresDUBRegister(request) ||
-                (registerRows.count == clips.count && Set(registerRows).count == clips.count),
+                hasBoundRegisterReceipts,
               Set(companions.keys) == Set(Records.companionNames(source:source)),
               let transcript,
               (try? transcript.validate(sourceID:source.id,sha256:source.sha256,duration:source.duration)) != nil else {return false}

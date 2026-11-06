@@ -197,7 +197,7 @@ final class EpisodeFolderOwnershipTests: XCTestCase {
             job.planningBasis = .transcriptAssisted;job.state = state;job.folderID = FolderProvider.id
             job.clips = [ClipRecord(id:1,title:"Accepted",intervals:[Interval(0,6)],filename:output.lastPathComponent,
                 measuredDuration:6,bytes:Int64(try Data(contentsOf:output).count),sha256:hash,
-                qa:QAReport(checkedAt:Date(),checks:[:],outputSHA256:hash,passed:true,limitations:["Synthetic checkpoint"]))]
+                qa:QAReport(checkedAt:Date(),checks:["framing":"Source 160x90; effective picture 160x90 inside 1920x1080, no quality-upscale claim"],outputSHA256:hash,passed:true,limitations:["Synthetic checkpoint"]))]
             try Persistence.save(job,to:jobDirectory.appendingPathComponent("job.json"))
             try Persistence.save(job.transcript,to:jobDirectory.appendingPathComponent("transcript.json"))
             let fixture = FolderProvider(jobID:fullID)

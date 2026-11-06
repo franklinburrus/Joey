@@ -233,6 +233,69 @@ final class RecoveryRegressionTests: XCTestCase {
         XCTAssertTrue(result.companions.isEmpty)
     }
 
+    func testAcceptedHistoricalCanvasRecoveryUsesActualBytesAndSavedLimits() async throws {
+        for width in [720,1920] {
+            let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+            var request = try Fixtures.request(dir:root,path:"unused")
+            request.profile = try Fixtures.profile(dir:root);request.fileToDrive = true
+            var (saved,directory) = try completed(request,root:root)
+            let original = URL(fileURLWithPath:saved.source!.path)
+            _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-y","-f","lavfi","-i","testsrc2=s=320x180:r=30:d=2","-an","-c:v","libx264","-pix_fmt","yuv420p",original.path])
+            saved.source = try await Media.inspect(original,request:request)
+            let output = directory.appendingPathComponent(saved.clips[0].filename)
+            let height = width == 720 ? 1280 : 1080
+            _ = try await Processes.run("ffmpeg",["-nostdin","-v","error","-y","-i",original.path,"-vf","scale=320:180,pad=\(width):\(height):(ow-iw)/2:(oh-ih)/2","-an","-c:v","libx264","-preset","ultrafast","-pix_fmt","yuv420p",output.path])
+            let hash = try Integrity.sha256(output), probe = try await Media.probe(output)
+            saved.clips[0].sha256 = hash;saved.clips[0].qa!.outputSHA256 = hash
+            saved.clips[0].qa!.checks = ["historical_fixture":"Generated pre-landscape acceptance; dimensions must be measured"]
+            saved.clips[0].bytes = Int64(try Data(contentsOf:output).count)
+            saved.clips[0].intervals = [Interval(0,2)];saved.clips[0].measuredDuration = probe.duration
+            saved.clips[0].drive = nil;saved.companions = [:];saved.registerRows = []
+            saved.transcript = Transcript(sourceID:request.sourceID,sourceSHA256:saved.source!.sha256,duration:2,engine:"Synthetic regression",segments:[TranscriptSegment(start:0,end:2,text:"Generated color bars.")])
+            saved.state = .qaPassed;saved.acceptedPlanSHA256 = try saved.acceptancePlanHash()
+            try Persistence.save(saved.transcript,to:directory.appendingPathComponent("transcript.json"))
+            try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+            let before: JobRecord = try Persistence.load(directory.appendingPathComponent("job.json"))
+            let provider = RecoveryDelivery()
+            let result = try await Coordinator.$deliveryOverride.withValue(provider) {
+                try await Coordinator(root:root).run(request) {job in
+                    XCTAssertFalse(job.stage.hasPrefix("render clip") || job.stage.hasPrefix("QA clip"))
+                    if job.stage == "Drive folder",job.error == nil {throw JoeyError.failed("Synthetic filing unavailable")}
+                }
+            }
+            XCTAssertEqual(result.state,.qaPassed,result.error ?? "")
+            XCTAssertEqual(result.stage,width == 720 ? "Drive folder" : "accepted export verification",result.error ?? "")
+            if width == 720 {XCTAssertEqual(result.error,"Synthetic filing unavailable")}
+            else {XCTAssertTrue(result.error?.contains("1920×1080") == true,result.error ?? "")}
+            XCTAssertEqual(try result.request.identityData(),try request.identityData())
+            XCTAssertEqual(result.clips,before.clips)
+            XCTAssertEqual(try Integrity.sha256(output),hash)
+            let calls = await provider.calls;XCTAssertEqual(calls,width == 720 ? 1 : 0,"Only the supported output may reach mocked archive/delivery")
+            if width == 720 {
+                XCTAssertNil(Configuration().resumeIssue(for:before))
+                let interrupted = try await Coordinator.$deliveryOverride.withValue(provider) {
+                    try await Coordinator(root:root).run(request) {job in
+                        XCTAssertFalse(job.stage.hasPrefix("render clip") || job.stage.hasPrefix("QA clip"))
+                    }
+                }
+                XCTAssertEqual(interrupted.state,.qaPassed)
+                XCTAssertEqual(interrupted.clips[0].qa,before.clips[0].qa)
+                // The existing delivery fixture loses its first upload reply.
+                // Retry must reconcile that committed identity, never rerender.
+                let recovered = try await Coordinator.$deliveryOverride.withValue(provider) {
+                    try await Coordinator(root:root).run(request) {job in
+                        XCTAssertFalse(job.stage.hasPrefix("render clip") || job.stage.hasPrefix("QA clip"))
+                    }
+                }
+                XCTAssertEqual(recovered.state,.completed,recovered.error ?? "")
+                XCTAssertEqual(recovered.id,saved.id)
+                XCTAssertEqual(recovered.clips[0].qa,before.clips[0].qa)
+                XCTAssertEqual(try Integrity.sha256(output),hash)
+                XCTAssertTrue(recovered.hasRequiredCompletionEvidence)
+            }
+        }
+    }
+
     func testAcceptedAudioRecoveryDoesNotResolveArtworkOrRerender() async throws {
         let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
         var request = try Fixtures.request(dir:root,path:"unused")
@@ -294,6 +357,39 @@ final class RecoveryRegressionTests: XCTestCase {
         }
     }
 
+    func testSavedRegisterReceiptsRequireExactAcceptedDriveIdentities() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        let request = try Fixtures.request(dir:root,path:"unused")
+        let (saved,directory) = try completed(request,root:root)
+        let id = try XCTUnwrap(saved.clips[0].drive?.id)
+        XCTAssertTrue(saved.hasRequiredCompletionEvidence)
+        for invalid in ["unrelated", "Master Library!2:other-id", "Master Library!0:\(id)",
+                        "Master Library!1:\(id)", "!2:\(id)", "Master Library!A2:\(id)",
+                        "Master Library!2:", "Master Library!2:\(id):extra"] {
+            var changed = saved;changed.registerRows = [invalid]
+            XCTAssertFalse(changed.hasRequiredCompletionEvidence,invalid)
+        }
+        var duplicate = saved
+        duplicate.clips[0].intervals = [Interval(0,50)];duplicate.clips[0].measuredDuration = 50
+        var second = duplicate.clips[0]
+        second.id = 2;second.filename = "second.mp4";second.intervals = [Interval(50,100)]
+        second.drive!.id = "second-drive-id";second.drive!.name = second.filename
+        duplicate.clips.append(second)
+        duplicate.registerRows = ["Master Library!2:\(id)","Master Library!3:\(id)"]
+        XCTAssertFalse(duplicate.hasRequiredCompletionEvidence,"Distinct row strings cannot repeat a clip identity")
+        duplicate.registerRows = ["Master Library!2:\(id)","Master Library!2:second-drive-id"]
+        XCTAssertFalse(duplicate.hasRequiredCompletionEvidence,"One row cannot identify two clips")
+        duplicate.registerRows = ["Master Library!2:\(id)","Master Library!3:second-drive-id"]
+        XCTAssertTrue(duplicate.hasRequiredCompletionEvidence)
+        let provider = RecoveryDelivery()
+        let before = try Data(contentsOf:directory.appendingPathComponent(saved.clips[0].filename))
+        let result = try await Coordinator.$deliveryOverride.withValue(provider) {try await Coordinator(root:root).run(request)}
+        XCTAssertEqual(result.state,.completed,result.error ?? "")
+        XCTAssertEqual(result.registerRows,saved.registerRows)
+        let calls = await provider.calls;XCTAssertEqual(calls,0)
+        XCTAssertEqual(try Data(contentsOf:directory.appendingPathComponent(saved.clips[0].filename)),before)
+    }
+
     private func workspace() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
@@ -340,7 +436,7 @@ final class RecoveryRegressionTests: XCTestCase {
         job.planningBasis = .transcriptAssisted
         job.folderID = receipt.parent
         job.clips = [ClipRecord(id:1,title:"Synthetic",intervals:[Interval(0,100)],filename:output.lastPathComponent,
-            measuredDuration:request.productionWorkflow == .joeBudden ? 107.3 : 100,bytes:bytes,sha256:hash,qa:QAReport(checkedAt:Date(),checks:[:],outputSHA256:hash,passed:true,
+            measuredDuration:request.productionWorkflow == .joeBudden ? 107.3 : 100,bytes:bytes,sha256:hash,qa:QAReport(checkedAt:Date(),checks:["framing":"Source 720x1280; effective picture 608x1080 inside 1920x1080, no quality-upscale claim"],outputSHA256:hash,passed:true,
                 limitations:["Synthetic checkpoint fixture; no media or provider acceptance"]),drive:receipt)]
         let destination = try DestinationResolver.resolve(source:job.source!,request:request,asset:.clip)
         job.clips[0].drive!.destination = destination
@@ -349,7 +445,7 @@ final class RecoveryRegressionTests: XCTestCase {
             var companion = job.clips[0].drive!;companion.name = name;companion.id = "synthetic_"+name
             job.companions[name] = companion
         }
-        job.registerRows = request.owner == .dub ? ["fixture-row"] : []
+        job.registerRows = request.owner == .dub ? ["Master Library!2:\(receipt.id)"] : []
         job.state = .completed;job.stage = "complete"
         try Persistence.save(job.transcript,to:directory.appendingPathComponent("transcript.json"))
         try Persistence.save(job,to:directory.appendingPathComponent("job.json"))
@@ -1020,7 +1116,7 @@ private actor RecoveryDelivery: CoordinatorDelivery {
         }
     }
     func reconcileRegister(job: JobRecord, tab: String) async throws -> [String] {
-        calls += 1;return DestinationResolver.requiresDUBRegister(job.request) && filingFault != "register" ? ["fixture-row"] : []
+        calls += 1;return DestinationResolver.requiresDUBRegister(job.request) && filingFault != "register" ? job.clips.enumerated().map {"\(tab)!\($0.offset+2):\($0.element.drive!.id)"} : []
     }
     func upload(_ local: URL, name: String?, parent: String, destination: FilingDestination, replaceCompanion: Bool) async throws -> DriveReceipt {
         calls += 1

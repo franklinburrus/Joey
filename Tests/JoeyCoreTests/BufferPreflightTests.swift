@@ -101,7 +101,7 @@ final class BufferPreflightTests: XCTestCase {
         let receipt = DriveReceipt(id:"accepted-output-id",name:"clip.mp4",parent:job.folderID!,bytes:1_000_000,md5:String(repeating:"b",count:32),sha256:sha,url:"https://drive.google.com/file/d/accepted-output-id/view",permissions:["anyone:reader","user:owner"],verifiedAt:Date(),destination:try DestinationResolver.resolve(source:job.source!,request:request,asset:.clip),permissionFingerprint:String(repeating:"a",count:64))
         job.clips = [ClipRecord(id:1,title:"Test clip",intervals:[Interval(0,137)],filename:"clip.mp4",measuredDuration:137,bytes:1_000_000,sha256:sha,qa:QAReport(checkedAt:Date(),checks:["audio_fidelity_sync":"Source PCM matched"],outputSHA256:sha,passed:true,limitations:[]),drive:receipt)]
         for name in Records.companionNames(source:job.source!) {var companion = receipt;companion.id = name;companion.name = name;job.companions[name] = companion}
-        job.registerRows = ["Sheet!A2:ZZ2"]
+        job.registerRows = ["Sheet!2:\(receipt.id)"]
         return job
     }
 

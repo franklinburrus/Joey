@@ -3,6 +3,194 @@ import XCTest
 @testable import JoeyInterface
 
 final class EmailModelTests: XCTestCase {
+    @MainActor func testAutomaticStartupRequiresReadableEmailOwnership() async throws {
+        for condition in ["readable", "corrupt", "leased"] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+            defer {try? FileManager.default.removeItem(at:root)}
+            let store = try EmailIntakeStore(root:root)
+            var settings = EmailIntakeSettings();settings.account = "parent@icloud.com";settings.allowedSenders = ["sender@example.test"]
+            try store.configure(settings)
+            try store.activate(EmailScan(uidValidity:7,uidNext:1,frontier:0,messages:[]))
+            try store.ingest(EmailScan(uidValidity:7,uidNext:2,frontier:1,messages:[EmailMessage(uid:1,status:"authorized",reason:"templateToken",links:["https://youtu.be/abcdefghijk"])]))
+            let work = try XCTUnwrap(store.state.work.first)
+            var request = try Fixtures.request(dir:root,path:root.appendingPathComponent("protected-source.mp4").path)
+            request.sourceID = work.source.id
+            request.profile.x!.checkedAt = Date().addingTimeInterval(-7200)
+            request.profile.instagram!.checkedAt = Date().addingTimeInterval(-7200)
+            request.profile.x!.validUntil = Date().addingTimeInterval(-3600)
+            request.profile.instagram!.validUntil = Date().addingTimeInterval(-3600)
+            try store.freeze(work.id,request:request)
+            try store.updateWork(work.id,status:.running)
+            try store.pause()
+            var job = JobRecord(id:try request.stableID(),request:request)
+            job.state = .processing;job.stage = "source"
+            let checkpoint = root.appendingPathComponent("jobs/\(job.id)/job.json")
+            try Persistence.save(job,to:checkpoint)
+            let media = root.appendingPathComponent("protected-source.mp4")
+            try Data("accepted media preservation canary".utf8).write(to:media)
+            let checkpointBefore = try Data(contentsOf:checkpoint), mediaBefore = try Data(contentsOf:media)
+            let validLedger = try Data(contentsOf:store.url)
+            if condition == "corrupt" {try Data("{corrupt ledger".utf8).write(to:store.url)}
+            let ledgerBefore = try Data(contentsOf:store.url)
+            var lease = condition == "leased" ? try store.lock() : nil
+            var unrelated = job
+            unrelated.request.sourceID = "unrelated-manual-source"
+            unrelated.id = try unrelated.request.stableID()
+            let unrelatedCheckpoint = root.appendingPathComponent("jobs/\(unrelated.id)/job.json")
+            if condition == "readable" {try Persistence.save(unrelated,to:unrelatedCheckpoint)}
+            let model = JobModel(root:root,startsAutomatically:true,recentJoeEpisodes:{[]})
+            await model.startupTask?.value
+            withExtendedLifetime(lease) {}
+            XCTAssertEqual(try Data(contentsOf:checkpoint),checkpointBefore,condition)
+            XCTAssertEqual(try Data(contentsOf:media),mediaBefore,condition)
+            if condition != "readable" {
+                XCTAssertFalse(model.email.available,condition)
+                XCTAssertEqual(try Data(contentsOf:store.url),ledgerBefore,condition)
+            }
+            XCTAssertNil(model.task,condition)
+            XCTAssertNil(model.email.state.nextRequestedWork(),condition)
+            if condition == "readable" {
+                let recovered: JobRecord = try Persistence.load(unrelatedCheckpoint)
+                XCTAssertEqual(recovered.state,.failed)
+                XCTAssertEqual(recovered.stage,"capability verification")
+            } else {
+                // Restore only this isolated damaged/leased ownership fixture.
+                // A normal restart then holds email until explicit Process.
+                lease = nil
+                try validLedger.write(to:store.url)
+                let recovered = JobModel(root:root,startsAutomatically:true,recentJoeEpisodes:{[]})
+                await recovered.startupTask?.value
+                XCTAssertTrue(recovered.email.available)
+                XCTAssertEqual(try Data(contentsOf:checkpoint),checkpointBefore)
+                recovered.email.lookup = {_ in XCTFail("Recovery must reuse the frozen request");throw CancellationError()}
+                recovered.email.process(work.id,workflow:work.workflow)
+                await recovered.automationTask?.value
+                XCTAssertEqual(recovered.email.state.work.first?.jobID,job.id)
+                XCTAssertEqual(try recovered.email.state.work.first?.request?.identityData(),try request.identityData())
+                XCTAssertEqual(recovered.email.state.work.first?.status,.retryable)
+                XCTAssertEqual(recovered.jobs.map(\.id),[job.id])
+                XCTAssertEqual(try Data(contentsOf:media),mediaBefore)
+                // Explicit manual Resume remains supported even while the first
+                // model's mailbox ownership view is unavailable.
+                XCTAssertEqual(model.start(request),.accepted)
+                await model.task?.value
+                XCTAssertEqual(model.jobs.map(\.id),[job.id])
+            }
+        }
+    }
+
+    @MainActor func testProcessRefreshesCheckpointCreatedAfterUIInventory() async throws {
+        let model = try queuedModel(), store = try XCTUnwrap(model.email.store)
+        await model.refresh()
+        XCTAssertTrue(model.jobs.isEmpty)
+        let work = try XCTUnwrap(store.state.work.first)
+        let original = try ProductionIntake.request(source:DiscoveredSource(id:work.source.id,title:"Original title",
+            url:work.source.url,duration:10,episodeDate:"2026-10-01"),content:.dub,mode:.fullShow,sharedProfile:model.configuration?.profile)
+        var job = JobRecord(id:try original.stableID(),request:original)
+        job.state = .failed
+        job.source = SourceRecord(id:original.sourceID,owner:.dub,title:original.title,path:model.root.appendingPathComponent("missing.mp4").path,
+            bytes:1,sha256:String(repeating:"a",count:64),duration:10,width:320,height:180,fps:30,hasAudio:false,kind:.nativeVideo,
+            streams:[],authorizationBasis:"Synthetic fixture",classificationEvidence:"Synthetic fixture")
+        try Persistence.save(job,to:model.root.appendingPathComponent("jobs/\(job.id)/job.json"))
+        var calls = 0
+        model.email.lookup = {_ in
+            calls += 1
+            return DiscoveredSource(id:work.source.id,title:"Changed title",url:work.source.url,duration:11,episodeDate:"2026-11-06")
+        }
+        // Both paths fail before acquisition/provider access. Identity adoption
+        // still occurs before capability renewal and is independently observable.
+        var settings = try Configuration.load(root:model.root)
+        settings.profile = original.profile
+        settings.profile?.x?.account = "different-fixture-account"
+        settings.rcloneRemote = "synthetic-unavailable-remote"
+        try Persistence.save(settings,to:model.root.appendingPathComponent("settings.json"))
+        model.email.process(work.id,workflow:work.workflow)
+        await model.runEmailItem()
+        XCTAssertEqual(calls,0)
+        XCTAssertEqual(model.email.state.work.first?.jobID,job.id)
+        XCTAssertEqual(try model.email.state.work.first?.request?.identityData(),try original.identityData())
+        XCTAssertEqual(model.jobs.map(\.id),[job.id])
+    }
+
+    @MainActor func testEmailAdmissionReconcilesCheckpointCreatedDuringDiscoveryBeforeFreezing() async throws {
+        let model = try queuedModel(), store = try XCTUnwrap(model.email.store)
+        let work = try XCTUnwrap(store.state.work.first)
+        let original = try ProductionIntake.request(source:DiscoveredSource(id:work.source.id,title:"Original locked admission",
+            url:work.source.url,duration:10,episodeDate:"2026-10-01"),content:.dub,mode:.fullShow,sharedProfile:model.configuration?.profile)
+        var settings = try Configuration.load(root:model.root)
+        settings.profile = original.profile;settings.profile?.x?.account = "different-fixture-account"
+        try Persistence.save(settings,to:model.root.appendingPathComponent("settings.json"))
+        var calls = 0
+        model.email.lookup = {_ in
+            calls += 1
+            // A separate coordinator wins admission while discovery is suspended.
+            // Its synthetic account mismatch stops before acquisition or providers.
+            let other = try Coordinator(root:model.root)
+            _ = try await other.run(original)
+            return DiscoveredSource(id:work.source.id,title:"Provider title changed",url:work.source.url,duration:11,episodeDate:"2026-11-06")
+        }
+        model.email.process(work.id,workflow:work.workflow)
+        await model.runEmailItem()
+        XCTAssertEqual(calls,1)
+        XCTAssertEqual(model.email.state.work.first?.jobID,try original.stableID())
+        XCTAssertEqual(try model.email.state.work.first?.request?.identityData(),try original.identityData())
+        XCTAssertEqual(model.jobs.map(\.id),[try original.stableID()])
+        let first = try XCTUnwrap(model.email.state.work.first?.request)
+        model.email.process(work.id,workflow:work.workflow)
+        await model.runEmailItem()
+        XCTAssertEqual(calls,1)
+        XCTAssertEqual(try model.email.state.work.first?.request?.identityData(),try first.identityData())
+        XCTAssertEqual(model.jobs.count,1)
+    }
+
+    @MainActor func testLinkAdmissionPreservesDistinctOwnerWorkflowAccountAndSelections() throws {
+        let model = try queuedModel()
+        let work = try XCTUnwrap(model.email.state.work.first)
+        let original = try ProductionIntake.request(source:DiscoveredSource(id:work.source.id,title:"Original",
+            url:work.source.url,duration:10),content:.dub,mode:.fullShow,sharedProfile:model.configuration?.profile)
+        var proposed = original;proposed.title = "Changed metadata";proposed.expectedDuration = 11
+        XCTAssertEqual(try ProductionIntake.existingRequest(matching:proposed,requests:[original]),original)
+        var owner = original;owner.owner = .taxstone
+        var workflow = original;workflow.mode = .highlights
+        var account = original;account.profile.x!.account = "another-account"
+        var selected = original;selected.mode = .highlights;selected.fixedIntervals = [Interval(0,5)]
+        var preferred = original;preferred.preferredDuration = 480
+        var archive = original;archive.archiveRootID = "explicit-archive-root"
+        var artwork = original
+        artwork.artwork = Artwork(owner:.dub,driveID:"explicit-artwork",file:try XCTUnwrap(original.profile.x?.accountEvidence))
+        var sourceHash = original;sourceHash.expectedSourceSHA256 = String(repeating:"a",count:64)
+        var local = original;local.localPath = "/explicit/source.mp4"
+        for distinct in [owner,workflow,account,selected,preferred,archive,artwork,sourceHash,local] {
+            XCTAssertNil(try ProductionIntake.existingRequest(matching:proposed,requests:[distinct]))
+        }
+        for explicit in [artwork,sourceHash,local] {
+            XCTAssertNil(try ProductionIntake.existingRequest(matching:explicit,requests:[original]))
+            XCTAssertNil(try ProductionIntake.existingRequest(for:work.source.url,content:.dub,mode:.fullShow,
+                requests:[explicit],sharedProfile:original.profile))
+        }
+        XCTAssertNil(try ProductionIntake.existingRequest(matching:selected,requests:[original]))
+    }
+
+    @MainActor func testFreshManualDiscoveryAlsoReconcilesConcurrentEmailCheckpoint() async throws {
+        let model = try queuedModel()
+        let work = try XCTUnwrap(model.email.state.work.first)
+        let original = try ProductionIntake.request(source:DiscoveredSource(id:work.source.id,title:"Email accepted first",
+            url:work.source.url,duration:10),content:.dub,mode:.fullShow,sharedProfile:model.configuration?.profile)
+        var settings = try Configuration.load(root:model.root)
+        settings.profile = original.profile;settings.profile?.x?.account = "different-fixture-account"
+        try Persistence.save(settings,to:model.root.appendingPathComponent("settings.json"))
+        model.startLink(work.source.url,content:.dub,mode:.fullShow,archive:"",archiveRoot:"",transcript:"",lookup:{_ in
+            let other = try Coordinator(root:model.root)
+            _ = try await other.run(original)
+            return DiscoveredSource(id:work.source.id,title:"Provider title changed",url:work.source.url,duration:11)
+        })
+        for _ in 0..<500 where model.preparingSource {try await Task.sleep(nanoseconds:10_000_000)}
+        XCTAssertFalse(model.preparingSource)
+        await model.task?.value
+        XCTAssertEqual(model.jobs.map(\.id),[try original.stableID()])
+        XCTAssertEqual(try model.jobs.first?.request.identityData(),try original.identityData())
+    }
     @MainActor private func queuedModel() throws -> JobModel {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)

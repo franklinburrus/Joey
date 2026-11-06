@@ -1,6 +1,6 @@
 # Joey
 
-Joey is a native macOS Swift/SwiftUI application for authorized DUB and Taxstone media. It plans full-show coverage or explicit highlights, produces one shared portrait MP4 per clip, performs automatic media checks, and files verified outputs to the existing Joey Drive destinations. It never publishes social posts or sends email.
+Joey is a native macOS Swift/SwiftUI application for authorized DUB and Taxstone media. It plans full-show coverage or explicit highlights, produces one shared MP4 per clip under its saved presentation contract, performs automatic media checks, and files verified outputs to the configured creator destinations. Joe Budden retains its separate approved Drive-only workflow. It never publishes social posts or sends email.
 
 The current requirements are in [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md). Read [docs/STATUS.md](docs/STATUS.md) for verified progress and remaining operational dependencies, and [docs/OPERATING_GUIDE.md](docs/OPERATING_GUIDE.md) for use.
 

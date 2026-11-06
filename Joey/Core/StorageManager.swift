@@ -65,7 +65,7 @@ public final class StorageManager {
     private static let gib: Int64 = 1024*1024*1024
     // These are the pipeline's expendable products, not filename-based authority:
     // a fresh directory receipt, lifecycle, job and inode/hash checks are also required.
-    private static let scratchNames: Set<String> = ["render.partial.mp4","render.json","selected.wav","selected-with-outro.wav","audio-video.mp4","background.png","expected-artwork.png","expected-picture.gray","actual-picture.gray","expected-source.wav","final-audio.m4a","final-waveform.f32","qa-actual.f32","qa-art.raw","qa-expected.f32","qa-wave.f32","qa-wave.rgb","waveform.f32"]
+    private static let scratchNames: Set<String> = ["render.partial.mp4","render.json","selected.wav","selected-with-outro.wav","audio-video.mp4","background.png","expected-artwork.png","expected-picture.gray","actual-picture.gray","expected-picture.rgb","actual-picture.rgb","expected-source.wav","final-audio.m4a","final-waveform.f32","qa-actual.f32","qa-art.raw","qa-expected.f32","qa-wave.f32","qa-wave.rgb","waveform.f32"]
 
     static func automaticCleanupEnabled(root: URL) -> Bool {
         let url = root.appendingPathComponent("settings.json")
