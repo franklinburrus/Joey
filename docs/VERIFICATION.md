@@ -1,3 +1,13 @@
+# Workspace update installed and published — 2026-11-07
+
+Frank authorized commit, push, installation, update and task cleanup. Verified source was published as `526c2a9ab85e49717f699155d28ce92a915a469e` on `codex/workspace-redesign-20261107`, with PR #18 open against main. All application/test input hashes still match the retained 464-pass/four-skip suite, final native build and source-bound candidate. No repeated media rendering or provider verification was needed for this bundle-only update.
+
+Before replacement, the installed app's Cancel and Save Progress saved Episode 978 as CANCELLED while it was waiting for disk capacity. Normal app exit released the processing/email locks. The guarded same-volume installer preserved all 6,503 runtime identities and 3,277 small-state hashes, retained the prior bundle under `Joey Rollbacks/2026-11-07-before-workspace-redesign/`, and verified candidate/staged/installed strict signatures and all eight bundle hashes. Direct installer exit was 0.
+
+Postlaunch readback preserved every saved job file and the archived unsupported-workflow files at the recorded metadata/hash strength. Only joe-automation.json changed through normal startup observation. Joe and Taxstone automatic queues remain disabled and Episode 978 remains paused. The installed app is running and native observation verified Ready, the sidebar icon, hide/show, title-bar sizing, Command-plus to 110% and Control-minus back to 100%. The app was left at 100% with navigation visible.
+
+Task-owned review apps, synthetic runtime and disposable build directories were moved to Trash with a cleanup manifest. The distinct review-bundle preferences were moved there too. Rollback, verified candidate, logs, screenshots and receipts remain available. `publication-install/installation/installed.json` contains installed hashes, rollback and runtime preservation. `publication-install/cleanup.json` records recoverable cleanup. Exact publication heads and final clean-checkout readback are recorded in the sibling publication receipt. Main integration is separate from this feature-branch publication.
+
 # Native workspace redesign — 2026-11-07
 
 The approved workspace redesign is implemented in the existing SwiftUI app. The final Release build and strict deep candidate signature passed with direct exit 0. The full cached-source Swift suite executed 468 tests with 464 passes, four existing opt-in skips and zero failures, direct exit 0. The 14-test presentation suite passed after the two new sizing regressions failed for the missing sizing type. Existing Swift capture warnings and native build notices remain separate from success status.
