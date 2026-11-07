@@ -1,3 +1,15 @@
+# Unsupported-job recovery and integration verification — 2026-11-07
+
+The existing coordinator reproduced one decode failure for `dub-2ded57b978f7432e5c9d2141`. Its intact unsupported-workflow checkpoint was FAILED at source with zero clips, companions or register rows. The authorized same-volume archive preserved all five file SHA-256 values and the original's complete 6,250,340,031 bytes. File inodes, lengths and modification times also match. The 6,432-file runtime inventory reconciled exactly across the move, including all 6,427 unrelated files.
+
+Before/after coordinator list commands both exited 0. The first reported one checkpoint failure on stderr. The second returned the same 32 readable job records with empty stderr. Actual installed native observation showed Ready and no recovery banner. Frank's simultaneous Jobs selection was left in place. New intake's checkpoint guard is clear, with no production submission used as a test.
+
+The exact archive is `/Users/frank/Library/Application Support/Joey Native/preserved-unsupported-workflows/20261107/dub-2ded57b978f7432e5c9d2141`. Restoring it requires Joey closed, processing/email locks held and the original active path absent. The complete rollback, file hashes, current-state preconditions and recovery readback are in `/Users/frank/Library/Caches/Joey-Queue-Removal-20261107/recovery-merge/recovery.json` and sibling receipts. Recovery modifies runtime placement only. The installed application and all application/test source inputs retain their verified identity.
+
+The final current-source full Swift suite passed with direct exit 0, executing 466 tests with 462 passes, four intentional opt-in skips and zero failures. Log is `recovery-merge/full-swift.log`. The four skips retain the documented live Drive, owned assistant-service and real-media prerequisites. All application/test inputs and eight installed bundle hashes match the verified candidate. Strict deep installed signature verification also passed with direct exit 0.
+
+GitHub readback found main unprotected with no rulesets and PR #17 cleanly mergeable. There are no check runs, review submissions or unresolved review threads at that readback. The prior independent source review and regression correction remain valid for identical application inputs. Integration completion and post-merge verification are recorded in `/Users/frank/Library/Caches/Joey-Queue-Removal-20261107/recovery-merge/merge.json`, which binds the PR, expected head, actual merge commit, local/remote agreement and final source identity without circular commit metadata.
+
 # Queue update installed and restarted — 2026-11-07
 
 Frank authorized installation and restart of the verified queue-removal candidate. All eight installed bundle file hashes match the final Release receipt, and strict deep signature verification passed with direct exit 0. The old bundle is preserved at `/Users/frank/Applications/Joey Rollbacks/2026-11-07-before-queue-removal/Joey Native.app`.
