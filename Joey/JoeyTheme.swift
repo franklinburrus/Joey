@@ -4,6 +4,26 @@ import JoeyCore
 import SwiftUI
 import AppKit
 
+/// The persisted preference is a supported interface size, never an arbitrary
+/// transform. Invalid values from older preferences safely restore actual size.
+enum JoeyInterfaceSize {
+    static let levels: [Double] = [0.8,0.9,1,1.1,1.25,1.5,1.75,2]
+
+    static func normalized(_ value: Double) -> Double {
+        levels.contains(value) ? value : 1
+    }
+
+    static func increased(_ value: Double) -> Double {
+        let index = levels.firstIndex(of:normalized(value))!
+        return levels[min(index + 1,levels.count - 1)]
+    }
+
+    static func decreased(_ value: Double) -> Double {
+        let index = levels.firstIndex(of:normalized(value))!
+        return levels[max(index - 1,0)]
+    }
+}
+
 enum JoeyAppearance: String, CaseIterable, Identifiable {
     case system, light, dark
     var id: String { rawValue }
@@ -24,9 +44,17 @@ enum JoeyTheme {
     static let verified = color(0x228348)
     static func font(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         // Keep supporting text readable throughout the native interface.
-        .custom(weight == .bold ? "HelveticaNeue-Bold" : weight == .medium ? "HelveticaNeue-Medium" : "HelveticaNeue", size:max(14,size))
+        .custom(weight == .bold ? "HelveticaNeue-Bold" : weight == .medium ? "HelveticaNeue-Medium" : "HelveticaNeue", size:max(11,size))
     }
-    static func primary(_ scheme: ColorScheme) -> Color { color(scheme == .dark ? 0x69CD91 : 0x237A48) }
+    static func primary(_ scheme: ColorScheme) -> Color { color(scheme == .dark ? 0xF2F3EE : 0x111111) }
+    static let processing = color(0xB98A00)
+    static let attention = color(0xAC362D)
+    static func status(completed: Bool, isRunning: Bool, status: String) -> Color {
+        if completed {return verified}
+        if isRunning {return processing}
+        if status == "Needs attention" || status == "Delivery incomplete" {return attention}
+        return .secondary
+    }
     static func background(_ scheme: ColorScheme) -> Color { color(scheme == .dark ? 0x191919 : 0xF7F7F5) }
     static func panel(_ scheme: ColorScheme) -> Color { color(scheme == .dark ? 0x222222 : 0xFCFCFA) }
     static func onPrimary(_ scheme: ColorScheme) -> Color { scheme == .dark ? color(0x191919) : .white }
