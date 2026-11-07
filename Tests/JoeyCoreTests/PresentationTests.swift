@@ -1,7 +1,26 @@
 import XCTest
 @testable import JoeyCore
+@testable import JoeyInterface
 
 final class PresentationTests: XCTestCase {
+    func testInterfaceSizingNormalizesInvalidSavedValues() {
+        for invalid in [Double.nan, .infinity, -.infinity, -1, 0, 1.13, 10] {
+            XCTAssertEqual(JoeyInterfaceSize.normalized(invalid),1)
+        }
+        for scale in [0.8,0.9,1,1.1,1.25,1.5,1.75,2] {
+            XCTAssertEqual(JoeyInterfaceSize.normalized(scale),scale)
+        }
+    }
+
+    func testInterfaceSizingStepsAndClampsToSupportedRange() {
+        XCTAssertEqual(JoeyInterfaceSize.increased(1),1.1)
+        XCTAssertEqual(JoeyInterfaceSize.decreased(1),0.9)
+        XCTAssertEqual(JoeyInterfaceSize.increased(2),2)
+        XCTAssertEqual(JoeyInterfaceSize.decreased(0.8),0.8)
+        XCTAssertEqual(JoeyInterfaceSize.increased(.nan),1.1)
+        XCTAssertEqual(JoeyInterfaceSize.decreased(10),0.9)
+    }
+
     func testStagesDoNotInferDeliveryFromAcceptedClips() throws {
         let dir = FileManager.default.temporaryDirectory
         var request = try Fixtures.request(dir:dir,path:"fixture")

@@ -11,6 +11,8 @@ struct JobDetailView: View {
     @State private var resumeIssue: String? = "Checking saved requirements…"
     @State private var productionSetup = false
     @State private var capabilityDetails: [String] = []
+    @State private var expandedStage: String?
+    @State private var showingAllClips = false
     private var presentation: JobPresentation {JobPresentation(job:job)}
     private var sourceLabel: String {
         job.source.map {URL(fileURLWithPath:$0.path).lastPathComponent} ?? job.request.originalURL ?? job.request.sourceID
@@ -30,12 +32,13 @@ struct JobDetailView: View {
         ScrollView {
             VStack(alignment:.leading,spacing:22) {
                 VStack(alignment:.leading,spacing:7) {
-                    Text(job.request.productionWorkflow == .joeBudden ? "Joe Budden" : job.request.owner == .dub ? "DUB" : "Taxstone")
-                        .font(JoeyTheme.font(30,weight:.bold)).tracking(-0.8)
+                    Text(job.request.productionWorkflow == .joeBudden ? "JOE BUDDEN" : job.request.owner == .dub ? "DUB" : "TAXSTONE")
+                        .font(JoeyTheme.font(12,weight:.medium)).foregroundStyle(.secondary)
                     // Selectable Text can retain an older native accessibility
                     // value. Recreate only changed text, preserving the preview.
-                    Text(job.request.title).font(JoeyTheme.font(16)).textSelection(.enabled).id(job.request.title)
-                    Text(presentation.status).font(JoeyTheme.font(12)).foregroundStyle(presentation.completed ? JoeyTheme.verified : .secondary)
+                    Text(job.request.title).font(JoeyTheme.font(30,weight:.medium)).tracking(-0.8).textSelection(.enabled).id(job.request.title)
+                    Text(presentation.status).font(JoeyTheme.font(12))
+                        .foregroundStyle(JoeyTheme.status(completed:presentation.completed,isRunning:isRunning,status:presentation.status))
                 }
                 if !presentation.completed && !isRunning {
                     attention
@@ -43,30 +46,22 @@ struct JobDetailView: View {
                 } else if isRunning {
                     controls
                 }
-                JobPreview(url:previewURL,isAudio:job.source?.kind == .audio)
-                    .aspectRatio(16.0 / 9,contentMode:.fit)
-                VStack(alignment:.leading,spacing:10) {
-                    Text(presentation.stage).font(JoeyTheme.font(13,weight:.medium))
-                    JobProgressView(presentation:presentation,isRunning:isRunning)
-                }
-                VStack(alignment:.leading,spacing:14) {
-                    ForEach(presentation.stages) {stage in
-                        HStack(alignment:.top,spacing:12) {
-                            Image(systemName:stage.verified ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(stage.verified ? JoeyTheme.verified : isRunning && presentation.activeStageID == stage.id ? JoeyTheme.primary(scheme) : .secondary)
-                                .font(.system(size:13)).frame(width:15)
-                            VStack(alignment:.leading,spacing:3) {
-                                Text(stage.title).font(JoeyTheme.font(12,weight:.medium))
-                                Text(stage.detail).font(JoeyTheme.font(11)).foregroundStyle(.secondary)
-                            }
-                        }.accessibilityElement(children:.combine)
+                ViewThatFits(in:.horizontal) {
+                    HStack(alignment:.top,spacing:24) {
+                        preview.frame(minWidth:300,maxWidth:.infinity)
+                        stageOverview.frame(width:280)
                     }
+                    VStack(alignment:.leading,spacing:24) {preview;stageOverview}
                 }
                 if presentation.completed {controls}
                 Divider()
-                metadata
-                Divider()
-                results
+                ViewThatFits(in:.horizontal) {
+                    HStack(alignment:.top,spacing:24) {
+                        results.frame(minWidth:300,maxWidth:.infinity,alignment:.leading)
+                        metadata.frame(width:280,alignment:.leading)
+                    }
+                    VStack(alignment:.leading,spacing:24) {results;Divider();metadata}
+                }
             }.padding(24)
         }.background(JoeyTheme.panel(scheme))
         .task(id:job.id + String(job.updatedAt.timeIntervalSince1970)) {
@@ -81,6 +76,44 @@ struct JobDetailView: View {
             ProductionSetupView(model:model,owner:job.request.owner)
         }
     }
+    @ViewBuilder private var preview: some View {
+        if previewURL != nil {
+            JobPreview(url:previewURL,isAudio:job.source?.kind == .audio)
+                .aspectRatio(16.0 / 9,contentMode:.fit)
+        } else {
+            Label(job.source?.kind == .audio ? "Preview after first verified clip" : "Preview unavailable",systemImage:job.source?.kind == .audio ? "waveform" : "film")
+                .font(JoeyTheme.font(12)).foregroundStyle(.secondary)
+                .padding(16).frame(maxWidth:.infinity,alignment:.leading)
+                .background(Color.primary.opacity(0.035),in:RoundedRectangle(cornerRadius:4))
+        }
+    }
+    private var stageOverview: some View {
+        VStack(alignment:.leading,spacing:16) {
+            Text(presentation.stage).font(JoeyTheme.font(13,weight:.medium))
+            JobProgressView(presentation:presentation,isRunning:isRunning)
+            LazyVGrid(columns:[GridItem(.adaptive(minimum:76),alignment:.top)],alignment:.leading,spacing:12) {
+                ForEach(presentation.stages) {stage in
+                    Button {expandedStage = expandedStage == stage.id ? nil : stage.id} label: {
+                        VStack(spacing:8) {
+                            Image(systemName:stage.verified ? "checkmark.circle" : "circle")
+                                .foregroundStyle(stage.verified ? JoeyTheme.verified : isRunning && presentation.activeStageID == stage.id ? JoeyTheme.processing : Color.secondary)
+                                .font(.system(size:22,weight:.light))
+                            Text(stage.title).font(JoeyTheme.font(12)).multilineTextAlignment(.center)
+                        }.frame(maxWidth:.infinity,minHeight:64)
+                            .background(expandedStage == stage.id ? Color.primary.opacity(0.04) : Color.clear,in:RoundedRectangle(cornerRadius:4))
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                        .accessibilityLabel(stage.title + ", " + stage.detail)
+                        .accessibilityValue(expandedStage == stage.id ? "Expanded" : "Collapsed")
+                }
+            }
+            if let stage = presentation.stages.first(where:{$0.id == expandedStage}) {
+                Divider()
+                Text(stage.detail).font(JoeyTheme.font(12)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal:false,vertical:true)
+            }
+        }
+    }
     private func checkResume() {
         guard !isRunning else {return}
         resumeIssue = presentation.completed ? nil : model.resumeIssue(for:job)
@@ -91,6 +124,7 @@ struct JobDetailView: View {
             VStack(alignment:.leading,spacing:10) {
                 Label("Needs attention",systemImage:"exclamationmark.circle")
                     .font(JoeyTheme.font(13,weight:.medium))
+                    .foregroundStyle(JoeyTheme.attention)
                 Text(issue).textSelection(.enabled).fixedSize(horizontal:false,vertical:true)
                 Text("Accepted clips and saved progress are retained.").foregroundStyle(.secondary)
                 ViewThatFits(in:.horizontal) {
@@ -203,9 +237,10 @@ struct JobDetailView: View {
                 Link("Episode folder",destination:url)
             }
             if !job.clips.isEmpty {
-                DisclosureGroup("Clips (\(job.clips.count))") {
+                VStack(alignment:.leading,spacing:12) {
+                    Text("Clips (\(job.clips.count))").font(JoeyTheme.font(13,weight:.medium))
                     LazyVStack(alignment:.leading,spacing:18) {
-                        ForEach(job.clips) {clip in
+                        ForEach(showingAllClips ? job.clips : Array(job.clips.prefix(3))) {clip in
                             VStack(alignment:.leading,spacing:7) {
                                 Text("\(clip.id). \(clip.title)").font(JoeyTheme.font(12,weight:.medium))
                                 Text(clip.intervals.map {String(format:"%.3f–%.3f s",$0.start,$0.end)}.joined(separator:"; ")).monospacedDigit()
@@ -224,6 +259,9 @@ struct JobDetailView: View {
                             }
                         }
                     }.padding(.top,12)
+                    if job.clips.count > 3 {
+                        Button(showingAllClips ? "Show fewer clips" : "View all \(job.clips.count) clips") {showingAllClips.toggle()}
+                    }
                 }
             }
         }.font(JoeyTheme.font(11)).controlSize(.small)

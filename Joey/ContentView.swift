@@ -35,6 +35,8 @@ struct ContentView: View {
     @State private var checkpointRecovery = false
     @State private var dropTargeted = false
     @AppStorage("joey.appearance") private var appearance = JoeyAppearance.light.rawValue
+    @AppStorage("joey.sidebarCollapsed") private var sidebarCollapsed = false
+    @AppStorage("joey.interfaceScale") private var interfaceScale = 1.0
     @Environment(\.colorScheme) private var scheme
     private var selectedAppearance: JoeyAppearance {JoeyAppearance(rawValue:appearance) ?? .system}
     private var listedJobs: [JobRecord] {showingRemovedJobs && destination == .jobs ? model.removedJobs : model.visibleJobs}
@@ -48,23 +50,31 @@ struct ContentView: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let scale = CGFloat(JoeyInterfaceSize.normalized(interfaceScale))
+            let width = geometry.size.width / scale
+            let height = geometry.size.height / scale
             // Keep recovery notices and all panes inside the proposed window
             // viewport. Their intrinsic content must not enlarge its minimum.
             VStack(spacing:0) {
                 if !model.checkpointFailures.isEmpty {checkpointNotice}
                 // These thresholds come from the pane minimums, not a display's
                 // half-screen size. macOS controls the actual tiled window bounds.
-                if geometry.size.width >= 1100 {
+                if width >= 1100 {
                     HStack(spacing:0) {
-                        sidebar.frame(width:220)
-                        Divider()
+                        if !sidebarCollapsed {
+                            ViewThatFits(in:.vertical) {
+                                sidebar
+                                ScrollView {sidebar}
+                            }.frame(width:width * 0.14)
+                            Divider()
+                        }
                         panes
                     }
                 } else {
                     VStack(spacing:0) {
-                        compactNavigation(showDetailToggle:geometry.size.width < 900)
+                        compactNavigation(showDetailToggle:width < 900)
                         Divider()
-                        if geometry.size.width >= 900 {
+                        if width >= 900 {
                             panes
                         } else if showingDetail && (selectedJob != nil || destination == .buffer) {
                             inspector
@@ -73,13 +83,23 @@ struct ContentView: View {
                         }
                     }
                 }
-            }.frame(width:geometry.size.width,height:geometry.size.height)
+            }.frame(width:width,height:height)
+                .scaleEffect(scale,anchor:.topLeading)
+                .frame(width:geometry.size.width,height:geometry.size.height,alignment:.topLeading)
         }
         .font(JoeyTheme.font(16))
         .foregroundStyle(.primary)
         .background(JoeyTheme.background(scheme))
         .tint(JoeyTheme.primary(scheme))
         .frame(minWidth:440,minHeight:480)
+        .toolbar {
+            ToolbarItem(placement:.navigation) {
+                Button {sidebarCollapsed.toggle()} label: {Image(systemName:"sidebar.left")}
+                    .accessibilityLabel(sidebarCollapsed ? "Show Joey sidebar" : "Hide Joey sidebar")
+                    .help(sidebarCollapsed ? "Show Joey sidebar" : "Hide Joey sidebar")
+            }
+            ToolbarItem(placement:.primaryAction) {interfaceSizingControls}
+        }
         .sheet(isPresented:$checkpointRecovery) {checkpointRecoveryDetails}
         .preferredColorScheme(selectedAppearance.colorScheme)
         .onAppear {selectedAppearance.apply()}
@@ -110,9 +130,15 @@ struct ContentView: View {
             Label("History needs recovery",systemImage:"exclamationmark.circle").font(.headline)
             Text("\(model.checkpointFailures.count) saved checkpoint(s) need repair. Readable history remains available. New jobs wait for identity reconciliation.")
                 .fixedSize(horizontal:false,vertical:true)
-            HStack {
-                Button("Recovery Details") {checkpointRecovery = true}
-                Button("Refresh History") {Task {await model.refresh()}}
+            ViewThatFits(in:.horizontal) {
+                HStack {
+                    Button("Recovery Details") {checkpointRecovery = true}
+                    Button("Refresh History") {Task {await model.refresh()}}
+                }
+                VStack(alignment:.leading,spacing:8) {
+                    Button("Recovery Details") {checkpointRecovery = true}
+                    Button("Refresh History") {Task {await model.refresh()}}
+                }
             }.controlSize(.small)
         }.font(JoeyTheme.font(12)).padding(12).frame(maxWidth:.infinity,alignment:.leading)
             .background(JoeyTheme.panel(scheme))
@@ -141,15 +167,41 @@ struct ContentView: View {
     }
 
     private var panes: some View {
-        HSplitView {
-            workspace.frame(minWidth:380,maxWidth:.infinity,maxHeight:.infinity)
-            inspector.frame(minWidth:350,idealWidth:400,maxWidth:500,maxHeight:.infinity)
+        VStack(spacing:0) {
+            if destination == .process || destination == .jobs {
+                HStack {
+                    Text(destination.rawValue).font(JoeyTheme.font(19,weight:.medium))
+                    Spacer()
+                    Button("Import Link",systemImage:"plus") {openIntake()}.disabled(working)
+                }.padding(24)
+                Divider()
+            }
+            GeometryReader {geometry in
+                HStack(spacing:0) {
+                    workspace.frame(width:geometry.size.width * (destination == .process || destination == .jobs ? 0.30 : 0.55))
+                    Divider()
+                    inspector.frame(maxWidth:.infinity,maxHeight:.infinity)
+                }
+            }
         }
     }
 
     private func compactNavigation(showDetailToggle: Bool) -> some View {
-        HStack(spacing:12) {
-            Menu {
+        ViewThatFits(in:.horizontal) {
+            HStack(spacing:12) {
+                navigationMenu
+                Spacer(minLength:0)
+                if showDetailToggle && (selectedJob != nil || destination == .buffer) {detailNavigationButton}
+            }
+            VStack(alignment:.leading,spacing:8) {
+                navigationMenu
+                if showDetailToggle && (selectedJob != nil || destination == .buffer) {detailNavigationButton}
+            }
+        }.controlSize(.regular).padding(12)
+    }
+
+    private var navigationMenu: some View {
+        Menu {
                 ForEach(JoeyDestination.allCases,id:\.self) {item in
                     Button(item.rawValue,systemImage:item.symbol) {destination = item;showingDetail = false}
                 }
@@ -158,18 +210,30 @@ struct ContentView: View {
                 Button("Local Assistant…") {assistant = true}.disabled(working)
             } label: {Label("Navigate",systemImage:"sidebar.left")}
                 .accessibilityLabel("Navigation and settings")
-            Spacer(minLength:0)
-            if showDetailToggle && (selectedJob != nil || destination == .buffer) {
-                Button(showingDetail ? destination.workspaceNavigationTitle : (destination == .buffer ? "Handoff" : "Job Details"),systemImage:showingDetail ? "list.bullet" : "info.circle") {
-                    showingDetail.toggle()
-                }.accessibilityLabel(showingDetail ? destination.workspaceNavigationAccessibilityLabel : (destination == .buffer ? "Show Buffer handoff" : "Show selected job details"))
-            }
-        }.controlSize(.regular).padding(12)
+    }
+
+    private var detailNavigationButton: some View {
+        Button(showingDetail ? destination.workspaceNavigationTitle : (destination == .buffer ? "Handoff" : "Job Details"),systemImage:showingDetail ? "list.bullet" : "info.circle") {
+            showingDetail.toggle()
+        }.accessibilityLabel(showingDetail ? destination.workspaceNavigationAccessibilityLabel : (destination == .buffer ? "Show Buffer handoff" : "Show selected job details"))
+    }
+
+    private var interfaceSizingControls: some View {
+        HStack(spacing:4) {
+            Button {interfaceScale = JoeyInterfaceSize.decreased(interfaceScale)} label: {Image(systemName:"minus")}
+                .accessibilityLabel("Decrease interface size").disabled(JoeyInterfaceSize.normalized(interfaceScale) <= 0.8)
+            Button("\(Int(JoeyInterfaceSize.normalized(interfaceScale) * 100))%") {interfaceScale = 1}
+                .accessibilityLabel("Reset interface size to 100 percent")
+                .accessibilityValue("\(Int(JoeyInterfaceSize.normalized(interfaceScale) * 100)) percent")
+                .help("Actual interface size")
+            Button {interfaceScale = JoeyInterfaceSize.increased(interfaceScale)} label: {Image(systemName:"plus")}
+                .accessibilityLabel("Increase interface size").disabled(JoeyInterfaceSize.normalized(interfaceScale) >= 2)
+        }.controlSize(.small)
     }
 
     private var sidebar: some View {
-        VStack(alignment:.leading,spacing:36) {
-            Text("Joey").font(JoeyTheme.font(38,weight:.bold)).tracking(-2).padding(.top,24)
+        VStack(alignment:.leading,spacing:28) {
+            Text("Joey").font(JoeyTheme.font(29,weight:.bold)).tracking(-1.5).padding(.top,24)
             VStack(spacing:8) {
                 ForEach(JoeyDestination.allCases,id:\.self) {item in
                     Button {destination = item;showingDetail = false} label: {
@@ -177,7 +241,7 @@ struct ContentView: View {
                             Image(systemName:item.symbol).font(.system(size:19)).frame(width:24)
                             Text(item.rawValue).font(JoeyTheme.font(16,weight:.medium)).fixedSize(horizontal:false,vertical:true)
                             Spacer(minLength:0)
-                        }.padding(.horizontal,12).padding(.vertical,14)
+                        }.padding(.horizontal,10).padding(.vertical,11)
                             .foregroundStyle(destination == item ? JoeyTheme.primary(scheme) : Color.primary)
                             .background(destination == item ? Color.primary.opacity(0.045) : Color.clear,in:RoundedRectangle(cornerRadius:4))
                             .overlay(alignment:.leading) {
@@ -195,7 +259,7 @@ struct ContentView: View {
             Label {
                 Text(working ? "Working" : model.error != nil || !model.checkpointFailures.isEmpty ? "Needs attention" : "Ready")
             } icon: {
-                Circle().fill(working || model.error != nil || !model.checkpointFailures.isEmpty ? Color.secondary : JoeyTheme.verified).frame(width:7,height:7)
+                Circle().fill(model.error != nil || !model.checkpointFailures.isEmpty ? JoeyTheme.attention : working ? JoeyTheme.processing : Color.secondary).frame(width:7,height:7)
             }.font(JoeyTheme.font(12)).foregroundStyle(.secondary)
         }.padding(.horizontal,18).padding(.bottom,24)
     }
@@ -207,10 +271,10 @@ struct ContentView: View {
             ShowsView(model:model) {url in openIntake(url,content:.joeBudden)}
         } else {
             ScrollView {
-                VStack(alignment:.leading,spacing:28) {
+                VStack(alignment:.leading,spacing:16) {
                     if destination == .process {dropArea}
                     HStack {
-                        Text(destination == .process ? "Recent jobs" : showingRemovedJobs ? "Removed jobs" : "Jobs").font(JoeyTheme.font(20,weight:.medium))
+                        Text(destination == .process ? "Recent jobs" : showingRemovedJobs ? "Removed jobs" : "Queue").font(JoeyTheme.font(12,weight:.medium)).foregroundStyle(.secondary)
                         Spacer()
                         if destination == .jobs {
                             Menu {
@@ -224,15 +288,15 @@ struct ContentView: View {
                             }.disabled((!selectingJobs && listedJobs.isEmpty) || model.removingJobs)
                             if !selectingJobs && !showingRemovedJobs {
                                 Button("Import Link",systemImage:"plus") {openIntake()}.disabled(working)
+                                    .labelStyle(.iconOnly)
                             }
                         }
                     }
                     if selectingJobs {
-                        HStack {
+                        VStack(alignment:.leading,spacing:8) {
                             Button(selectedJobIDs.count == listedJobs.count ? "Deselect All" : "Select All") {
                                 selectedJobIDs = selectedJobIDs.count == listedJobs.count ? [] : Set(listedJobs.map(\.id))
                             }.disabled(model.removingJobs)
-                            Spacer()
                             Button(showingRemovedJobs ? "Restore Selected (\(selectedJobIDs.count))" : "Remove Selected (\(selectedJobIDs.count))") {
                                 let ids = selectedJobIDs
                                 if showingRemovedJobs {
@@ -271,18 +335,17 @@ struct ContentView: View {
                     if destination == .process && listedJobs.count > 8 {
                         Button("View all jobs") {destination = .jobs}.buttonStyle(.plain).foregroundStyle(.secondary)
                     }
-                }.padding(28)
+                }.padding(16)
             }
         }
     }
 
     private var dropArea: some View {
         Button {openIntake()} label: {
-            VStack(spacing:18) {
-                Image(systemName:"square.and.arrow.up").font(.system(size:38,weight:.light))
-                Text("Drop a link or import").font(JoeyTheme.font(17,weight:.medium))
-                Text("YouTube or X").font(JoeyTheme.font(12)).foregroundStyle(.secondary)
-            }.frame(maxWidth:.infinity).frame(height:250)
+            VStack(spacing:listedJobs.isEmpty ? 18 : 8) {
+                Image(systemName:"square.and.arrow.up").font(.system(size:listedJobs.isEmpty ? 38 : 18,weight:.light))
+                Text(listedJobs.isEmpty ? "Drop a link or import" : "Import YouTube or X").font(JoeyTheme.font(14,weight:.medium))
+            }.frame(maxWidth:.infinity).frame(height:listedJobs.isEmpty ? 250 : 72)
                 .background(dropTargeted ? JoeyTheme.primary(scheme).opacity(0.06) : Color.primary.opacity(0.015))
                 .overlay(RoundedRectangle(cornerRadius:4).strokeBorder(Color.primary.opacity(dropTargeted ? 0.5 : 0.2),style:StrokeStyle(lineWidth:1,dash:[5,4])))
                 .contentShape(Rectangle())
@@ -361,22 +424,23 @@ private struct JobRow: View {
     var body: some View {
         Button(action:select) {
             HStack(spacing:14) {
-                Image(systemName:job.source?.kind == .audio ? "waveform" : "film")
-                    .font(.system(size:21,weight:.light)).frame(width:44,height:54)
-                    .background(Color.primary.opacity(0.04),in:RoundedRectangle(cornerRadius:3))
                 VStack(alignment:.leading,spacing:7) {
-                    Text(job.request.title).font(JoeyTheme.font(18,weight:.medium)).lineLimit(2)
-                    Text(presentation.status).font(JoeyTheme.font(11)).foregroundStyle(.secondary)
+                    Text(job.request.productionWorkflow == .joeBudden ? "JOE BUDDEN" : job.request.owner == .dub ? "DUB" : "TAXSTONE")
+                        .font(JoeyTheme.font(11,weight:.medium)).foregroundStyle(.secondary)
+                    Text(job.request.title).font(JoeyTheme.font(15,weight:.medium)).lineLimit(3)
+                    Text(presentation.status).font(JoeyTheme.font(12))
+                        .foregroundStyle(JoeyTheme.status(completed:presentation.completed,isRunning:isRunning,status:presentation.status))
                     JobProgressView(presentation:presentation,isRunning:isRunning)
                         .allowsHitTesting(false).accessibilityHidden(true)
                 }
                 Spacer(minLength:0)
                 if presentation.completed {Image(systemName:"checkmark.circle.fill").foregroundStyle(JoeyTheme.verified)}
-                else if job.error != nil {Image(systemName:"exclamationmark.circle").foregroundStyle(.secondary)}
-                else if isRunning {Circle().fill(Color.secondary).frame(width:7,height:7)}
+                else if presentation.status == "Needs attention" || presentation.status == "Delivery incomplete" {Image(systemName:"exclamationmark.circle").foregroundStyle(JoeyTheme.attention)}
+                else if isRunning {Circle().fill(JoeyTheme.processing).frame(width:7,height:7)}
             }.padding(.vertical,16).padding(.horizontal,10)
                 .frame(maxWidth:.infinity,alignment:.leading)
                 .background(selected ? Color.primary.opacity(0.035) : Color.clear)
+                .overlay(alignment:.leading) {if selected {Rectangle().fill(JoeyTheme.primary(scheme)).frame(width:2)}}
                 .contentShape(Rectangle())
         }.buttonStyle(.plain)
             .accessibilityElement(children:.ignore)
@@ -396,12 +460,12 @@ struct JobProgressView: View {
         VStack(alignment:.leading,spacing:5) {
             if let progress = presentation.clipProgress {
                 ProgressView(value:progress)
-                    .progressViewStyle(JoeyMeasuredProgressStyle(color:presentation.completed ? JoeyTheme.verified : .secondary))
+                    .progressViewStyle(JoeyMeasuredProgressStyle(color:presentation.completed ? JoeyTheme.verified : isRunning ? JoeyTheme.processing : .secondary))
                     .accessibilityLabel("Clips passed automated QA")
                     .accessibilityValue("\(presentation.accepted) of \(presentation.total)")
                 Text("QA · \(presentation.accepted)/\(presentation.total) clips").font(JoeyTheme.font(11)).foregroundStyle(.secondary).monospacedDigit()
             } else if isRunning {
-                ProgressView().progressViewStyle(.linear).tint(.secondary)
+                ProgressView().progressViewStyle(.linear).tint(JoeyTheme.processing)
                     .accessibilityLabel("Processing; clip count not yet available")
             } else {
                 Text("No clips planned").font(JoeyTheme.font(11)).foregroundStyle(.secondary)
