@@ -1,3 +1,11 @@
+# PR #18 integration complete — 2026-11-07
+
+Frank instructed "Fix and close PR 18," authorizing review of current findings, confirmed repairs if needed, ordinary main integration and closed-state verification. The prior publication-only boundary is superseded for this pull request. Current review readback found zero inline comments, zero review threads, completed code/security review and no reported code findings at f83b270482c04c362253d7a30cc1f27999cd6ff1. Main has no branch protection or rulesets and the PR has no check runs. No application repair was justified by the current findings.
+
+PR #18 merged and closed at 2026-11-07T21:35:18Z as e38fe8af2d991afde242e853ea6ad455282773e8. The merge used an explicit expected-head guard. Its full repository tree exactly matches the reviewed f83b270 head, preserving the existing 464-pass/four-skip test evidence, native Release build and installed-native verification. All application/test input hashes and the eight installed bundle hashes were independently matched before integration, and strict installed signature verification passed.
+
+The canonical and existing cache checkouts are synchronized to main through ordinary fast-forward updates. Exact final heads, clean-state readback, review/protection observations and installed-source binding are recorded under `/Users/frank/Library/Caches/Joey-Workspace-20261107/pr18-closeout/`. The documentation closeout changes no application input. The installed update and existing rollback remain current for the merged application code. This integration starts no media or provider operation and requires no replacement installation.
+
 # Authorized workspace publication and installation — 2026-11-07
 
 Frank instructed "Push, Commit, Install, Update and Clear." This authorizes publication of the verified workspace redesign, replacement of the installed Joey bundle with the bound Release candidate, a controlled checkpoint-preserving restart, and cleanup of this task's temporary processes and synthetic artifacts. Preserve rollback, verification evidence, production media and runtime records. Publication targets `codex/workspace-redesign-20261107` through the existing origin. Main integration remains separate.
