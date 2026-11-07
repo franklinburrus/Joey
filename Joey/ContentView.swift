@@ -23,6 +23,9 @@ struct ContentView: View {
     @StateObject private var buffer: BufferViewModel
     @State private var destination: JoeyDestination = .process
     @State private var selectedID: String?
+    @State private var selectingJobs = false
+    @State private var selectedJobIDs: Set<String> = []
+    @State private var showingRemovedJobs = false
     @State private var showingDetail = true
     @State private var intake = false
     @State private var intakeURL = ""
@@ -34,7 +37,8 @@ struct ContentView: View {
     @AppStorage("joey.appearance") private var appearance = JoeyAppearance.light.rawValue
     @Environment(\.colorScheme) private var scheme
     private var selectedAppearance: JoeyAppearance {JoeyAppearance(rawValue:appearance) ?? .system}
-    private var selectedJob: JobRecord? {JobPresentation.selectedJob(in:model.jobs,id:selectedID)}
+    private var listedJobs: [JobRecord] {showingRemovedJobs && destination == .jobs ? model.removedJobs : model.visibleJobs}
+    private var selectedJob: JobRecord? {JobPresentation.selectedJob(in:listedJobs,id:selectedID)}
     private var working: Bool {model.busy || model.libraryBusy || model.preparingSource}
 
     init(model: JobModel) {
@@ -80,6 +84,8 @@ struct ContentView: View {
         .preferredColorScheme(selectedAppearance.colorScheme)
         .onAppear {selectedAppearance.apply()}
         .onChange(of:appearance) {_,_ in selectedAppearance.apply()}
+        .onChange(of:listedJobs.map(\.id)) {_,ids in selectedJobIDs.formIntersection(ids)}
+        .onChange(of:destination) {_,_ in selectingJobs = false;selectedJobIDs = []}
         .sheet(isPresented:$intake) {
             NewJobView(model:model,initialURL:intakeURL,initialContent:intakeContent) {intake = false}
                 .frame(width:760,height:700)
@@ -204,23 +210,65 @@ struct ContentView: View {
                 VStack(alignment:.leading,spacing:28) {
                     if destination == .process {dropArea}
                     HStack {
-                        Text(destination == .process ? "Recent jobs" : "Jobs").font(JoeyTheme.font(20,weight:.medium))
+                        Text(destination == .process ? "Recent jobs" : showingRemovedJobs ? "Removed jobs" : "Jobs").font(JoeyTheme.font(20,weight:.medium))
                         Spacer()
                         if destination == .jobs {
-                            Button("Import Link",systemImage:"plus") {openIntake()}.disabled(working)
+                            Menu {
+                                Button(showingRemovedJobs ? "Show Queue" : "Show Removed Jobs") {
+                                    showingRemovedJobs.toggle();selectedJobIDs = [];selectedID = nil;selectingJobs = false
+                                }
+                            } label: {Image(systemName:"ellipsis.circle")}
+                                .accessibilityLabel("Job list options")
+                            Button(selectingJobs ? "Done" : "Select") {
+                                selectingJobs.toggle();selectedJobIDs = []
+                            }.disabled(listedJobs.isEmpty || model.removingJobs)
+                            if !selectingJobs && !showingRemovedJobs {
+                                Button("Import Link",systemImage:"plus") {openIntake()}.disabled(working)
+                            }
                         }
                     }
-                    if model.jobs.isEmpty {
-                        Text("No jobs yet").foregroundStyle(.secondary).padding(.vertical,32)
+                    if selectingJobs {
+                        HStack {
+                            Button(selectedJobIDs.count == listedJobs.count ? "Deselect All" : "Select All") {
+                                selectedJobIDs = selectedJobIDs.count == listedJobs.count ? [] : Set(listedJobs.map(\.id))
+                            }.disabled(model.removingJobs)
+                            Spacer()
+                            Button(showingRemovedJobs ? "Restore Selected (\(selectedJobIDs.count))" : "Remove Selected (\(selectedJobIDs.count))") {
+                                let ids = selectedJobIDs
+                                if showingRemovedJobs {
+                                    if model.restoreJobs(ids) {selectedJobIDs = []}
+                                } else {
+                                    Task {if await model.removeJobs(ids) {selectedJobIDs = []}}
+                                }
+                            }.disabled(selectedJobIDs.isEmpty || model.removingJobs || model.cancelling)
+                        }.controlSize(.small)
+                        Text(showingRemovedJobs ? "Restore returns jobs to the queue without starting them." : "Removal stops selected active jobs. Saved files, progress and Drive records are kept.")
+                            .font(JoeyTheme.font(12)).foregroundStyle(.secondary)
+                    }
+                    if listedJobs.isEmpty {
+                        Text(showingRemovedJobs ? "No removed jobs" : "No jobs in queue").foregroundStyle(.secondary).padding(.vertical,32)
                     } else {
                         LazyVStack(spacing:0) {
-                            ForEach(destination == .process ? Array(model.jobs.prefix(8)) : model.jobs) {job in
-                                JobRow(job:job,selected:selectedJob?.id == job.id,isRunning:isRunning(job)) {selectedID = job.id;showingDetail = true}
+                            ForEach(destination == .process ? Array(listedJobs.prefix(8)) : listedJobs) {job in
+                                HStack(spacing:8) {
+                                    if selectingJobs {
+                                        Toggle("Select \(job.request.title)",isOn:Binding(get:{selectedJobIDs.contains(job.id)},set:{checked in
+                                            if checked {selectedJobIDs.insert(job.id)} else {selectedJobIDs.remove(job.id)}
+                                        })).toggleStyle(.checkbox).labelsHidden()
+                                            .accessibilityLabel("Select \(job.request.title)")
+                                            .disabled(model.removingJobs)
+                                    }
+                                    JobRow(job:job,selected:selectingJobs ? selectedJobIDs.contains(job.id) : selectedJob?.id == job.id,isRunning:isRunning(job)) {
+                                        if selectingJobs {
+                                            if selectedJobIDs.contains(job.id) {selectedJobIDs.remove(job.id)} else {selectedJobIDs.insert(job.id)}
+                                        } else {selectedID = job.id;showingDetail = true}
+                                    }.disabled(model.removingJobs)
+                                }
                                 Divider()
                             }
                         }
                     }
-                    if destination == .process && model.jobs.count > 8 {
+                    if destination == .process && listedJobs.count > 8 {
                         Button("View all jobs") {destination = .jobs}.buttonStyle(.plain).foregroundStyle(.secondary)
                     }
                 }.padding(28)
@@ -277,15 +325,22 @@ struct ContentView: View {
     }
     private func openIntake(_ url: String = "", content: LinkContent = .dub) {intakeURL = url;intakeContent = content;intake = true}
     private func isRunning(_ job: JobRecord) -> Bool {
-        (model.busy && model.jobs.first?.id == job.id) ||
-        (model.libraryBusy && model.taxstoneLibrary.currentSourceID == job.request.sourceID && job.state != .completed)
+        model.isRunning(job)
     }
     @ViewBuilder private var inspector: some View {
         if destination == .buffer {
             BufferHandoffPanel(buffer:buffer,model:model)
         } else if let job = selectedJob {
-            JobDetailView(model:model,job:job,isRunning:isRunning(job),onPrepare:{buffer.episodeID = job.id;destination = .buffer;showingDetail = false})
-                .id(job.id)
+            if model.removedJobIDs.contains(job.id) {
+                VStack(spacing:16) {
+                    Text(job.request.title).font(.headline)
+                    Text("Removed from queue. Saved files and delivery records are kept.")
+                    Button("Restore to Queue") {if model.restoreJobs([job.id]) {showingRemovedJobs = false;selectedID = job.id}}
+                }.padding(28).frame(maxWidth:.infinity,maxHeight:.infinity)
+            } else {
+                JobDetailView(model:model,job:job,isRunning:isRunning(job),onPrepare:{buffer.episodeID = job.id;destination = .buffer;showingDetail = false})
+                    .id(job.id)
+            }
         } else {
             VStack(spacing:16) {
                 Image(systemName:"film.stack").font(.system(size:30,weight:.light))

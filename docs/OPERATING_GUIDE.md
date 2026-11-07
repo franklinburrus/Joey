@@ -14,6 +14,12 @@ Startup is not universally passive: existing authorized interrupted manual work 
 
 Owner checklist — **DEFERRED — OWNER ACCEPTANCE**: after separately authorized installation and active-history reconciliation, test one intended original source through native acquisition/transcription/planning/rendering and automated QA; inspect usability and semantic accuracy; authorize required Drive/Sheets delivery and verify current capability/provider evidence; test platform ingestion and real sleep/wake; exercise live mailbox or optional assistant only if desired. No per-clip human approval gate is introduced. Failed or incomplete jobs retain their actual state. These owner activities are not prerequisites for engineering code integration.
 
+## Select and remove jobs
+
+In Jobs, choose **Select**, mark one or several rows (or **Select All**), then choose **Remove Selected**. Removed jobs disappear from Jobs and Recent jobs and stay removed after reopening Joey. Removal stops a selected active job through the existing cancellation flow; stopping active Joe/Taxstone library work also pauses its owning automatic queue. It does not delete originals, accepted clips, checkpoints, transcripts, delivery records or Drive objects.
+
+Open the Jobs options menu (**…**) and choose **Show Removed Jobs** to inspect removed entries. Use **Restore to Queue** for one entry, or Select and **Restore Selected** for several. Restoration preserves the original job identity and accepted progress and does not immediately start processing. Use Resume or the existing automation controls when ready. Removed checkpoints remain in identity reconciliation, preventing duplicate imports from bypassing their saved contracts.
+
 ## Start a job
 
 Open Joey Native.app, choose Import Link, paste the original YouTube/X URL and choose DUB, Taxstone or Joe Budden. Source identity and metadata are resolved from that link. Full-show coverage is the default; DUB/Taxstone Highlights explicitly selects one highlight per 15-minute source block, including the final partial block. Advanced Settings accepts an existing full-length archive link and source-bound transcript. Complete-original filing is required before new DUB, Taxstone and Joe Budden production clips. Imported legacy job requests retain local-source recovery and may specify exact intervals, verified date evidence and artwork bindings.

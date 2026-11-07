@@ -9,6 +9,11 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
 
 @MainActor final class JobModel: ObservableObject {
     @Published var jobs: [JobRecord] = []
+    @Published private(set) var removedJobIDs: Set<String> = []
+    @Published private(set) var removingJobs = false
+    @Published private(set) var activeJobID: String?
+    var visibleJobs: [JobRecord] {jobs.filter {!removedJobIDs.contains($0.id)}}
+    var removedJobs: [JobRecord] {jobs.filter {removedJobIDs.contains($0.id)}}
     @Published private(set) var checkpointFailures: [CheckpointFailure] = []
     @Published var selected: String?
     @Published var busy = false
@@ -66,7 +71,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             // An unavailable ledger is unknown ownership, not an empty queue.
             // Explicit manual recovery and independently owned automation remain
             // available; unclassified startup recovery waits for a readable ledger.
-            let pending = email.available ? jobs.filter { $0.resumesAutomatically && !queuedIDs.contains($0.request.sourceID) && !emailJobs.contains($0.id) } : []
+            let pending = email.available ? visibleJobs.filter { $0.resumesAutomatically && !queuedIDs.contains($0.request.sourceID) && !emailJobs.contains($0.id) } : []
             for job in pending {
                 start(job.request)
                 await task?.value
@@ -173,7 +178,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
     }
     func resumeJoeQueue(includeJoe: Bool = true) {
         if includeJoe && joeAutomation.enabled && automationStateReadable {joeResumeRequested = true}
-        guard !cancelling, !recovering, automationTask == nil,
+        guard !removingJobs,!cancelling, !recovering, automationTask == nil,
               !busy, !libraryBusy, !preparingSource else {return}
         let emailReady = email.available && email.state.nextRequestedWork() != nil
         guard joeResumeRequested || emailReady else {return}
@@ -202,6 +207,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             }
             do {
                 let prior = jobs.first {$0.request.sourceID == episode.id && $0.request.productionWorkflow == .joeBudden}
+                if let prior,removedJobIDs.contains(prior.id) {continue}
                 if prior?.state != .completed || prior?.hasRequiredCompletionEvidence != true {
                     let request: JobRequest
                     if let prior {request = prior.request}
@@ -241,7 +247,44 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         do {
             let inventory = try await coordinator.inventory()
             jobs = inventory.jobs;checkpointFailures = inventory.failures
+            removedJobIDs = try JobQueue.removedIDs(root:root)
         } catch {self.error = error.localizedDescription}
+    }
+    func isRunning(_ job: JobRecord) -> Bool {
+        if busy {return activeJobID == job.id}
+        guard libraryBusy,!automationRunning,!email.dispatching,job.state != .completed,
+              let sourceID = taxstoneLibrary.currentSourceID else {return false}
+        return taxstoneLibrary.episodes.first {$0.id == sourceID}?.jobID == job.id
+    }
+    /// Persist intent before cancellation so completion callbacks and another
+    /// app instance cannot dispatch the removed identity again.
+    @discardableResult func removeJobs(_ ids: Set<String>) async -> Bool {
+        guard !removingJobs,!cancelling else {return false}
+        let known = ids.intersection(jobs.map(\.id))
+        guard !known.isEmpty else {return false}
+        removingJobs = true
+        defer {removingJobs = false}
+        do {
+            try JobQueue.setRemoved(known,removed:true,root:root)
+            removedJobIDs = try JobQueue.removedIDs(root:root)
+        } catch {self.error = "Jobs could not be removed: " + error.localizedDescription;return false}
+        if jobs.contains(where:{known.contains($0.id) && isRunning($0)}) {
+            let processing = task
+            let parent = libraryBusy && !email.dispatching ? libraryTask : (automationRunning && !email.dispatching ? automationTask : nil)
+            cancel()
+            await processing?.value
+            await parent?.value
+        }
+        await refresh()
+        return true
+    }
+    @discardableResult func restoreJobs(_ ids: Set<String>) -> Bool {
+        guard !removingJobs else {return false}
+        do {
+            try JobQueue.setRemoved(ids.intersection(jobs.map(\.id)),removed:false,root:root)
+            removedJobIDs = try JobQueue.removedIDs(root:root)
+            return true
+        } catch {self.error = "Jobs could not be restored: " + error.localizedDescription;return false}
     }
     func revealCheckpoint(_ failure: CheckpointFailure) {
         NSWorkspace.shared.activateFileViewerSelecting([root.appendingPathComponent("jobs").appendingPathComponent(failure.directoryID)])
@@ -286,11 +329,12 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
     }
     @discardableResult func start(_ request: JobRequest, automatic: Bool = false,
                                  admitLink: (@Sendable (JobRequest) async throws -> Void)? = nil) -> JobAcceptance {
-        guard !cancelling, !busy, (!libraryBusy || automatic), (!automationRunning || automatic) else {return .deferred}
+        guard !removingJobs,!cancelling, !busy, (!libraryBusy || automatic), (!automationRunning || automatic) else {return .deferred}
         guard let coordinator else {return .unavailable}
         busy = true; error = nil
+        activeJobID = jobs.first {$0.request == request}?.id
         task = Task {
-            defer {busy = false; task = nil;if !automatic {resumeJoeQueue()}}
+            defer {busy = false; activeJobID = nil;task = nil;if !automatic {resumeJoeQueue()}}
             do {
                 let result = try await coordinator.run(request,admitLink:admitLink) { [weak self] job in
                     await self?.receive(job)
@@ -307,7 +351,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
     /// One explicitly requested email item per turn. Library/Joe loops offer the same
     /// turn between episodes, so no automation owns an unbounded media queue.
     func runEmailItem(interleaved: Bool = false, now: Date = Date()) async {
-        guard !cancelling, !busy, !preparingSource, (!libraryBusy || interleaved),
+        guard !removingJobs,!cancelling, !busy, !preparingSource, (!libraryBusy || interleaved),
               email.available, !email.dispatching, let store = email.store else {return}
         let inventory: JobInventory
         do {
@@ -345,6 +389,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
                 guard email.available, !cancelling else {throw CancellationError()}
             }
             guard email.available, !cancelling, let request else {throw CancellationError()}
+            if let id = work.jobID,removedJobIDs.contains(id) {throw CancellationError()}
             try Task.checkCancellation()
             let admission: (@Sendable (JobRequest) async throws -> Void)?
             if work.request == nil {
@@ -384,6 +429,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         catch {email.failedPersistence(error);throw error}
     }
     func receive(_ job: JobRecord) {
+        if busy {activeJobID = job.id}
         jobs.removeAll {$0.id == job.id}; jobs.insert(job,at:0); selected = job.id
     }
     func waitForProcessing(_ processing: Task<Void,Never>) async {
