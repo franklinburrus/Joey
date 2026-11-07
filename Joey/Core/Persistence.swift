@@ -63,3 +63,24 @@ public final class ProcessingLock {
     }
     deinit { if fd >= 0 { flock(fd, LOCK_UN); close(fd) } }
 }
+
+/// Queue visibility and dispatch intent are separate from immutable media and
+/// delivery checkpoints. All writers merge under the same cross-process lock.
+public enum JobQueue {
+    public static func removedIDs(root: URL) throws -> Set<String> {
+        let url = root.appendingPathComponent("job-queue.json")
+        guard FileManager.default.fileExists(atPath:url.path) else {return []}
+        let values = try url.resourceValues(forKeys:[.isRegularFileKey,.isSymbolicLinkKey])
+        guard values.isRegularFile == true,values.isSymbolicLink != true else {
+            throw JoeyError.dependency("Saved queue disposition cannot be read safely. Restore job-queue.json before processing; job files are preserved.")
+        }
+        return try Persistence.load(url)
+    }
+    public static func setRemoved(_ ids: Set<String>, removed: Bool, root: URL) throws {
+        let lock = try ProcessingLock(directory:root,name:"job-queue.lock")
+        defer {withExtendedLifetime(lock) {}}
+        var saved = try removedIDs(root:root)
+        if removed {saved.formUnion(ids)} else {saved.subtract(ids)}
+        try Persistence.save(saved.sorted(),to:root.appendingPathComponent("job-queue.json"))
+    }
+}

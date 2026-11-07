@@ -109,6 +109,7 @@ public actor Coordinator {
                 // profile validation. Those resume only after capacity permits.
                 do {
                     while true {
+                        if try JobQueue.removedIDs(root:root).contains(job.id) {throw CancellationError()}
                         try await Task.sleep(nanoseconds:StorageManager.capacityRetryNanoseconds)
                         if StorageManager.automaticCleanupEnabled(root:root) {
                             _ = try? StorageManager.clean(root:root)
@@ -166,6 +167,9 @@ public actor Coordinator {
             throw JoeyError.invalid("Existing checkpoint at stable job identity cannot be reconciled; preserve it for recovery")
         }
         var job = matches.first ?? JobRecord(id:id,request:supplied)
+        guard try !JobQueue.removedIDs(root:root).contains(id) else {
+            throw JoeyError.dependency("This job was removed from the queue. Restore it from Removed Jobs before resuming; saved files and delivery records are retained.")
+        }
         var request = job.request
         // Save email ownership before creating or mutating the job checkpoint.
         // Holding the processing lock across admission closes the discovery race
@@ -185,6 +189,7 @@ public actor Coordinator {
         }
         func authorizeNewOperation() throws {
             try Task.checkCancellation()
+            if try JobQueue.removedIDs(root:root).contains(id) {throw CancellationError()}
             try request.profile.validate()
         }
         var completedReadbackPassed = false

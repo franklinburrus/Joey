@@ -427,6 +427,7 @@ public actor TaxstoneLibrary {
                 guard state.enabled else {break}
                 if let limit,attempts >= limit {break}
                 if ["COMPLETED","BLOCKED"].contains(state.episodes[index].status) {continue}
+                if let id = state.episodes[index].jobID,try JobQueue.removedIDs(root:root).contains(id) {continue}
                 attempts += 1;state.currentSourceID = state.episodes[index].id
                 do {
                     let request = try await prepare(state.episodes[index],config:config)

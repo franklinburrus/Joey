@@ -1,3 +1,57 @@
+# Unsupported-job recovery and integration verification — 2026-11-07
+
+The existing coordinator reproduced one decode failure for `dub-2ded57b978f7432e5c9d2141`. Its intact unsupported-workflow checkpoint was FAILED at source with zero clips, companions or register rows. The authorized same-volume archive preserved all five file SHA-256 values and the original's complete 6,250,340,031 bytes. File inodes, lengths and modification times also match. The 6,432-file runtime inventory reconciled exactly across the move, including all 6,427 unrelated files.
+
+Before/after coordinator list commands both exited 0. The first reported one checkpoint failure on stderr. The second returned the same 32 readable job records with empty stderr. Actual installed native observation showed Ready and no recovery banner. Frank's simultaneous Jobs selection was left in place. New intake's checkpoint guard is clear, with no production submission used as a test.
+
+The exact archive is `/Users/frank/Library/Application Support/Joey Native/preserved-unsupported-workflows/20261107/dub-2ded57b978f7432e5c9d2141`. Restoring it requires Joey closed, processing/email locks held and the original active path absent. The complete rollback, file hashes, current-state preconditions and recovery readback are in `/Users/frank/Library/Caches/Joey-Queue-Removal-20261107/recovery-merge/recovery.json` and sibling receipts. Recovery modifies runtime placement only. The installed application and all application/test source inputs retain their verified identity.
+
+The final current-source full Swift suite passed with direct exit 0, executing 466 tests with 462 passes, four intentional opt-in skips and zero failures. Log is `recovery-merge/full-swift.log`. The four skips retain the documented live Drive, owned assistant-service and real-media prerequisites. All application/test inputs and eight installed bundle hashes match the verified candidate. Strict deep installed signature verification also passed with direct exit 0.
+
+GitHub readback found main unprotected with no rulesets and PR #17 cleanly mergeable. There are no check runs, review submissions or unresolved review threads at that readback. The prior independent source review and regression correction remain valid for identical application inputs. Integration completion and post-merge verification are recorded in `/Users/frank/Library/Caches/Joey-Queue-Removal-20261107/recovery-merge/merge.json`, which binds the PR, expected head, actual merge commit, local/remote agreement and final source identity without circular commit metadata.
+
+## Empty-list review correction
+
+PR #17 reported that removing every visible job, or restoring every removed job, disabled Done while keeping selection mode active. The original native fixture reproduced disabled Done and hidden Import Link after remove-all. ContentView now disables the Select action for an empty list while permitting Done during selection. The one-line correction introduces no new helper or state.
+
+Fresh Release build and strict signature passed with direct exit 0. In the corrected isolated Release fixture, Restore Selected (3) emptied Removed jobs with Done still enabled. Done exited selection. Remove Selected (3) emptied Jobs with Done still enabled, and Done restored an enabled Import Link. The fixture quit normally. Its complete source-input comparison changed only ContentView, which is excluded from the Swift package targets, so the passed 466-test package run remains applicable.
+
+The corrected Release candidate was installed and restarted with rollback. All 6,434 runtime file identities were preserved before launch, including 3,208 small-file hashes. Postlaunch job files, the archived original and Frank's current removed-job IDs remained intact. The installed eight bundle hashes match the corrected candidate and strict signature passed with direct exit 0. Native installed observation shows Ready and Jobs with Select and Import Link available. Corrected candidate and installation receipts are under `/Users/frank/Library/Caches/Joey-Queue-Removal-20261107/recovery-merge/selection-fix/`. The earlier install and candidate receipts remain historical evidence.
+
+# Queue update installed and restarted — 2026-11-07
+
+Frank authorized installation and restart of the verified queue-removal candidate. All eight installed bundle file hashes match the final Release receipt, and strict deep signature verification passed with direct exit 0. The old bundle is preserved at `/Users/frank/Applications/Joey Rollbacks/2026-11-07-before-queue-removal/Joey Native.app`.
+
+The paused and cleanly exited app released its processing/email locks. A same-volume staged replacement checked 6,431 runtime file identities with SHA-256 for 3,206 small state files and backed those state files up privately. All runtime files matched before launch. Postlaunch comparison preserved all 5,786 job files at the recorded metadata/hash strength. Joe's startup observation update was the only changed pre-existing runtime file, with paused state and queued identities retained. Media was verified by stable file identity, bytes and modification time during this bundle-only operation. No full-media rehash or new rendering was needed.
+
+Actual installed native observation confirmed Jobs, Select, named checkboxes and Remove Selected enabled at one selection. Done cleared the temporary selection. The installed app remains open. Episode 978 and automatic queues remain paused after their controlled checkpointed shutdown. No production job was removed. The existing unsupported `dubBroadcast` checkpoint remains intact and causes the visible one-record history recovery warning and new-import hold. Reconciliation of that record is outside this installation.
+
+Exact receipt, rollback manifest, source binding, state backup and preservation measurements are in `/Users/frank/Library/Caches/Joey-Queue-Removal-20261107/installation/installed.json` and its sibling files. Earlier feature tests/native fixture verification below are reused for the unchanged candidate.
+
+# Job queue removal — preinstallation verification 2026-11-07
+
+Feature scope and implementation checklist are in the leading STATUS entry. All Joey tools used `Tools/run-local.py` and explicit `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. Evidence root: `/Users/frank/Library/Caches/Joey-Queue-Removal-20261107/`.
+
+| Check | Direct exit | Observed result |
+| --- | --- | --- |
+| Initial queue regressions | 0 | 6 passed, zero failures |
+| Full Swift suite before final review correction | 0 | 464 executed: 460 passed, 4 intentional opt-in skips, zero failures |
+| Same-source cancellation regression before fix | 1 | Incorrect active classification and unrelated task cancellation both reproduced |
+| Final affected suites after correction | 0 | 51 passed, zero failures/skips; includes all 8 queue regressions |
+| Native Debug build | 0 | BUILD SUCCEEDED |
+| Isolated native UI fixture | 0 | Bulk selection, removal, removed-list readback and restoration observed; fixture closed normally |
+
+The full run's four skips retain their existing explicit prerequisites: authorized live Drive routing, two owned local-assistant service cases, and real-media renderer inputs. Existing compiler warnings remain; no warning-free claim is made. Only `isRunning` changed after the full run: source-level matching became exact library job matching. Its new failing regression and all affected model, intake, inventory, email and library suites passed on the final implementation. Native view verification is reused for unchanged view behavior; the final Select All disabling change only prevents mutation while a removal is pending.
+
+Commands:
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer python3 Tools/run-local.py /usr/bin/swift test
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer python3 Tools/run-local.py /usr/bin/swift test --filter 'JobQueueRemovalTests|NativeModelRegressionTests|JobInventoryTests|EmailModelTests|TaxstoneLibraryTests|ManualIntakeRegressionTests'
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer python3 Tools/run-local.py /usr/bin/xcodebuild -project Joey.xcodeproj -scheme Joey -configuration Release -destination platform=macOS -derivedDataPath /Users/frank/Library/Caches/Joey-Queue-Removal-20261107/ReleaseDerivedData -jobs 2 CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual build
+```
+
+Final Release build passed (`final-release.log`, direct exit 0). Strict deep candidate signature passed, direct exit 0. Candidate `/Users/frank/Library/Caches/Joey-Queue-Removal-20261107/installation-candidate/Joey Native.app` matches every final Release bundle file hash; `candidate.json` binds bundle/source paths, per-file hashes and final Swift/Python source inputs. The candidate is prepared and uninstalled. Tests and UI used isolated fixtures; no production jobs, actual queue removals, Drive/Sheets writes or installed-app replacement occurred.
+
 ## Engineering integration verification — 2026-11-06
 
 PR #15 was merged through the ordinary GitHub merge API with expected head `21fd6e2213894d21cfc12d0e6b9c8e4e3b07d9cd`; actual merge commit is `093aa5bb47ebda345746ebc5d2fe7d5d0656fbb5`. Readback confirms merged/closed and remote main at that commit. The merged tree is identical to the tested repair tree. Main reported no branch protection or rules; no required gate was bypassed. GitHub returned no check runs/statuses, which is **absent**, not a CI pass. Exact-head code/security reviews completed; independent local source/candidate review passed with no confirmed code blocker.
