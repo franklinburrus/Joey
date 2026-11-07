@@ -221,7 +221,7 @@ struct ContentView: View {
                                 .accessibilityLabel("Job list options")
                             Button(selectingJobs ? "Done" : "Select") {
                                 selectingJobs.toggle();selectedJobIDs = []
-                            }.disabled(listedJobs.isEmpty || model.removingJobs)
+                            }.disabled((!selectingJobs && listedJobs.isEmpty) || model.removingJobs)
                             if !selectingJobs && !showingRemovedJobs {
                                 Button("Import Link",systemImage:"plus") {openIntake()}.disabled(working)
                             }

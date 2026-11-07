@@ -10,6 +10,14 @@ The final current-source full Swift suite passed with direct exit 0, executing 4
 
 GitHub readback found main unprotected with no rulesets and PR #17 cleanly mergeable. There are no check runs, review submissions or unresolved review threads at that readback. The prior independent source review and regression correction remain valid for identical application inputs. Integration completion and post-merge verification are recorded in `/Users/frank/Library/Caches/Joey-Queue-Removal-20261107/recovery-merge/merge.json`, which binds the PR, expected head, actual merge commit, local/remote agreement and final source identity without circular commit metadata.
 
+## Empty-list review correction
+
+PR #17 reported that removing every visible job, or restoring every removed job, disabled Done while keeping selection mode active. The original native fixture reproduced disabled Done and hidden Import Link after remove-all. ContentView now disables the Select action for an empty list while permitting Done during selection. The one-line correction introduces no new helper or state.
+
+Fresh Release build and strict signature passed with direct exit 0. In the corrected isolated Release fixture, Restore Selected (3) emptied Removed jobs with Done still enabled. Done exited selection. Remove Selected (3) emptied Jobs with Done still enabled, and Done restored an enabled Import Link. The fixture quit normally. Its complete source-input comparison changed only ContentView, which is excluded from the Swift package targets, so the passed 466-test package run remains applicable.
+
+The corrected Release candidate was installed and restarted with rollback. All 6,434 runtime file identities were preserved before launch, including 3,208 small-file hashes. Postlaunch job files, the archived original and Frank's current removed-job IDs remained intact. The installed eight bundle hashes match the corrected candidate and strict signature passed with direct exit 0. Native installed observation shows Ready and Jobs with Select and Import Link available. Corrected candidate and installation receipts are under `/Users/frank/Library/Caches/Joey-Queue-Removal-20261107/recovery-merge/selection-fix/`. The earlier install and candidate receipts remain historical evidence.
+
 # Queue update installed and restarted — 2026-11-07
 
 Frank authorized installation and restart of the verified queue-removal candidate. All eight installed bundle file hashes match the final Release receipt, and strict deep signature verification passed with direct exit 0. The old bundle is preserved at `/Users/frank/Applications/Joey Rollbacks/2026-11-07-before-queue-removal/Joey Native.app`.
