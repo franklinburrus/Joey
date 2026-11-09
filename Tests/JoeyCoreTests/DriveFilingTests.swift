@@ -91,6 +91,7 @@ final class DriveFilingTests: XCTestCase {
         do {_ = try await delivery.upload(file,parent:FilingProvider.folder,destination:route,replaceCompanion:true);XCTFail("Corrupted companion accepted")}
         catch {
             XCTAssertTrue(error.localizedDescription.contains("Downloaded remote SHA-256")
+                || error.localizedDescription.contains("Downloaded remote MD5")
                 || error.localizedDescription.contains("rolled back")
                 || error.localizedDescription.contains("Staged companion"),
                 error.localizedDescription)

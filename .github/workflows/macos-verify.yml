@@ -43,9 +43,11 @@ jobs:
 
       - name: Install media helpers
         run: |
-          brew install ffmpeg
+          brew install ffmpeg yt-dlp
           command -v ffmpeg
+          command -v yt-dlp
           ffmpeg -version | head -n 2
+          yt-dlp --version
 
       - name: Full Swift package test suite
         run: python3 Tools/run-local.py swift test

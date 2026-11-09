@@ -68,7 +68,8 @@ final class MediaTests: XCTestCase {
         XCTAssertNil(filed.drive)
         let jobDirectory = await coordinator.directory(for:result.id)
         XCTAssertTrue((result.storageWarnings ?? []).isEmpty,"RGB QA scratch must retain supported cleanup ownership")
-        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath:jobDirectory.appendingPathComponent("scratch/1").path).isEmpty)
+        // Local QA alone does not authorize scratch disposal until Drive filing evidence exists.
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath:jobDirectory.appendingPathComponent("scratch/1").path).isEmpty)
         let output = jobDirectory.appendingPathComponent(accepted.filename)
         XCTAssertEqual(try Integrity.sha256(output),accepted.qa?.outputSHA256)
         let render: RenderReceipt = try Persistence.load(jobDirectory.appendingPathComponent("evidence/1/render.json"))
