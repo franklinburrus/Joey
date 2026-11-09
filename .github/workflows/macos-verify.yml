@@ -41,6 +41,12 @@ jobs:
           xcodebuild -version
           python3 --version
 
+      - name: Install media helpers
+        run: |
+          brew install ffmpeg
+          command -v ffmpeg
+          ffmpeg -version | head -n 2
+
       - name: Full Swift package test suite
         run: python3 Tools/run-local.py swift test
 

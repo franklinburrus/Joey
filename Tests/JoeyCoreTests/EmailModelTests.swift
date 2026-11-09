@@ -425,7 +425,7 @@ final class EmailModelTests: XCTestCase {
         XCTAssertFalse(processing.isCancelled)
         XCTAssertFalse(queue.isCancelled)
     }
-    @MainActor func testCancelDuringInterleavedEmailDoesNotPauseJoeOrLibrary() async throws {
+    @MainActor func testCancelDuringInterleavedEmailPausesJoeAndLibraryAndCancelsProcessing() async throws {
         for libraryBusy in [false,true] {
             let model = try queuedModel()
             model.email.dispatching = true
@@ -435,10 +435,12 @@ final class EmailModelTests: XCTestCase {
             let processing = Task<Void,Never> {try? await Task.sleep(nanoseconds:30_000_000_000)}
             let queue = Task {await processing.value}
             model.task = processing;model.automationTask = queue
+            if libraryBusy {
+                model.libraryTask = Task {await processing.value}
+            }
             model.cancel()
             XCTAssertTrue(processing.isCancelled)
-            XCTAssertTrue(model.joeAutomation.enabled)
-            XCTAssertFalse(queue.isCancelled)
+            XCTAssertFalse(model.joeAutomation.enabled)
             await processing.value
             queue.cancel()
             for _ in 0..<5 {await Task.yield()}

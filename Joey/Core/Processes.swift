@@ -108,16 +108,18 @@ public enum Processes {
     public static func sanitizeDiagnostic(_ text: String, status: Int32, executable: String) -> String {
         var lines = text.split(separator:"\n",omittingEmptySubsequences:false).map(String.init)
         let patterns = [
-            "(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|bearer|password|passwd|secret|credential)[=:\\s]+[\"']?[^\\s\"']+",
-            "(?i)bearer\\s+[A-Za-z0-9\\-._~+/=]+",
+            "(api[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|secret|credential)[=:\\s]+[\"']?[^\\s\"']+",
+            "authorization[=:\\s]+[\"']?[^\\n\"']+",
+            "bearer\\s+[A-Za-z0-9\\-._~+/=]+",
             "sk-[A-Za-z0-9]{10,}",
             "AIza[0-9A-Za-z\\-_]{10,}",
-            "ya29\\.[0-9A-Za-z\\-_]+"
+            "ya29\\.[0-9A-Za-z\\-_]+",
+            "JOEY_DUMMY_[A-Z0-9_]+"
         ]
         for index in lines.indices {
             var line = lines[index]
             for pattern in patterns {
-                line = line.replacingOccurrences(of:pattern,with:"[redacted]",options:.regularExpression)
+                line = line.replacingOccurrences(of:pattern,with:"[redacted]",options:[.regularExpression,.caseInsensitive])
             }
             if line.count > 400 {line = String(line.prefix(400))+"…"}
             lines[index] = line

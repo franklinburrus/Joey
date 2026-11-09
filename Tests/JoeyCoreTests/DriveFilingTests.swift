@@ -232,7 +232,10 @@ private final class FilingProvider: @unchecked Sendable {
         if args[1].hasPrefix("fixture:") {
             downloads += 1;let name = String(args[1].dropFirst(8))
             guard let id = names.first(where:{$0.value == name && parents[$0.key] == parent})?.key else {throw JoeyError.failed("Fixture download absent")}
-            try (corruptDownload ? Data("corrupted".utf8) : files[id]!).write(to:URL(fileURLWithPath:args[2]))
+            let payload = files[id]!
+            // Keep byte length stable so readback fails on content/hash, not size.
+            let corrupt = Data(repeating:0x5A,count:payload.count)
+            try (corruptDownload ? corrupt : payload).write(to:URL(fileURLWithPath:args[2]))
         } else {
             writes += 1;writtenParents.append(parent)
             let name = String(args[2].dropFirst(8)),id = "synthetic_file_"+Integrity.textHash(name)
