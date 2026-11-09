@@ -414,7 +414,7 @@ public actor DriveDelivery {
                 throw JoeyError.dependency("No write access to authoritative destination: \(parent)")
             }
             // New clip/companion objects never overwrite an existing name.
-            var args = ["copyto",local.path,remote+":"+filename,"--drive-root-folder-id",parent,"--retries","1","--low-level-retries","1","--transfers","1","--checkers","1","--immutable"]
+            let args = ["copyto",local.path,remote+":"+filename,"--drive-root-folder-id",parent,"--retries","1","--low-level-retries","1","--transfers","1","--checkers","1","--immutable"]
             var writeError: Error?
             do { _ = try await runHelper("rclone",args) }
             catch {if error is CancellationError {throw error};writeError = error}
