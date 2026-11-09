@@ -1,14 +1,15 @@
 # HANDOFF — Joey PR #19 integrity/security repairs
 
-Updated: 2026-11-08 (America/New_York) during verification/stabilization.
+Updated: 2026-11-08 20:18 America/New_York after verified macOS CI success.
 
 ## Branch / PR
 
 - Branch: `cursor/integrity-security-repairs-79c7`
-- Head: `ec064679149f251dbf9285dde47584dfcf0b1b96`
+- Head: `7ae1a678b54ae145bdd2d6825ca0845944b0789b`
 - Base: `main` @ `1e6092c7fe6de85d405fa53bb93c9ab16854b624`
 - Draft PR: https://github.com/franklinburrus/Joey/pull/19
 - Status: **draft** — do not merge
+- Verified Actions run: https://github.com/franklinburrus/Joey/actions/runs/42543479929
 
 ## Repair commit inventory (verified present in `origin/main...HEAD`)
 
@@ -34,42 +35,30 @@ Updated: 2026-11-08 (America/New_York) during verification/stabilization.
 
 All 17 confirmed in the current PR diff.
 
-## Verification executed in this environment
+## Verified macOS CI (`7ae1a67`, run `42543479929`)
+
+Runner: GitHub Actions `macos-latest` (`macos-26-arm64`). Toolchain: Apple Swift 6.3.3 / Xcode 26.6. Helpers installed on runner: `ffmpeg` 9.0.2, `yt-dlp` 2026.10.26.
 
 | Check | Result |
 |---|---|
-| PR diff inventory of 17 repairs | PASS |
-| GitHub Actions workflow list | `total_count: 0` (no prior workflows) |
-| Actions permissions / runners APIs | **403** — cannot enable or inspect runners via this token |
-| `swift` / `xcodebuild` on agent host | **Absent** (Linux Ubuntu) |
-| Full Swift test suite | **NOT RUN** — external macOS blocker |
-| `IntegritySecurityRepairTests` | **NOT RUN** — external macOS blocker |
-| Release build | **NOT RUN** — external macOS blocker |
-| Linux Python unittest (non-Swift) | previously OK with 1 xctest skip; not claimed as Swift compilation |
+| Diff inventory of 17 repairs | PASS |
+| Linux Actions smoke (Python helpers) | PASS |
+| Full Swift package test suite | **PASS** — `Executed 478 tests, with 8 tests skipped and 0 failures` (606.908s) |
+| `IntegritySecurityRepairTests` filter | **PASS** — `Executed 6 tests, with 0 failures` (0.017s) |
+| Release build | **PASS** — shared scheme `Joey Native` absent on runner; `swift build -c release` completed (`Build complete! (77.63s)`) |
 
-## Artifacts added for macOS verification
+Log extract saved under `/opt/cursor/artifacts/macos-ci-7ae1a67-full.log`.
 
-1. `.github/workflows/macos-verify.yml` — minimal `macos-14` workflow (full `swift test`, filter, Release/`swift build -c release`). May not execute until Actions is enabled for the repo.
-2. `Tools/verify-macos-repairs.sh` — single local Mac script that runs all three checks, records exit codes, and writes `verification-reports/macos-verify-<UTC>.txt`.
+Local Mac backup remains: `Tools/verify-macos-repairs.sh` (same three checks, timestamped report).
 
-## Remaining blockers
+## Remaining blockers / risks
 
-1. **External:** macOS Swift compilation/tests/Release build have not passed on this PR head.
-2. **External:** GitHub Actions macOS execution is not confirmed available (empty workflow catalog; permissions APIs 403).
-3. **External:** `OPENAI_API_KEY` revocation remains an owner action outside Joey.
+1. **External:** `OPENAI_API_KEY` revocation remains an owner action outside Joey.
+2. **Integration (not CI):** Live Drive rename promote is still best-effort rollback, not provider-atomic.
+3. **Integration (by design):** Scratch retention until Drive filing increases local disk use.
+4. **Integration:** Native Xcode shared-scheme Release (`Joey Native`) was not exercised on CI; package Release build did pass. Confirm on Frank’s Mac if the shared scheme must be part of ship gate.
+5. **Integration:** Approved local Joe assets / real-media / live OAuth paths remain opt-in and were skipped or unused in CI (8 suite skips include Joe-asset hosts).
 
 ## Next required action
 
-On Frank’s Mac:
-
-```bash
-cd /path/to/Joey
-git fetch origin
-git checkout cursor/integrity-security-repairs-79c7
-chmod +x Tools/verify-macos-repairs.sh
-./Tools/verify-macos-repairs.sh
-```
-
-Paste/report the generated `verification-reports/macos-verify-*.txt` summary. Merge remains blocked until that report shows `result=PASS`.
-
-Optional: enable GitHub Actions for `franklinburrus/Joey` so `.github/workflows/macos-verify.yml` can run on the draft PR.
+Keep PR #19 draft. Owner review of repair semantics + optional OPENAI revocation. Do not merge or deploy from this agent. No production Drive/media destruction from this PR.
