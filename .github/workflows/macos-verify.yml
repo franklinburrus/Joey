@@ -1,0 +1,42 @@
+name: macOS verify
+
+# Minimal verification for integrity/security repairs.
+# Requires GitHub Actions to be enabled for this repository.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  swift-verify:
+    name: Swift tests and Release build
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+          python3 --version
+
+      - name: Full Swift package test suite
+        run: python3 Tools/run-local.py swift test
+
+      - name: IntegritySecurityRepairTests
+        run: python3 Tools/run-local.py swift test --filter IntegritySecurityRepairTests
+
+      - name: Release build
+        run: |
+          set -euo pipefail
+          if python3 Tools/run-local.py xcodebuild -list -project Joey.xcodeproj 2>/dev/null | grep -q "Joey Native"; then
+            python3 Tools/run-local.py xcodebuild -project Joey.xcodeproj -scheme "Joey Native" -configuration Release -destination 'platform=macOS' build
+          else
+            echo "Shared scheme 'Joey Native' not present; building Swift package Release instead."
+            python3 Tools/run-local.py swift build -c release
+          fi
