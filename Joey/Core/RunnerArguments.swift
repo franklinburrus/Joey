@@ -1,22 +1,21 @@
 import Foundation
-import JoeyCore
 
 /// Parse the complete invocation before creating a runtime directory or starting
 /// a command. A malformed scope or episode limit must never fall back silently.
-struct RunnerArguments {
-    enum Command: String {
+public struct RunnerArguments {
+    public enum Command: String {
         case run, list, setup, storage
         case storageClean = "storage-clean"
         case taxstoneInventory = "taxstone-inventory"
         case taxstoneRun = "taxstone-run"
         case checkDrive = "check-drive"
     }
-    let command: Command
-    let root: URL
-    let request: URL?
-    let limit: Int?
+    public let command: Command
+    public let root: URL
+    public let request: URL?
+    public let limit: Int?
 
-    init(_ arguments: [String]) throws {
+    public init(_ arguments: [String]) throws {
         guard let first = arguments.first, let command = Command(rawValue: first) else {
             throw JoeyError.invalid("A supported command is required")
         }

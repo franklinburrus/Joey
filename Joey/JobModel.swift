@@ -333,13 +333,14 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         guard let coordinator else {return .unavailable}
         busy = true; error = nil
         activeJobID = jobs.first {$0.request == request}?.id
+        if let activeJobID {selected = activeJobID}
         task = Task {
             defer {busy = false; activeJobID = nil;task = nil;if !automatic {resumeJoeQueue()}}
             do {
                 let result = try await coordinator.run(request,admitLink:admitLink) { [weak self] job in
                     await self?.receive(job)
                 }
-                receive(result)
+                receive(result,select:true)
             } catch is CancellationError {
                 // Expected user cancellation. Refresh the saved checkpoint below
                 // without presenting cancellation as an application failure.
@@ -428,9 +429,12 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         do {try store.freeze(id,request:request);email.publish()}
         catch {email.failedPersistence(error);throw error}
     }
-    func receive(_ job: JobRecord) {
+    func receive(_ job: JobRecord, select: Bool = false) {
         if busy {activeJobID = job.id}
-        jobs.removeAll {$0.id == job.id}; jobs.insert(job,at:0); selected = job.id
+        jobs.removeAll {$0.id == job.id}; jobs.insert(job,at:0)
+        // Progress ticks must not steal selection from another inspected job.
+        // Explicit select marks acceptance/completion of a started request.
+        if select || selected == nil || selected == job.id {selected = job.id}
     }
     func waitForProcessing(_ processing: Task<Void,Never>) async {
         // Awaiting an unstructured task does not propagate cancellation by itself.
@@ -441,14 +445,14 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         }
     }
     func cancel() {
-        if libraryBusy && !email.dispatching {pauseTaxstoneLibrary()}
-        else if automationRunning && !email.dispatching {pauseJoe()}
-        else {
-            let processing = task
-            processing?.cancel()
-            cancelling = true
-            Task {await processing?.value;cancelling = false}
-        }
+        // Always stop library/Joe automation on cancel, even when email work is
+        // interleaved. Email dispatch cancellation still runs below.
+        if libraryBusy {pauseTaxstoneLibrary()}
+        if automationRunning {pauseJoe()}
+        let processing = task
+        processing?.cancel()
+        cancelling = true
+        Task {await processing?.value;cancelling = false}
     }
     func refreshTaxstoneLibrary() {
         guard !cancelling, !busy, !libraryBusy, !preparingSource, let library else {return}

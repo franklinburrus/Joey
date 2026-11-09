@@ -1,3 +1,7 @@
+# Integrity/security repair branch — 2026-11-08
+
+Audited baseline `main` @ `1e6092c`. Branch `cursor/integrity-security-repairs-79c7` implements P1–P3 repairs from the full-repo pass: transactional companion replacement, required remote SHA-256 or authenticated readback, safe artwork promote, helper diagnostic sanitization, owned mail Python boundary, capacity-wait lock ownership, Drive-gated scratch cleanup, corrupt-checkpoint isolation, crash-safe admission scaffold, stable accepted-plan binding, cancel/selection fixes, parent-dir fsync, and cleanup warning surfacing. Linux validated Python unit tests and static scans only. macOS `swift test` / Release build / native integration remain required before merge. No production Drive mutation, media deletion, credential revocation, install, or main merge in this step. OPENAI_API_KEY revocation stays an external owner action.
+
 # PR #18 integration complete — 2026-11-07
 
 Frank instructed "Fix and close PR 18," authorizing review of current findings, confirmed repairs if needed, ordinary main integration and closed-state verification. The prior publication-only boundary is superseded for this pull request. Current review readback found zero inline comments, zero review threads, completed code/security review and no reported code findings at f83b270482c04c362253d7a30cc1f27999cd6ff1. Main has no branch protection or rulesets and the PR has no check runs. No application repair was justified by the current findings.

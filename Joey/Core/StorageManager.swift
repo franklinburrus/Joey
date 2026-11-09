@@ -254,6 +254,9 @@ public final class StorageManager {
         try Self.noLinks(evidence)
         let qa: QAReport = try Persistence.load(evidence)
         guard qa.passed,qa.outputSHA256 == hash else {return false}
+        // Retain render scratch until the accepted clip has a verified Drive
+        // receipt (or the job completed). Local QA alone is not filing proof.
+        guard clip.drive != nil || job.state == .completed else {return false}
         // Never discard a scratch dependency named by any job's immutable
         // request or accepted source, even if malformed metadata references it.
         let prefix = try work(a).path + "/"

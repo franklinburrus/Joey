@@ -1,6 +1,6 @@
 import XCTest
 @testable import JoeyCore
-@testable import JoeyRunner
+
 
 final class RunnerArgumentTests: XCTestCase {
     func testInvalidRootAndEpisodeLimitNeverFallBackToDefaults() {

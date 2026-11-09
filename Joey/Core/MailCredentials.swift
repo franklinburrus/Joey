@@ -94,7 +94,8 @@ public enum ICloudMail {
         // Checking mail must not discover models or run the ASR setup path.
         let configURL = root.appendingPathComponent("settings.json")
         let config: Configuration? = FileManager.default.fileExists(atPath:configURL.path) ? try Persistence.load(configURL):nil
-        let python = try Processes.executable(config?.pythonPath ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Dub/.venv/bin/python").path)
+        // Mail secrets travel on stdin only to an owned virtualenv Python.
+        let python = try Processes.credentialPython(config?.pythonPath)
         #if SWIFT_PACKAGE
         let script = Bundle.module.url(forResource:"mail_intake",withExtension:"py")
         #else

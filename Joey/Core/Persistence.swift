@@ -32,11 +32,14 @@ public enum Persistence {
         let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d
     }
     public static func save<T: Encodable>(_ value: T, to url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
+        let directory = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
         try encoder.encode(value).write(to: url, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         let fd = open(url.path, O_RDONLY); if fd >= 0 { _ = fsync(fd); close(fd) }
+        // Durability of the atomic rename also requires the parent directory.
+        let dirFd = open(directory.path, O_RDONLY); if dirFd >= 0 { _ = fsync(dirFd); close(dirFd) }
     }
     public static func load<T: Decodable>(_ url: URL) throws -> T { try decoder.decode(T.self, from: Data(contentsOf: url)) }
     public static func safeName(_ text: String) -> String {

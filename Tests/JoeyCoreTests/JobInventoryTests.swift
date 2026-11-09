@@ -47,6 +47,35 @@ final class JobInventoryTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath:root.appendingPathComponent("jobs").path),["legacy-damaged"])
         XCTAssertEqual(try Data(contentsOf:bad),original)
     }
+    func testIsolatingCorruptCheckpointsPreservesBytesAndUnblocksIntake() async throws {
+        let root = try workspace(), bad = try damaged(in:root)
+        let original = try Data(contentsOf:bad)
+        let coordinator = try Coordinator(root:root)
+        let moved = try await coordinator.isolateCheckpointFailures()
+        XCTAssertEqual(moved,["legacy-damaged"])
+        let after = try await coordinator.inventory()
+        XCTAssertTrue(after.failures.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath:bad.path))
+        let preserved = try FileManager.default.contentsOfDirectory(at:root.appendingPathComponent("preserved-corrupt-checkpoints"),includingPropertiesForKeys:nil)
+        var restored: URL?
+        for folder in preserved {
+            for child in try FileManager.default.contentsOfDirectory(at:folder,includingPropertiesForKeys:nil) {
+                let checkpoint = child.appendingPathComponent("job.json")
+                if FileManager.default.fileExists(atPath:checkpoint.path) {restored = checkpoint;break}
+            }
+            if restored != nil {break}
+        }
+        XCTAssertEqual(try Data(contentsOf:try XCTUnwrap(restored)),original)
+        let request = try Fixtures.request(dir:root,path:"unused synthetic source")
+        do {
+            _ = try await coordinator.run(request) {job in
+                if job.stage == "source" {throw CancellationError()}
+            }
+        } catch is CancellationError {}
+        let jobs = try FileManager.default.contentsOfDirectory(atPath:root.appendingPathComponent("jobs").path)
+        XCTAssertFalse(jobs.contains("legacy-damaged"))
+        XCTAssertFalse(jobs.isEmpty)
+    }
     func testKnownReadableJobCanResumeAndRestoringCheckpointClearsIssue() async throws {
         let root = try workspace(), healthy = try saveHealthy(in:root), bad = try damaged(in:root)
         let result = try await Coordinator(root:root).run(healthy.request) {job in

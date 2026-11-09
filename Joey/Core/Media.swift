@@ -921,8 +921,14 @@ public enum Media {
                 let level = waveform.levels[min(frame*15,waveform.levels.count-1)]
                 for bar in stride(from:0,to:120,by:3) {
                     let expected = waveform.shape[bar]*level*Double(bh)*0.46
-                    let x = min(bw-1,Int((box.minX-floor(box.minX)+(Double(bar)+0.5)*box.width/120+max(1,box.width/250)/2).rounded()))
-                    let center = Int((box.minY-floor(box.minY)+box.height/2).rounded())
+                    // Keep these arithmetic steps separate so newer Swift
+                    // compilers can type-check the QA geometry in time.
+                    let originX = box.minX - floor(box.minX)
+                    let barCenter = (Double(bar) + 0.5) * box.width / 120
+                    let halfStroke = max(1, box.width / 250) / 2
+                    let x = min(bw - 1, Int((originX + barCenter + halfStroke).rounded()))
+                    let originY = box.minY - floor(box.minY)
+                    let center = Int((originY + box.height / 2).rounded())
                     var extent = 0
                     for y in 0..<bh {
                         // Narrow bars acquire chroma-edge interpolation in

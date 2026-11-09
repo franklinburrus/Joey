@@ -87,7 +87,8 @@ final class WorkflowTests: XCTestCase {
         XCTAssertEqual((manifest?["intervalMappings"] as? [[String:Any]])?.count,1)
         XCTAssertTrue(FileManager.default.fileExists(atPath:jobDir.appendingPathComponent("evidence/1/qa.json").path))
         let attempts = jobDir.appendingPathComponent("scratch/1")
-        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath:attempts.path).isEmpty)
+        // Accepted local QA without Drive receipt retains render scratch for recovery.
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath:attempts.path).isEmpty)
         let cancelled = try await Task {
             try await coordinator.run(request) { job in
                 if job.stage == "source" {withUnsafeCurrentTask {$0?.cancel()}}

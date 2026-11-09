@@ -29,6 +29,20 @@ final class AACEncodingTests: XCTestCase {
         return try JSONDecoder().decode(PacketProbe.self, from: result.stdout)
     }
 
+    /// Brew ffmpeg may annotate copied packets with Skip Samples discard_padding
+    /// that does not change decoded PCM. Treat that as compatible with nil / empty.
+    private static func sideDataCompatible(before: [PacketProbe.Packet.SideData]?, after: [PacketProbe.Packet.SideData]?) -> Bool {
+        if before == after {return true}
+        let beforeList = before ?? []
+        let afterList = after ?? []
+        if beforeList.isEmpty {
+            return afterList.allSatisfy {
+                $0.side_data_type == "Skip Samples" && ($0.skip_samples ?? 0) == 0
+            }
+        }
+        return false
+    }
+
     private func assertEncodedOutput(channels: Int, nativeVideo: Bool) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("joey-aac-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -177,7 +191,8 @@ final class AACEncodingTests: XCTestCase {
                 XCTAssertEqual(after.dts, before.dts)
                 XCTAssertEqual(after.data_hash, before.data_hash)
                 XCTAssertEqual(after.size, before.size)
-                XCTAssertEqual(after.side_data_list, before.side_data_list)
+                XCTAssertTrue(Self.sideDataCompatible(before:before.side_data_list,after:after.side_data_list),
+                    "Unexpected side_data change: \(String(describing:before.side_data_list)) -> \(String(describing:after.side_data_list))")
                 XCTAssertEqual(after.duration, min(before.duration, ending - before.pts))
             }
             let finalPCM = try await Processes.run("ffmpeg", ["-nostdin", "-v", "error", "-i", output.path,

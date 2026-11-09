@@ -105,36 +105,77 @@ public actor Coordinator {
             while true {
                 let job = try await execute(request,estimatedDuration:estimatedDuration,admitLink:admitLink,progress:progress)
                 guard let needed = job.storageRequiredBytes else {return job}
-                // Capacity polling does not retry rendering, provider writes or
-                // profile validation. Those resume only after capacity permits.
+                // Hold the exclusive processing lock across capacity wait so a
+                // second Joey process cannot adopt the same job. Cleanup uses
+                // the held lock instead of opening a competing exclusive lock.
+                let lock = try ProcessingLock(directory:root)
                 do {
+                    defer {withExtendedLifetime(lock) {}}
+                    let storage = try StorageManager(root:root,lock:lock)
+                    let checkpoint = directory(for:job.id).appendingPathComponent("job.json")
                     while true {
+                        try Task.checkCancellation()
                         if try JobQueue.removedIDs(root:root).contains(job.id) {throw CancellationError()}
+                        var current: JobRecord = try Persistence.load(checkpoint)
+                        guard current.id == job.id, current.storageRequiredBytes != nil,
+                              try Persistence.encoder.encode(current) == Persistence.encoder.encode(job) else {
+                            // Another authorized writer advanced this checkpoint.
+                            return current
+                        }
                         try await Task.sleep(nanoseconds:StorageManager.capacityRetryNanoseconds)
                         if StorageManager.automaticCleanupEnabled(root:root) {
-                            _ = try? StorageManager.clean(root:root)
+                            do {
+                                let cleaned = try storage.clean()
+                                if !cleaned.errors.isEmpty {
+                                    current.storageWarnings = (current.storageWarnings ?? []) + cleaned.errors
+                                    try Persistence.save(current,to:checkpoint)
+                                }
+                            } catch {
+                                current.storageWarnings = (current.storageWarnings ?? []) + [error.localizedDescription]
+                                try Persistence.save(current,to:checkpoint)
+                            }
                         }
                         if try StorageManager.capacity(at:root).free >= needed {break}
                     }
                 } catch {
-                    // Another coordinator may have progressed while this one
-                    // waited. Never overwrite its checkpoint with a stale copy.
-                    if let lock = try? ProcessingLock(directory:root) {
-                        defer {withExtendedLifetime(lock) {}}
-                        let checkpoint = directory(for:job.id).appendingPathComponent("job.json")
-                        var current: JobRecord = try Persistence.load(checkpoint)
-                        if current.storageRequiredBytes != nil,try Persistence.encoder.encode(current) == Persistence.encoder.encode(job) {
-                            current.state = .cancelled;current.storageRequiredBytes = nil
-                            current.stage = "Paused while storage blocked"
-                            current.error = "Paused while storage blocked; progress preserved"
-                            try Persistence.save(current,to:checkpoint)
-                            try await progress(current)
-                        }
+                    // Lock ownership is already exclusive here. Never overwrite a
+                    // checkpoint another writer advanced while we waited.
+                    let checkpoint = directory(for:job.id).appendingPathComponent("job.json")
+                    if let current: JobRecord = try? Persistence.load(checkpoint),
+                       current.storageRequiredBytes != nil,
+                       (try? Persistence.encoder.encode(current)) == (try? Persistence.encoder.encode(job)) {
+                        var paused = current
+                        paused.state = .cancelled;paused.storageRequiredBytes = nil
+                        paused.stage = "Paused while storage blocked"
+                        paused.error = "Paused while storage blocked; progress preserved"
+                        try? Persistence.save(paused,to:checkpoint)
+                        try? await progress(paused)
                     }
                     throw error
                 }
             }
         }
+    }
+    /// Move unreadable checkpoints out of `jobs/` so new intake can resume.
+    /// Bytes are preserved under `preserved-corrupt-checkpoints/` for recovery.
+    @discardableResult
+    public func isolateCheckpointFailures() throws -> [String] {
+        let lock = try ProcessingLock(directory:root)
+        defer {withExtendedLifetime(lock) {}}
+        let failures = try inventory().failures
+        guard !failures.isEmpty else {return []}
+        let stamp = ISO8601DateFormatter().string(from:Date()).replacingOccurrences(of:":",with:"-")
+        let quarantine = root.appendingPathComponent("preserved-corrupt-checkpoints/"+stamp,isDirectory:true)
+        try FileManager.default.createDirectory(at:quarantine,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+        var moved: [String] = []
+        for failure in failures {
+            let source = directory(for:failure.directoryID)
+            let destination = quarantine.appendingPathComponent(failure.directoryID,isDirectory:true)
+            guard FileManager.default.fileExists(atPath:source.path) else {continue}
+            try FileManager.default.moveItem(at:source,to:destination)
+            moved.append(failure.directoryID)
+        }
+        return moved
     }
     private func execute(_ request: JobRequest, estimatedDuration: Double?,
                          admitLink: (@Sendable (JobRequest) async throws -> Void)?,
@@ -177,8 +218,25 @@ public actor Coordinator {
         try await admitLink?(request)
         let config = try Configuration.load(root:root,discoverTranscription:job.state != .completed && job.completionReconciliationRequired != true && request.transcriptPolicy != .modelIndependent)
         let storage = try StorageManager(root:root,lock:lock)
-        if job.state != .completed,StorageManager.automaticCleanupEnabled(root:root) {_ = try? storage.clean()}
+        if job.state != .completed,StorageManager.automaticCleanupEnabled(root:root) {
+            do {
+                let cleaned = try storage.clean()
+                if !cleaned.errors.isEmpty {
+                    job.storageWarnings = (job.storageWarnings ?? []) + cleaned.errors
+                }
+            } catch {
+                job.storageWarnings = (job.storageWarnings ?? []) + [error.localizedDescription]
+            }
+        }
         try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+        // Persist a crash-safe scaffold immediately after email freeze / admission
+        // so a request/jobID mapping cannot exist without a recoverable checkpoint.
+        if matches.isEmpty, !FileManager.default.fileExists(atPath:checkpoint.path) {
+            job.state = .processing
+            job.stage = "admitted"
+            job.updatedAt = Date()
+            try Persistence.save(job,to:checkpoint)
+        }
         func save() async throws {
             job.updatedAt = Date(); try Persistence.save(job,to:checkpoint); try await progress(job)
         }
@@ -362,9 +420,8 @@ public actor Coordinator {
                 try Task.checkCancellation()
                 let clip = job.clips[index], output = dir.appendingPathComponent(clip.filename)
                 if clip.qa?.passed == true, let sha = clip.sha256, (try? Integrity.sha256(output)) == sha {continue}
-                // The saved contract was checked before entering processing.
-                // A supported re-encode issues fresh QA and a new final binding.
-                job.acceptedPlanSHA256 = nil
+                // Keep any prior acceptance binding until the clip is replaced and
+                // the full plan is rebound after all accepted clips pass.
                 if source.kind == .audio, !artworkValidated {
                     job.stage = "artwork"; try await save()
                     try authorizeNewOperation()
@@ -441,7 +498,18 @@ public actor Coordinator {
                         job.storageWarnings = (job.storageWarnings ?? []) + ["Scratch preserved: "+error.localizedDescription]
                         try await save()
                     }
-                    if StorageManager.automaticCleanupEnabled(root:root) {_ = try? storage.clean()}
+                    if StorageManager.automaticCleanupEnabled(root:root) {
+                        do {
+                            let cleaned = try storage.clean()
+                            if !cleaned.errors.isEmpty {
+                                job.storageWarnings = (job.storageWarnings ?? []) + cleaned.errors
+                                try await save()
+                            }
+                        } catch {
+                            job.storageWarnings = (job.storageWarnings ?? []) + [error.localizedDescription]
+                            try await save()
+                        }
+                    }
                 } catch {
                     // Processes.run drains its supervisor before throwing. A
                     // sealed failed attempt remains protected until this clip

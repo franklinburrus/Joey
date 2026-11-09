@@ -213,7 +213,7 @@ public enum BufferPreflight {
               file["mimeType"] as? String == "video/mp4", file["trashed"] as? Bool == false,
               file["parents"] as? [String] == [folderID], Int64(file["size"] as? String ?? "") == clip.bytes,
               file["md5Checksum"] as? String == md5, receipt.md5 == md5,
-              (file["sha256Checksum"] as? String).map({$0 == clip.sha256}) ?? true,
+              file["sha256Checksum"] as? String == clip.sha256, receipt.sha256 == clip.sha256,
               folder["id"] as? String == folderID, folder["trashed"] as? Bool == false,
               folder["mimeType"] as? String == "application/vnd.google-apps.folder",
               folder["parents"] as? [String] == [destination.rootID],

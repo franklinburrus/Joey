@@ -1,0 +1,66 @@
+name: macOS verify
+
+# Minimal verification for integrity/security repairs.
+# Requires GitHub Actions to be enabled for this repository.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-verify-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux-smoke:
+    name: Linux Actions smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Python helper tests
+        run: python3 -m unittest Tests.test_mail_intake Tests.test_tool_environment -q
+
+  swift-verify:
+    name: Swift tests and Release build
+    # macos-14 is rejected in this repository with:
+    # "The configuration 'macos-14-arm64-us-default' is not supported"
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+          python3 --version
+
+      - name: Install media helpers
+        run: |
+          brew install ffmpeg yt-dlp
+          command -v ffmpeg
+          command -v yt-dlp
+          ffmpeg -version | head -n 2
+          yt-dlp --version
+
+      - name: Full Swift package test suite
+        run: python3 Tools/run-local.py swift test
+
+      - name: IntegritySecurityRepairTests
+        run: python3 Tools/run-local.py swift test --filter IntegritySecurityRepairTests
+
+      - name: Release build
+        run: |
+          set -euo pipefail
+          if python3 Tools/run-local.py xcodebuild -list -project Joey.xcodeproj 2>/dev/null | grep -q "Joey Native"; then
+            python3 Tools/run-local.py xcodebuild -project Joey.xcodeproj -scheme "Joey Native" -configuration Release -destination 'platform=macOS' build
+          else
+            echo "Shared scheme 'Joey Native' not present; building Swift package Release instead."
+            python3 Tools/run-local.py swift build -c release
+          fi

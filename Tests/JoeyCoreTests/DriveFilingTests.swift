@@ -80,12 +80,39 @@ final class DriveFilingTests: XCTestCase {
     func testCompanionIsPlacedBesideClipsAndDownloadedForByteReadback() async throws {
         let (dir,_,_,route,provider,delivery) = try setup()
         let file = dir.appendingPathComponent("RECONCILE.md");try Data("# Synthetic reconciliation\n".utf8).write(to:file)
+        provider.omitSHA256 = true
         let result = try await delivery.upload(file,parent:FilingProvider.folder,destination:route,replaceCompanion:true)
         XCTAssertEqual(result.parent,FilingProvider.folder);XCTAssertEqual(provider.downloads,1)
+        // Second replace stages beside the live object. Force authenticated
+        // readback and corrupt it so promotion never starts.
+        provider.omitSHA256 = true
         provider.corruptDownload = true
+        let before = provider.files
         do {_ = try await delivery.upload(file,parent:FilingProvider.folder,destination:route,replaceCompanion:true);XCTFail("Corrupted companion accepted")}
-        catch {XCTAssertTrue(error.localizedDescription.contains("Downloaded companion"))}
-        XCTAssertEqual(provider.writes,1)
+        catch {
+            XCTAssertTrue(error.localizedDescription.contains("Downloaded remote SHA-256")
+                || error.localizedDescription.contains("Downloaded remote MD5")
+                || error.localizedDescription.contains("rolled back")
+                || error.localizedDescription.contains("Staged companion"),
+                error.localizedDescription)
+        }
+        XCTAssertTrue(provider.names.values.contains("RECONCILE.md"))
+        let live = try XCTUnwrap(provider.names.first(where:{$0.value == "RECONCILE.md"}))
+        XCTAssertEqual(provider.files[live.key], before[live.key])
+    }
+    func testCompanionReplacementPreservesPreviousUntilPromotionVerifies() async throws {
+        let (dir,_,_,route,provider,delivery) = try setup()
+        let file = dir.appendingPathComponent("RECONCILE.md")
+        try Data("# Synthetic reconciliation\n".utf8).write(to:file)
+        let first = try await delivery.upload(file,parent:FilingProvider.folder,destination:route,replaceCompanion:true)
+        try Data("# Updated synthetic reconciliation\n".utf8).write(to:file)
+        let second = try await delivery.upload(file,parent:FilingProvider.folder,destination:route,replaceCompanion:true)
+        XCTAssertEqual(second.name,"RECONCILE.md")
+        XCTAssertNotEqual(first.sha256,second.sha256)
+        XCTAssertEqual(provider.names.values.filter {$0 == "RECONCILE.md"}.count,1)
+        XCTAssertFalse(provider.names.values.contains(where:{$0.hasPrefix("joey-stage-")}))
+        XCTAssertFalse(provider.names.values.contains(where:{$0.hasPrefix("joey-prev-")}))
+        XCTAssertEqual(provider.movetos >= 2,true)
     }
     func testChangedExistingMediaIsPreservedWithoutOverwrite() async throws {
         let (dir,_,_,route,provider,delivery) = try setup(), file = dir.appendingPathComponent("01_clip.mp4")
@@ -170,9 +197,9 @@ private final class FilingProvider: @unchecked Sendable {
     let lock = NSRecursiveLock()
     var destination: FilingDestination
     var files: [String:Data] = [:], names: [String:String] = [:], parents: [String:String] = [:]
-    var writes = 0,downloads = 0,requests = 0,permissionMutations = 0
+    var writes = 0,downloads = 0,requests = 0,permissionMutations = 0,movetos = 0,deletes = 0
     var writtenParents: [String] = []
-    var fault = "",loseResponse = false,wrongAncestor = false,wrongFolderParent = false,corruptDownload = false
+    var fault = "",loseResponse = false,wrongAncestor = false,wrongFolderParent = false,corruptDownload = false,omitSHA256 = false
     init(destination: FilingDestination) {self.destination = destination}
     func command(_ args: [String]) throws -> ProcessResult {
         lock.lock();defer {lock.unlock()}
@@ -180,12 +207,36 @@ private final class FilingProvider: @unchecked Sendable {
             return ProcessResult(stdout:try JSONSerialization.data(withJSONObject:["fixture":["type":"drive","token":"{\"access_token\":\"dummy-only\"}"]]),stderr:"",status:0)
         }
         if args.first == "lsjson" {return ProcessResult(stdout:Data("[]".utf8),stderr:"",status:0)}
-        guard args.first == "copyto",let parentIndex = args.firstIndex(of:"--drive-root-folder-id") else {throw JoeyError.failed("Unexpected test mutation")}
+        guard let parentIndex = args.firstIndex(of:"--drive-root-folder-id") else {throw JoeyError.failed("Unexpected test mutation")}
         let parent = args[parentIndex+1]
+        if args.first == "moveto" {
+            movetos += 1
+            let sourceName = String(args[1].dropFirst(8)), destinationName = String(args[2].dropFirst(8))
+            guard let id = names.first(where:{$0.value == sourceName && parents[$0.key] == parent})?.key else {
+                throw JoeyError.failed("Fixture move source absent")
+            }
+            guard !names.contains(where:{$0.value == destinationName && $0.key != id && parents[$0.key] == parent}) else {
+                throw JoeyError.failed("Fixture move destination collision")
+            }
+            names[id] = destinationName
+            return ProcessResult(stdout:Data(),stderr:"",status:0)
+        }
+        if args.first == "deletefile" {
+            deletes += 1
+            let name = String(args[1].dropFirst(8))
+            if let id = names.first(where:{$0.value == name && parents[$0.key] == parent})?.key {
+                files[id] = nil;names[id] = nil;parents[id] = nil
+            }
+            return ProcessResult(stdout:Data(),stderr:"",status:0)
+        }
+        guard args.first == "copyto" else {throw JoeyError.failed("Unexpected test mutation")}
         if args[1].hasPrefix("fixture:") {
             downloads += 1;let name = String(args[1].dropFirst(8))
             guard let id = names.first(where:{$0.value == name && parents[$0.key] == parent})?.key else {throw JoeyError.failed("Fixture download absent")}
-            try (corruptDownload ? Data("corrupted".utf8) : files[id]!).write(to:URL(fileURLWithPath:args[2]))
+            let payload = files[id]!
+            // Keep byte length stable so readback fails on content/hash, not size.
+            let corrupt = Data(repeating:0x5A,count:payload.count)
+            try (corruptDownload ? corrupt : payload).write(to:URL(fileURLWithPath:args[2]))
         } else {
             writes += 1;writtenParents.append(parent)
             let name = String(args[2].dropFirst(8)),id = "synthetic_file_"+Integrity.textHash(name)
@@ -197,10 +248,12 @@ private final class FilingProvider: @unchecked Sendable {
     func file(_ id: String) throws -> [String:Any] {
         let data = files[id]!, temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try data.write(to:temporary);defer {try? FileManager.default.removeItem(at:temporary)}
-        return ["id":id,"name":names[id]!,"parents":[fault == "parent" ? "wrong-parent":parents[id]!],"trashed":false,
+        var object: [String:Any] = ["id":id,"name":names[id]!,"parents":[fault == "parent" ? "wrong-parent":parents[id]!],"trashed":false,
             "mimeType":"application/octet-stream","size":String(data.count),"md5Checksum":fault == "hash" ? "bad":try Integrity.md5(temporary),
-            "sha256Checksum":try Integrity.sha256(temporary),"webViewLink":"https://drive.google.com/file/d/"+id+"/view",
+            "webViewLink":"https://drive.google.com/file/d/"+id+"/view",
             "permissions":fault == "sharing" ? [["id":"anyone","type":"anyone","role":"writer"]] : Self.permissions]
+        if !omitSHA256 {object["sha256Checksum"] = try Integrity.sha256(temporary)}
+        return object
     }
     func response(_ request: URLRequest) throws -> Data {
         lock.lock();defer {lock.unlock()};requests += 1

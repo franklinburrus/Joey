@@ -263,7 +263,14 @@ public actor DriveDelivery {
         let root = route.rootID
         _ = try await verifyRoot(route.destination)
         let md5 = try Integrity.md5(local)
-        let equivalent = try await children(root).filter {$0["md5Checksum"] as? String == md5 && Int64($0["size"] as? String ?? "") == source.bytes}
+        // Prefer SHA-256 identity when the provider exposes it; otherwise fall
+        // back to MD5+size only as a candidate filter before full verify().
+        let equivalent = try await children(root).filter {
+            Int64($0["size"] as? String ?? "") == source.bytes && (
+                ($0["sha256Checksum"] as? String).map({$0 == source.sha256}) == true ||
+                ($0["sha256Checksum"] == nil && $0["md5Checksum"] as? String == md5)
+            )
+        }
         guard equivalent.count <= 1 else {throw JoeyError.dependency("Duplicate byte-equivalent originals in \(root); no new archive upload")}
         if let file = equivalent.first, let id = file["id"] as? String {
             let info = try await metadata(id)
@@ -279,14 +286,23 @@ public actor DriveDelivery {
         guard let parent = (info["parents"] as? [String])?.first, let name = info["name"] as? String,
               !name.contains("/"), let bytes = Int64(info["size"] as? String ?? ""), bytes > 0,
               let md5 = info["md5Checksum"] as? String, info["trashed"] as? Bool != true else {throw JoeyError.dependency("Original archive has no complete downloadable metadata/checksum")}
+        let remoteSHA = info["sha256Checksum"] as? String
         let matches = try await children(parent).filter {$0["name"] as? String == name}
         guard matches.count == 1, matches[0]["id"] as? String == id else {throw JoeyError.dependency("Original archive name is ambiguous; no substitute downloaded")}
         let local = directory.appendingPathComponent("original."+(name as NSString).pathExtension)
-        if FileManager.default.fileExists(atPath:local.path), (try? Integrity.md5(local)) == md5 {return local}
+        if FileManager.default.fileExists(atPath:local.path) {
+            let localMD5 = try? Integrity.md5(local)
+            let localSHA = try? Integrity.sha256(local)
+            if let remoteSHA, localSHA == remoteSHA, localMD5 == md5 {return local}
+            if remoteSHA == nil, localMD5 == md5 {return local}
+        }
         try Persistence.checkDisk(at:directory,requiredBytes:bytes)
         let partial = directory.appendingPathComponent("original-download.partial")
         _ = try await Processes.retry {try await self.runHelper("rclone",["copyto",self.remote+":"+name,partial.path,"--drive-root-folder-id",parent,"--transfers","1","--checkers","1"])}
         guard try Integrity.md5(partial) == md5 else {throw JoeyError.failed("Downloaded original differs from existing archive bytes")}
+        if let remoteSHA {
+            guard try Integrity.sha256(partial) == remoteSHA else {throw JoeyError.failed("Downloaded original SHA-256 differs from archive metadata")}
+        }
         if FileManager.default.fileExists(atPath:local.path) {throw JoeyError.failed("Different existing local original preserved; cannot overwrite")}
         try FileManager.default.moveItem(at:partial,to:local)
         return local
@@ -381,10 +397,14 @@ public actor DriveDelivery {
                 if match["md5Checksum"] as? String == md5, Int64(match["size"] as? String ?? "") == bytes {
                     let receipt = try await verify(id:id,local:local,parent:parent,name:filename,sha:sha,md5:md5,bytes:bytes,
                         destination:destination,expectedPermissions:expectedPermissions!)
-                    if replaceCompanion {try await readCompanion(local:local,receipt:receipt)}
                     return receipt
                 }
                 guard replaceCompanion else { throw JoeyError.failed("Existing remote file has different bytes; preserved: \(filename)") }
+                // Stage beside the live companion, verify, then promote. Drive
+                // renames are not atomic; the previous object is preserved until
+                // the final name verifies, then removed.
+                return try await replaceCompanionTransactionally(local:local,filename:filename,parent:parent,
+                    destination:destination,existingID:id,expectedPermissions:expectedPermissions!,sha:sha,md5:md5,bytes:bytes)
             } else {
                 guard existingID == nil else {throw JoeyError.failed("Existing remote file disappeared; no replacement created")}
                 // New children must inherit the destination's existing access.
@@ -393,8 +413,8 @@ public actor DriveDelivery {
             if let capability = currentParent["capabilities"] as? [String:Bool], capability["canAddChildren"] == false {
                 throw JoeyError.dependency("No write access to authoritative destination: \(parent)")
             }
-            var args = ["copyto",local.path,remote+":"+filename,"--drive-root-folder-id",parent,"--retries","1","--low-level-retries","1","--transfers","1","--checkers","1"]
-            args += replaceCompanion ? ["--ignore-times"] : ["--immutable"]
+            // New clip/companion objects never overwrite an existing name.
+            let args = ["copyto",local.path,remote+":"+filename,"--drive-root-folder-id",parent,"--retries","1","--low-level-retries","1","--transfers","1","--checkers","1","--immutable"]
             var writeError: Error?
             do { _ = try await runHelper("rclone",args) }
             catch {if error is CancellationError {throw error};writeError = error}
@@ -405,16 +425,73 @@ public actor DriveDelivery {
             if let file = after.first,let id = file["id"] as? String,
                file["md5Checksum"] as? String == md5,Int64(file["size"] as? String ?? "") == bytes {
                 if let existingID, existingID != id {throw JoeyError.failed("Upload replaced the existing provider file identity")}
-                let receipt = try await verify(id:id,local:local,parent:parent,name:filename,sha:sha,md5:md5,bytes:bytes,
+                return try await verify(id:id,local:local,parent:parent,name:filename,sha:sha,md5:md5,bytes:bytes,
                     destination:destination,expectedPermissions:expectedPermissions!)
-                if replaceCompanion {try await readCompanion(local:local,receipt:receipt)}
-                return receipt
             }
             if let blocked = writeError as? StorageBlocked {throw blocked}
             if attempt == 2 {throw writeError ?? JoeyError.failed("Upload has no unique integrity readback: \(filename)")}
             try await Task.sleep(nanoseconds:500_000_000)
         }
         throw JoeyError.failed("Upload reconciliation exhausted")
+    }
+    private func replaceCompanionTransactionally(local: URL, filename: String, parent: String, destination: FilingDestination,
+                                                 existingID: String, expectedPermissions: String,
+                                                 sha: String, md5: String, bytes: Int64) async throws -> DriveReceipt {
+        let stageName = "joey-stage-"+UUID().uuidString+"__"+filename
+        let previousName = "joey-prev-"+UUID().uuidString+"__"+filename
+        var staged = false
+        var previousMoved = false
+        do {
+            _ = try await runHelper("rclone",["copyto",local.path,remote+":"+stageName,"--drive-root-folder-id",parent,
+                "--retries","1","--low-level-retries","1","--transfers","1","--checkers","1","--immutable"])
+            staged = true
+            let stagedChildren = try await children(parent).filter {$0["name"] as? String == stageName}
+            guard stagedChildren.count == 1, let stagedID = stagedChildren[0]["id"] as? String,
+                  stagedChildren[0]["md5Checksum"] as? String == md5,
+                  Int64(stagedChildren[0]["size"] as? String ?? "") == bytes else {
+                throw JoeyError.failed("Staged companion has no unique integrity readback: \(stageName)")
+            }
+            _ = try await verify(id:stagedID,local:local,parent:parent,name:stageName,sha:sha,md5:md5,bytes:bytes,
+                destination:destination,expectedPermissions:expectedPermissions)
+            _ = try await runHelper("rclone",["moveto",remote+":"+filename,remote+":"+previousName,"--drive-root-folder-id",parent,"--retries","1"])
+            previousMoved = true
+            do {
+                _ = try await runHelper("rclone",["moveto",remote+":"+stageName,remote+":"+filename,"--drive-root-folder-id",parent,"--retries","1"])
+            } catch {
+                // Restore the previous companion before surfacing promotion failure.
+                _ = try? await runHelper("rclone",["moveto",remote+":"+previousName,remote+":"+filename,"--drive-root-folder-id",parent,"--retries","1"])
+                previousMoved = false
+                throw error
+            }
+            staged = false
+            let promoted = try await children(parent).filter {$0["name"] as? String == filename}
+            guard promoted.count == 1, let promotedID = promoted[0]["id"] as? String,
+                  promoted[0]["md5Checksum"] as? String == md5,
+                  Int64(promoted[0]["size"] as? String ?? "") == bytes else {
+                _ = try? await runHelper("rclone",["moveto",remote+":"+filename,remote+":"+stageName,"--drive-root-folder-id",parent,"--retries","1"])
+                _ = try? await runHelper("rclone",["moveto",remote+":"+previousName,remote+":"+filename,"--drive-root-folder-id",parent,"--retries","1"])
+                previousMoved = false
+                staged = true
+                throw JoeyError.failed("Promoted companion has no unique integrity readback: \(filename)")
+            }
+            if promotedID != existingID {
+                // Drive assigned a new identity for the promoted object; that is
+                // expected after stage+rename. The previous object is removed only
+                // after the final name verifies.
+            }
+            let receipt = try await verify(id:promotedID,local:local,parent:parent,name:filename,sha:sha,md5:md5,bytes:bytes,
+                destination:destination,expectedPermissions:expectedPermissions)
+            _ = try? await runHelper("rclone",["deletefile",remote+":"+previousName,"--drive-root-folder-id",parent,"--retries","1"])
+            previousMoved = false
+            return receipt
+        } catch {
+            if staged {_ = try? await runHelper("rclone",["deletefile",remote+":"+stageName,"--drive-root-folder-id",parent,"--retries","1"])}
+            if previousMoved {
+                _ = try? await runHelper("rclone",["moveto",remote+":"+previousName,remote+":"+filename,"--drive-root-folder-id",parent,"--retries","1"])
+            }
+            if error is CancellationError {throw error}
+            throw JoeyError.failed("Companion replacement rolled back; previous remote object preserved: \(filename)")
+        }
     }
     private func verify(id: String, local: URL, parent: String, name: String, sha: String, md5: String, bytes: Int64,
                         destination: FilingDestination?, expectedPermissions: String) async throws -> DriveReceipt {
@@ -424,22 +501,31 @@ public actor DriveDelivery {
         guard value["id"] as? String == id, value["name"] as? String == name,
               value["trashed"] as? Bool == false, (value["parents"] as? [String]) == [parent],
               Int64(value["size"] as? String ?? "") == bytes, value["md5Checksum"] as? String == md5,
-              (value["sha256Checksum"] as? String).map({$0 == sha}) ?? true,
               matches.count == 1,matches.first?["id"] as? String == id,
               try Integrity.sha256(local) == sha,
               try Self.permissionFingerprint(value) == expectedPermissions,
               let link = value["webViewLink"] as? String,let permissions = value["permissions"] as? [[String:Any]] else {
             throw JoeyError.failed("Independent Drive ID/name/parent/size/checksum/permissions/duplicate readback failed: \(id)")
         }
+        // Filename/size/MD5 are never enough. Prefer provider SHA-256; otherwise
+        // require an authenticated full-content download comparison.
+        if let remoteSHA = value["sha256Checksum"] as? String, !remoteSHA.isEmpty {
+            guard remoteSHA == sha else {throw JoeyError.failed("Independent Drive SHA-256 mismatch: \(id)")}
+        } else {
+            try await readRemoteBytes(name:name,parent:parent,expectedSHA:sha,expectedMD5:md5,expectedBytes:bytes)
+        }
         return DriveReceipt(id:id,name:name,parent:parent,bytes:bytes,md5:md5,sha256:sha,url:link,
             permissions:permissions.map {"\($0["type"] as? String ?? "unknown"):\($0["role"] as? String ?? "unknown")"}.sorted(),verifiedAt:Date(),
             destination:destination,permissionFingerprint:expectedPermissions)
     }
-    private func readCompanion(local: URL, receipt: DriveReceipt) async throws {
+    private func readRemoteBytes(name: String, parent: String, expectedSHA: String, expectedMD5: String, expectedBytes: Int64) async throws {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("joey-drive-readback-"+UUID().uuidString)
         defer {try? FileManager.default.removeItem(at:temporary)}
-        _ = try await runReadHelper("rclone",["copyto",remote+":"+receipt.name,temporary.path,"--drive-root-folder-id",receipt.parent,"--retries","1","--transfers","1","--checkers","1"])
-        guard try Integrity.sha256(temporary) == receipt.sha256 else {throw JoeyError.failed("Downloaded companion bytes differ: \(receipt.name)")}
+        _ = try await runReadHelper("rclone",["copyto",remote+":"+name,temporary.path,"--drive-root-folder-id",parent,"--retries","1","--transfers","1","--checkers","1"])
+        let attrs = try FileManager.default.attributesOfItem(atPath:temporary.path)
+        guard (attrs[.size] as? NSNumber)?.int64Value == expectedBytes else {throw JoeyError.failed("Downloaded remote bytes have unexpected size: \(name)")}
+        guard try Integrity.md5(temporary) == expectedMD5 else {throw JoeyError.failed("Downloaded remote MD5 differs: \(name)")}
+        guard try Integrity.sha256(temporary) == expectedSHA else {throw JoeyError.failed("Downloaded remote SHA-256 differs: \(name)")}
     }
     public func verifyPackage(job: JobRecord, directory: URL) async throws {
         guard job.hasRequiredCompletionEvidence, let source = job.source, let folder = job.folderID else {
@@ -466,9 +552,8 @@ public actor DriveDelivery {
             let meta = try await metadata(id)
             guard let parent = (meta["parents"] as? [String])?.first, let name = meta["name"] as? String else { throw JoeyError.dependency("Approved DUB art metadata unavailable") }
             let local = root.appendingPathComponent("approved-dub-art.png")
-            _ = try await runReadHelper("rclone",["copyto",remote+":"+name,local.path,"--drive-root-folder-id",parent])
-            let sha = try Integrity.sha256(local)
-            guard sha == "1522d2fbbbb6d943cd08cb07b617212be4fafcb841c7dcdba713fe81c4fdc790" else { throw JoeyError.failed("Approved DUB artwork bytes changed") }
+            let expected = "1522d2fbbbb6d943cd08cb07b617212be4fafcb841c7dcdba713fe81c4fdc790"
+            let sha = try await downloadArtwork(name:name,parent:parent,destination:local,expectedSHA:expected)
             return Artwork(owner:.dub,sourceID:nil,driveID:id,file:EvidenceFile(path:local.path,sha256:sha,basis:"Exact approved Drive artwork"))
         }
         // Resolve episode-specific image from established source archive and
@@ -480,11 +565,38 @@ public actor DriveDelivery {
             }
             if matches.count == 1, let name = matches[0]["name"] as? String, let id = matches[0]["id"] as? String {
                 let local = root.appendingPathComponent("taxstone-"+Persistence.safeName(source.id)+".art")
-                _ = try await runReadHelper("rclone",["copyto",remote+":"+name,local.path,"--drive-root-folder-id",parent])
-                return Artwork(owner:.taxstone,sourceID:source.id,driveID:id,file:EvidenceFile(path:local.path,sha256:try Integrity.sha256(local),basis:"Unique source-ID-matching image in established Taxstone archive"))
+                let sha = try await downloadArtwork(name:name,parent:parent,destination:local,expectedSHA:nil)
+                return Artwork(owner:.taxstone,sourceID:source.id,driveID:id,file:EvidenceFile(path:local.path,sha256:sha,basis:"Unique source-ID-matching image in established Taxstone archive"))
             }
         }
         throw JoeyError.dependency("Matching Taxstone artwork unresolved for \(source.id) after checking configured assets and established archive/operational folders")
+    }
+    /// Download into a temporary file, verify, then promote. A failed download
+    /// never replaces a previously valid local artwork file.
+    private func downloadArtwork(name: String, parent: String, destination: URL, expectedSHA: String?) async throws -> String {
+        let temporary = destination.deletingLastPathComponent().appendingPathComponent(destination.lastPathComponent+".joey-partial-"+UUID().uuidString)
+        defer {try? FileManager.default.removeItem(at:temporary)}
+        _ = try await runReadHelper("rclone",["copyto",remote+":"+name,temporary.path,"--drive-root-folder-id",parent])
+        let sha = try Integrity.sha256(temporary)
+        if let expectedSHA {
+            guard sha == expectedSHA else {throw JoeyError.failed("Approved DUB artwork bytes changed")}
+        } else {
+            guard !sha.isEmpty, sha.count == 64 else {throw JoeyError.failed("Artwork SHA-256 unavailable after download")}
+        }
+        if FileManager.default.fileExists(atPath:destination.path) {
+            let existing = try Integrity.sha256(destination)
+            if existing == sha {return sha}
+            let preserved = destination.deletingLastPathComponent().appendingPathComponent("preserved-"+UUID().uuidString+"-"+destination.lastPathComponent)
+            try FileManager.default.moveItem(at:destination,to:preserved)
+            do {try FileManager.default.moveItem(at:temporary,to:destination)}
+            catch {
+                _ = try? FileManager.default.moveItem(at:preserved,to:destination)
+                throw error
+            }
+        } else {
+            try FileManager.default.moveItem(at:temporary,to:destination)
+        }
+        return sha
     }
     private func registerRows(_ endpoint: String, matching headers: [String]? = nil) async throws -> [[Any]] {
         let object = try await request(endpoint,sheets:true)
