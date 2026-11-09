@@ -22,7 +22,11 @@ final class StorageTests: XCTestCase {
         try Data("accepted waiting for Drive".utf8).write(to:output)
         let hash = try Integrity.sha256(output)
         let qa = QAReport(checkedAt:Date(),checks:["fixture":"isolated"],outputSHA256:hash,passed:true,limitations:[])
-        job.clips = [ClipRecord(id:1,title:"Fixture",intervals:[Interval(0,2)],filename:"accepted.mp4",sha256:accepted ? hash:nil,qa:accepted ? qa:nil)]
+        let drive: DriveReceipt? = accepted ? DriveReceipt(id:"fixture-drive-id",name:"accepted.mp4",parent:"fixture-folder",
+            bytes:Int64(try Data(contentsOf:output).count),md5:try Integrity.md5(output),sha256:hash,
+            url:"https://drive.google.com/file/d/fixture-drive-id/view",permissions:["user:owner"],verifiedAt:Date(),
+            destination:nil,permissionFingerprint:String(repeating:"a",count:64)) : nil
+        job.clips = [ClipRecord(id:1,title:"Fixture",intervals:[Interval(0,2)],filename:"accepted.mp4",sha256:accepted ? hash:nil,qa:accepted ? qa:nil,drive:drive)]
         job.state = accepted ? .qaPassed:.failed
         try Persistence.save(job,to:dir.appendingPathComponent("job.json"))
         try Persistence.save(qa,to:dir.appendingPathComponent("evidence/1/qa.json"))
@@ -35,7 +39,7 @@ final class StorageTests: XCTestCase {
         try Data("{\"diagnostic\":true}".utf8).write(to:work.appendingPathComponent("render.json"))
         return Fixture(root:root,lock:lock,manager:manager,work:work,job:job)
     }
-    func testClosedScratchCleanupMeasuresDeletionAndProtectsUnfiledAcceptedOutput() throws {
+    func testClosedScratchCleanupMeasuresDeletionAndProtectsFiledAcceptedOutput() throws {
         let f = try fixture()
         let jobDir = f.root.appendingPathComponent("jobs/"+f.job.id)
         let protected = [f.root.appendingPathComponent("original.mp4"),jobDir.appendingPathComponent("accepted.mp4"),jobDir.appendingPathComponent("transcript.json"),jobDir.appendingPathComponent("job.json")]
@@ -50,6 +54,15 @@ final class StorageTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath:jobDir.appendingPathComponent("storage-attempts/\(f.work.lastPathComponent)-render.json").path))
         XCTAssertEqual(try f.manager.clean().removedBytes,0)
         XCTAssertGreaterThan(result.freeBytesBefore,0);XCTAssertGreaterThan(result.freeBytesAfter,0)
+    }
+    func testAcceptedScratchWithoutDriveReceiptIsRetained() throws {
+        let f = try fixture()
+        var job = f.job
+        job.clips[0].drive = nil
+        try Persistence.save(job,to:f.root.appendingPathComponent("jobs/\(job.id)/job.json"))
+        try f.manager.closeAttempt(f.work,jobID:f.job.id)
+        XCTAssertEqual(try f.manager.clean().removedBytes,0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath:f.work.path))
     }
     func testFailedAttemptRequiredForRecoveryRemainsUntilAcceptedReplacement() throws {
         let f = try fixture(accepted:false)
