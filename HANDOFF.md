@@ -8,7 +8,7 @@ Updated: 2026-11-08 20:25 America/New_York (final evidence consolidation).
 - Branch: `cursor/integrity-security-repairs-79c7`
 - Base: `main` @ `1e6092c7fe6de85d405fa53bb93c9ab16854b624`
 - Draft PR: https://github.com/franklinburrus/Joey/pull/19 — **draft, do not merge**
-- Head SHA: `a75272bdda713cf824ae1b74bf1e4fcd868876c2`
+- Head SHA: branch tip of `cursor/integrity-security-repairs-79c7` (exact value in CI matrix after tip verification)
 - Workflow: `.github/workflows/macos-verify.yml` (`macos-latest`)
 - Local Mac backup: `Tools/verify-macos-repairs.sh`
 
@@ -40,7 +40,7 @@ Product-code verification baseline: Actions run https://github.com/franklinburru
 
 | Requirement | Acceptance Standard | Actual Result | Evidence |
 |---|---|---|---|
-| Branch HEAD | Exact SHA recorded | `a75272bdda713cf824ae1b74bf1e4fcd868876c2` | https://github.com/franklinburrus/Joey/commit/a75272bdda713cf824ae1b74bf1e4fcd868876c2 |
+| Branch HEAD | Exact SHA recorded | Filled after tip macOS CI concludes | PR #19 head + Actions run for that SHA |
 | macOS CI | All required checks successful on exact HEAD | Must PASS on tip (`Linux Actions smoke` + `Swift tests and Release build`) | Actions runs for this branch; product baseline `42543479929` |
 | Full Swift suite | Zero failures | PASS on `7ae1a67`: 478 executed, 8 skipped, 0 failures (606.908s) | `/opt/cursor/artifacts/macos-ci-7ae1a67-full.log`; run `42543479929` |
 | IntegritySecurityRepairTests | Zero failures | PASS on `7ae1a67`: 6 executed, 0 failures (0.017s) | Same run, job step `IntegritySecurityRepairTests` |
