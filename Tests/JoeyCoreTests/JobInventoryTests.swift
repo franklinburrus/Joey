@@ -57,8 +57,14 @@ final class JobInventoryTests: XCTestCase {
         XCTAssertTrue(after.failures.isEmpty)
         XCTAssertFalse(FileManager.default.fileExists(atPath:bad.path))
         let preserved = try FileManager.default.contentsOfDirectory(at:root.appendingPathComponent("preserved-corrupt-checkpoints"),includingPropertiesForKeys:nil)
-        let restored = preserved.flatMap {try FileManager.default.contentsOfDirectory(at:$0,includingPropertiesForKeys:nil)}
-            .map {$0.appendingPathComponent("job.json")}.first {FileManager.default.fileExists(atPath:$0.path)}
+        var restored: URL?
+        for folder in preserved {
+            for child in try FileManager.default.contentsOfDirectory(at:folder,includingPropertiesForKeys:nil) {
+                let checkpoint = child.appendingPathComponent("job.json")
+                if FileManager.default.fileExists(atPath:checkpoint.path) {restored = checkpoint;break}
+            }
+            if restored != nil {break}
+        }
         XCTAssertEqual(try Data(contentsOf:try XCTUnwrap(restored)),original)
         let request = try Fixtures.request(dir:root,path:"unused synthetic source")
         do {
