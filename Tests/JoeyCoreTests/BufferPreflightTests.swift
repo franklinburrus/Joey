@@ -127,11 +127,11 @@ final class BufferPreflightTests: XCTestCase {
     func testDriveReadbackRejectsWrongOwnerFolderHashDuplicatesAndAccessChanges() throws {
         let job = try completedJob(temporaryDirectory()), source = job.source!
         var clip = job.clips[0]
-        let file: [String:Any] = ["id":"accepted-output-id","name":"clip.mp4","mimeType":"video/mp4","trashed":false,"parents":["episode-folder-id"],"size":"1000000","md5Checksum":String(repeating:"b",count:32),"permissions":[["id":"link","type":"anyone","role":"reader","allowFileDiscovery":false],["id":"owner","type":"user","role":"owner","emailAddress":"owner@example.invalid"]]]
+        let file: [String:Any] = ["id":"accepted-output-id","name":"clip.mp4","mimeType":"video/mp4","trashed":false,"parents":["episode-folder-id"],"size":"1000000","md5Checksum":String(repeating:"b",count:32),"sha256Checksum":clip.sha256!,"permissions":[["id":"link","type":"anyone","role":"reader","allowFileDiscovery":false],["id":"owner","type":"user","role":"owner","emailAddress":"owner@example.invalid"]]]
         clip.drive!.permissionFingerprint = try DriveDelivery.permissionFingerprint(file)
         let folder: [String:Any] = ["id":"episode-folder-id","mimeType":"application/vnd.google-apps.folder","trashed":false,"parents":[DriveDelivery.videoRoot],"appProperties":["joeySourceID":source.id,"joeyOwner":"dub"]]
         XCTAssertNoThrow(try BufferPreflight.validateDrive(file:file,folder:folder,source:source,request:job.request,clip:clip,folderID:"episode-folder-id",md5:String(repeating:"b",count:32)))
-        for change: [String:Any] in [["id":"other-output-id"],["md5Checksum":"different"],["parents":[DriveDelivery.audioRoot]],["trashed":true],["permissions":[["type":"anyone","role":"writer"]]]] {
+        for change: [String:Any] in [["id":"other-output-id"],["md5Checksum":"different"],["sha256Checksum":String(repeating:"c",count:64)],["parents":[DriveDelivery.audioRoot]],["trashed":true],["permissions":[["type":"anyone","role":"writer"]]]] {
             XCTAssertThrowsError(try BufferPreflight.validateDrive(file:file.merging(change,uniquingKeysWith:{$1}),folder:folder,source:source,request:job.request,clip:clip,folderID:"episode-folder-id",md5:String(repeating:"b",count:32)))
         }
         var wrongOwner = folder; wrongOwner["appProperties"] = ["joeySourceID":source.id,"joeyOwner":"taxstone"]
