@@ -39,16 +39,28 @@ final class RuntimeTests: XCTestCase {
         let result = try await Processes.run("/usr/bin/env",[],environment:injected)
         XCTAssertFalse(String(decoding:result.stdout,as:UTF8.self).contains(canary))
         XCTAssertFalse(result.stderr.contains(canary))
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
-        defer {try? FileManager.default.removeItem(at:dir)}
-        let script = dir.appendingPathComponent("diagnostic.sh")
-        try "/usr/bin/env >&2\nexit 7\n".write(to:script,atomically:true,encoding:.utf8)
-        do {_ = try await Processes.run("/bin/sh",[script.path],environment:injected);XCTFail("Expected diagnostic failure")}
-        catch {
-            XCTAssertTrue(error.localizedDescription.contains("exit 7"))
-            XCTAssertFalse(error.localizedDescription.contains(canary))
-            XCTAssertFalse(error.localizedDescription.contains("OPENAI_API_KEY"))
+        let sanitized = Processes.sanitizeDiagnostic(
+            "OPENAI_API_KEY=\(canary)\nAuthorization: Bearer \(canary)\npassword=\(canary)\n",
+            status:7,executable:"/usr/bin/rclone")
+        XCTAssertTrue(sanitized.contains("exit 7"))
+        XCTAssertTrue(sanitized.contains("[redacted]"))
+        XCTAssertFalse(sanitized.contains(canary))
+        XCTAssertFalse(sanitized.contains("OPENAI_API_KEY="+canary))
+        do {
+            _ = try await Processes.run("/bin/sh",["-c","true"],input:Data("secret-stdin".utf8))
+            XCTFail("Shell helper accepted credential stdin")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("Shell interpreters"))
+        }
+    }
+    func testCredentialPythonRejectsShellAndUnownedInterpreters() throws {
+        XCTAssertThrowsError(try Processes.credentialPython("/bin/sh"))
+        XCTAssertThrowsError(try Processes.credentialPython("/usr/bin/env"))
+        XCTAssertThrowsError(try Processes.credentialPython("python"))
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let owned = home.appendingPathComponent(".venv/bin/python")
+        if FileManager.default.isExecutableFile(atPath:owned.path) {
+            XCTAssertEqual(try Processes.credentialPython(owned.path),try Processes.credentialPython(owned.path))
         }
     }
     func testSHA256AndEvidenceDetectChangedBytes() throws {

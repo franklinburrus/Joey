@@ -72,6 +72,61 @@ public enum Processes {
         }
         throw JoeyError.dependency("Required local executable unavailable: \(name)")
     }
+    /// Shell interpreters never receive Joey helper work, including credential stdin.
+    private static let blockedHelperNames: Set<String> = ["sh","bash","zsh","csh","ksh","fish","dash"]
+    public static func refuseShellHelper(_ executable: String) throws {
+        let name = URL(fileURLWithPath:executable).lastPathComponent.lowercased()
+        if blockedHelperNames.contains(name) {
+            throw JoeyError.invalid("Shell interpreters are not permitted as Joey helpers")
+        }
+    }
+    /// Mail and other secret-bearing helpers may only use an owned Python binary.
+    public static func credentialPython(_ configured: String?) throws -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let fallback = home.appendingPathComponent("Dub/.venv/bin/python").path
+        let requested = (configured?.isEmpty == false) ? configured! : fallback
+        guard requested.hasPrefix("/") else {throw JoeyError.invalid("Mail Python path must be absolute")}
+        guard let resolved = realpath(requested,nil) else {throw JoeyError.dependency("Mail Python path is missing")}
+        defer {free(resolved)}
+        let path = String(cString:resolved)
+        try refuseShellHelper(path)
+        let name = URL(fileURLWithPath:path).lastPathComponent.lowercased()
+        guard name == "python" || name.hasPrefix("python3") else {
+            throw JoeyError.invalid("Mail credentials require a python executable, not \(name)")
+        }
+        let allowedRoots = [
+            home.appendingPathComponent("Dub/.venv/bin").path,
+            home.appendingPathComponent(".venv/bin").path
+        ]
+        guard allowedRoots.contains(where:{path.hasPrefix($0 + "/")}),
+              FileManager.default.isExecutableFile(atPath:path) else {
+            throw JoeyError.invalid("Mail Python must be an owned virtualenv interpreter under Dub/.venv or ~/.venv")
+        }
+        return path
+    }
+    /// Strip likely secret material from helper diagnostics before persistence.
+    public static func sanitizeDiagnostic(_ text: String, status: Int32, executable: String) -> String {
+        var lines = text.split(separator:"\n",omittingEmptySubsequences:false).map(String.init)
+        let patterns = [
+            "(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|bearer|password|passwd|secret|credential)[=:\\s]+[\"']?[^\\s\"']+",
+            "(?i)bearer\\s+[A-Za-z0-9\\-._~+/=]+",
+            "sk-[A-Za-z0-9]{10,}",
+            "AIza[0-9A-Za-z\\-_]{10,}",
+            "ya29\\.[0-9A-Za-z\\-_]+"
+        ]
+        for index in lines.indices {
+            var line = lines[index]
+            for pattern in patterns {
+                line = line.replacingOccurrences(of:pattern,with:"[redacted]",options:.regularExpression)
+            }
+            if line.count > 400 {line = String(line.prefix(400))+"…"}
+            lines[index] = line
+        }
+        let body = lines.joined(separator:"\n").trimmingCharacters(in:.whitespacesAndNewlines)
+        let name = URL(fileURLWithPath:executable).lastPathComponent
+        if body.isEmpty {return "\(name) exit \(status)"}
+        return "\(name) exit \(status): \(body)"
+    }
     /// maxOutput bounds each captured stream while the helper runs. Stderr
     /// retains its final 6000 bytes. Explicit stdout files bypass capture only.
     public static func run(_ executable: String, _ arguments: [String], directory: URL? = nil,
@@ -82,8 +137,11 @@ public enum Processes {
         guard maxOutput >= 0, (input?.count ?? 0) <= 16384, timeout == nil || (timeout!.isFinite && timeout! > 0) else {
             throw JoeyError.invalid("Invalid bounded process input or deadline")
         }
+        let resolvedExecutable = try self.executable(executable)
+        // Credential-bearing stdin never enters a shell interpreter.
+        if input != nil {try refuseShellHelper(resolvedExecutable)}
         let storageRoot = StorageManager.processingRoot
-        let toolName = URL(fileURLWithPath:executable).lastPathComponent
+        let toolName = URL(fileURLWithPath:resolvedExecutable).lastPathComponent
         let writesMedia = toolName == "ffmpeg" || toolName == "yt-dlp" || toolName.hasPrefix("python") ||
             (toolName == "rclone" && arguments.first == "copyto" && arguments.count > 2 && arguments[2].hasPrefix("/"))
         let storageLease = try storageRoot.map {try ProcessingLock(directory:$0,name:"storage-workers.lock",shared:true)}
@@ -100,7 +158,7 @@ public enum Processes {
         }
         defer { try? outputFile?.close() }
         let process = Process(); process.executableURL = try ProcessSupervisor.executable()
-        process.arguments = ["--supervise",String(getpid())]+(storageRoot.map {["--storage-root",$0.path]} ?? [])+[try self.executable(executable)]+arguments; process.currentDirectoryURL = directory
+        process.arguments = ["--supervise",String(getpid())]+(storageRoot.map {["--storage-root",$0.path]} ?? [])+[resolvedExecutable]+arguments; process.currentDirectoryURL = directory
         process.standardOutput = outputFile ?? stdout.pipe.fileHandleForWriting
         process.standardError = stderr.pipe.fileHandleForWriting
         process.standardInput = FileHandle.nullDevice
@@ -178,7 +236,7 @@ public enum Processes {
         // a thread-local run loop and can deadlock after async thread migration.
         let diagnostic = String(decoding: stderr.bytes, as: UTF8.self)
         guard process.terminationStatus == 0 else {
-            throw JoeyError.failed("\(URL(fileURLWithPath:executable).lastPathComponent) exit \(process.terminationStatus): \(diagnostic)")
+            throw JoeyError.failed(sanitizeDiagnostic(diagnostic,status:process.terminationStatus,executable:resolvedExecutable))
         }
         return ProcessResult(stdout: stdout.bytes, stderr: diagnostic, status: process.terminationStatus)
     }

@@ -57,6 +57,8 @@ class ToolEnvironmentTests(unittest.TestCase):
 
     def test_actual_xctest_diagnostic_uses_only_dummy_parent(self):
         command = ["/Applications/Xcode.app/Contents/Developer/usr/bin/xctest", "-help"]
+        if not Path(command[0]).exists():
+            self.skipTest("xctest is unavailable on this host; macOS verification still required")
         # Positive control establishes that this diagnostic prints its inherited
         # environment. The parent contains synthetic values only, never live keys.
         control = subprocess.run(command, env=self.parent(), capture_output=True, text=True)
