@@ -96,6 +96,47 @@ final class PresentationTests: XCTestCase {
         XCTAssertEqual(JobPresentation(job:job).status,"Delivery incomplete")
     }
 
+    func testProcessControlsStayTruthfulAcrossResumeStorageWaitAndCancellation() throws {
+        var job = JobRecord(id:"fixture",request:try Fixtures.request(dir:FileManager.default.temporaryDirectory,path:"fixture"))
+        job.state = .cancelled
+        let starting = JobPresentation(job:job).processControls(isRunning:true)
+        XCTAssertEqual(starting.status,"Processing")
+        XCTAssertTrue(starting.showsCancel)
+        XCTAssertFalse(starting.showsResume)
+        job.state = .processing
+        job.stage = "source"
+        job.error = nil
+        let resume = JobPresentation(job:job).processControls(isRunning:true)
+        XCTAssertEqual(resume.status,"Processing")
+        XCTAssertTrue(resume.showsCancel)
+        XCTAssertFalse(resume.showsResume)
+
+        job.storageRequiredBytes = 14_950_834_612
+        job.error = "Storage blocked: need 14950834612 bytes including operating-system reserve; available 8201310208. Progress retained."
+        job.stage = "Storage blocked — capacity recheck in 60 seconds"
+        let blocked = JobPresentation(job:job).processControls(isRunning:true)
+        XCTAssertEqual(blocked.status,"Paused while storage blocked — need 14950834612 bytes; 8201310208 bytes available when paused")
+        XCTAssertTrue(blocked.showsCancel)
+        XCTAssertFalse(blocked.showsResume)
+        XCTAssertEqual(JobPresentation.availableBytes(from:job.error),8_201_310_208)
+
+        // Cancellation persists Stopped before ownership releases.
+        job.state = .cancelled
+        job.storageRequiredBytes = nil
+        job.stage = "Paused while storage blocked"
+        job.error = "Paused while storage blocked; progress preserved"
+        let stopping = JobPresentation(job:job).processControls(isRunning:true,isCancelling:true)
+        XCTAssertEqual(stopping.status,"Stopping — saving progress")
+        XCTAssertTrue(stopping.showsCancel)
+        XCTAssertFalse(stopping.showsResume)
+
+        let stopped = JobPresentation(job:job).processControls(isRunning:false)
+        XCTAssertEqual(stopped.status,"Stopped — progress saved")
+        XCTAssertFalse(stopped.showsCancel)
+        XCTAssertTrue(stopped.showsResume)
+        XCTAssertEqual(JobPresentation(job:job).accepted,0)
+    }
+
     func testRejectedSourceMarkersPreserveAcceptedEvidenceAndExactFailure() throws {
         let cases: [(JobState, String)] = [
             (.failed, "Synthetic source hash rejection"),

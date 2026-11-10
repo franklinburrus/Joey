@@ -322,7 +322,7 @@ struct ContentView: View {
                                             .accessibilityLabel("Select \(job.request.title)")
                                             .disabled(model.removingJobs)
                                     }
-                                    JobRow(job:job,selected:selectingJobs ? selectedJobIDs.contains(job.id) : selectedJob?.id == job.id,isRunning:isRunning(job)) {
+                                    JobRow(job:job,selected:selectingJobs ? selectedJobIDs.contains(job.id) : selectedJob?.id == job.id,isRunning:isRunning(job),isCancelling:model.cancelling) {
                                         if selectingJobs {
                                             if selectedJobIDs.contains(job.id) {selectedJobIDs.remove(job.id)} else {selectedJobIDs.insert(job.id)}
                                         } else {selectedID = job.id;showingDetail = true}
@@ -418,6 +418,7 @@ private struct JobRow: View {
     let job: JobRecord
     let selected: Bool
     let isRunning: Bool
+    let isCancelling: Bool
     var select: () -> Void
     @Environment(\.colorScheme) private var scheme
     private var presentation: JobPresentation {JobPresentation(job:job)}
@@ -428,14 +429,14 @@ private struct JobRow: View {
                     Text(job.request.productionWorkflow == .joeBudden ? "JOE BUDDEN" : job.request.owner == .dub ? "DUB" : "TAXSTONE")
                         .font(JoeyTheme.font(11,weight:.medium)).foregroundStyle(.secondary)
                     Text(job.request.title).font(JoeyTheme.font(15,weight:.medium)).lineLimit(3)
-                    Text(presentation.status).font(JoeyTheme.font(12))
-                        .foregroundStyle(JoeyTheme.status(completed:presentation.completed,isRunning:isRunning,status:presentation.status))
+                    Text(presentation.status(isRunning:isRunning,isCancelling:isCancelling)).font(JoeyTheme.font(12))
+                        .foregroundStyle(JoeyTheme.status(completed:presentation.completed,isRunning:isRunning,status:presentation.status(isRunning:isRunning,isCancelling:isCancelling)))
                     JobProgressView(presentation:presentation,isRunning:isRunning)
                         .allowsHitTesting(false).accessibilityHidden(true)
                 }
                 Spacer(minLength:0)
                 if presentation.completed {Image(systemName:"checkmark.circle.fill").foregroundStyle(JoeyTheme.verified)}
-                else if presentation.status == "Needs attention" || presentation.status == "Delivery incomplete" {Image(systemName:"exclamationmark.circle").foregroundStyle(JoeyTheme.attention)}
+                else if presentation.status(isRunning:isRunning,isCancelling:isCancelling) == "Needs attention" || presentation.status(isRunning:isRunning,isCancelling:isCancelling) == "Delivery incomplete" {Image(systemName:"exclamationmark.circle").foregroundStyle(JoeyTheme.attention)}
                 else if isRunning {Circle().fill(JoeyTheme.processing).frame(width:7,height:7)}
             }.padding(.vertical,16).padding(.horizontal,10)
                 .frame(maxWidth:.infinity,alignment:.leading)
@@ -446,7 +447,7 @@ private struct JobRow: View {
             .accessibilityElement(children:.ignore)
             .accessibilityAddTraits(.isButton)
             .accessibilityAction {select()}
-            .accessibilityLabel("\(job.request.title), \(presentation.status)")
+            .accessibilityLabel("\(job.request.title), \(presentation.status(isRunning:isRunning,isCancelling:isCancelling))")
             .accessibilityValue(presentation.total > 0 ? "\(presentation.accepted) of \(presentation.total) clips passed QA" : "No clips planned")
             .accessibilityAddTraits(selected ? .isSelected : [])
     }

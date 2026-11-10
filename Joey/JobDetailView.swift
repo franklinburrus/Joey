@@ -14,6 +14,9 @@ struct JobDetailView: View {
     @State private var expandedStage: String?
     @State private var showingAllClips = false
     private var presentation: JobPresentation {JobPresentation(job:job)}
+    private var processControls: (status: String, showsCancel: Bool, showsResume: Bool) {
+        presentation.processControls(isRunning:isRunning,isCancelling:model.cancelling)
+    }
     private var sourceLabel: String {
         job.source.map {URL(fileURLWithPath:$0.path).lastPathComponent} ?? job.request.originalURL ?? job.request.sourceID
     }
@@ -37,8 +40,8 @@ struct JobDetailView: View {
                     // Selectable Text can retain an older native accessibility
                     // value. Recreate only changed text, preserving the preview.
                     Text(job.request.title).font(JoeyTheme.font(30,weight:.medium)).tracking(-0.8).textSelection(.enabled).id(job.request.title)
-                    Text(presentation.status).font(JoeyTheme.font(12))
-                        .foregroundStyle(JoeyTheme.status(completed:presentation.completed,isRunning:isRunning,status:presentation.status))
+                    Text(processControls.status).font(JoeyTheme.font(12))
+                        .foregroundStyle(JoeyTheme.status(completed:presentation.completed,isRunning:isRunning,status:processControls.status))
                 }
                 if !presentation.completed && !isRunning {
                     attention
@@ -166,10 +169,10 @@ struct JobDetailView: View {
     }
     private var controls: some View {
         VStack(alignment:.leading,spacing:10) {
-            if isRunning {
+            if processControls.showsCancel {
                 Button("Cancel and Save Progress",systemImage:"stop.circle") {model.cancel()}
                     .help("Stops this attempt. Resume reuses accepted clips and saved progress.")
-            } else if !presentation.completed {
+            } else if processControls.showsResume {
                 Button("Resume",systemImage:"play") {
                     checkResume()
                     if resumeIssue == nil {model.resume(job)}
