@@ -18,6 +18,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
     @Published var selected: String?
     @Published var busy = false
     @Published private(set) var cancelling = false
+    private var libraryPauseInProgress = false
     @Published var error: String?
     @Published var configuration: Configuration?
     @Published var deliveryCheck: String?
@@ -176,7 +177,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             await processing?.value
             await queue?.value
             joeStatus = "Automatic processing paused. Queue and accepted work retained."
-            if ownsCancellation {cancelling = false}
+            if ownsCancellation && !libraryPauseInProgress {cancelling = false}
         }
     }
     func resumeJoeQueue(includeJoe: Bool = true) {
@@ -468,7 +469,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         // A library or Joe pause already owns cancellation until its queue drains.
         guard !cancelling else {return}
         cancelling = true
-        Task {await processing?.value;cancelling = false}
+        Task {await processing?.value;if !libraryPauseInProgress {cancelling = false}}
     }
     func refreshTaxstoneLibrary() {
         guard !cancelling, !busy, !libraryBusy, !preparingSource, let library else {return}
@@ -498,9 +499,11 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         }
     }
     func pauseTaxstoneLibrary() {
-        guard !cancelling else {return}
+        guard !libraryPauseInProgress else {return}
+        libraryPauseInProgress = true
         cancelling = true
         let processing = task, runningLibrary = libraryTask
+        let runningJoe = automationRunning && !email.dispatching ? automationTask:nil
         // Joe can own the active task while the library is between episodes.
         // Stop its queue too, before any completion callback can restart it.
         if automationRunning {pauseJoe()}
@@ -508,9 +511,11 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         runningLibrary?.cancel()
         Task {
             await processing?.value
+            await runningJoe?.value
             await runningLibrary?.value
             do {try await library?.pause();if let library {taxstoneLibrary = await library.snapshot()}}
             catch {self.error = error.localizedDescription}
+            libraryPauseInProgress = false
             cancelling = false
         }
     }

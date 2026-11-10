@@ -123,6 +123,56 @@ final class NativeModelRegressionTests: XCTestCase {
         XCTAssertEqual(writes,1,"No provider write may begin after cancellation")
     }
 
+    @MainActor func testCancelDuringJoePauseAlsoStopsLibraryAndWaitsForBoth() async throws {
+        let model = try model()
+        var releaseProcessing: CheckedContinuation<Void,Never>?
+        var releaseLibrary: CheckedContinuation<Void,Never>?
+        let processing = Task {await withCheckedContinuation {releaseProcessing = $0}}
+        let queue = Task {await processing.value}
+        let library = Task {await withCheckedContinuation {releaseLibrary = $0}}
+        model.task = processing;model.automationTask = queue;model.libraryTask = library
+        model.automationRunning = true;model.libraryBusy = true;model.joeAutomation.enabled = true
+        while releaseProcessing == nil || releaseLibrary == nil {await Task.yield()}
+
+        model.pauseJoe()
+        XCTAssertTrue(model.cancelling)
+        model.cancel()
+        XCTAssertTrue(library.isCancelled,"Cancel must also stop the library while Joe is pausing")
+        releaseProcessing?.resume()
+        await queue.value
+        for _ in 0..<10 {await Task.yield()}
+        XCTAssertTrue(model.cancelling,"Cancellation must remain active until the library drains")
+        releaseLibrary?.resume()
+        await library.value
+        for _ in 0..<100 where model.cancelling {await Task.yield()}
+        XCTAssertFalse(model.cancelling)
+    }
+
+    @MainActor func testPausingLibraryDoesNotWaitForUnrelatedEmailTurn() async throws {
+        for joeRunning in [false,true] {
+            let model = try model()
+            var releaseLibrary: CheckedContinuation<Void,Never>?
+            var releaseEmail: CheckedContinuation<Void,Never>?
+            let library = Task {await withCheckedContinuation {releaseLibrary = $0}}
+            let emailTurn = Task {await withCheckedContinuation {releaseEmail = $0}}
+            model.libraryBusy = true;model.libraryTask = library
+            model.automationRunning = joeRunning;model.automationTask = emailTurn
+            model.email.dispatching = true
+            while releaseLibrary == nil || releaseEmail == nil {await Task.yield()}
+
+            model.pauseTaxstoneLibrary()
+            XCTAssertTrue(library.isCancelled)
+            XCTAssertFalse(emailTurn.isCancelled)
+            releaseLibrary?.resume()
+            await library.value
+            for _ in 0..<100 where model.cancelling {await Task.yield()}
+            XCTAssertFalse(model.cancelling,"Library pause must not wait for an unrelated email turn")
+            releaseEmail?.resume()
+            await emailTurn.value
+            for _ in 0..<100 where model.cancelling {await Task.yield()}
+        }
+    }
+
     @MainActor func testCancelKeepsCancellationActiveUntilLibraryDrains() async throws {
         let model = try model()
         var release: CheckedContinuation<Void,Never>?
