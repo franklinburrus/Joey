@@ -148,6 +148,7 @@ public actor Coordinator {
                         paused.state = .cancelled;paused.storageRequiredBytes = nil
                         paused.stage = "Paused while storage blocked"
                         paused.error = "Paused while storage blocked; progress preserved"
+                        paused.updatedAt = Date()
                         try? Persistence.save(paused,to:checkpoint)
                         try? await progress(paused)
                     }

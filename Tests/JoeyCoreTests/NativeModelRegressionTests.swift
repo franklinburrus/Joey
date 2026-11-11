@@ -123,6 +123,72 @@ final class NativeModelRegressionTests: XCTestCase {
         XCTAssertEqual(writes,1,"No provider write may begin after cancellation")
     }
 
+    @MainActor func testCancelDuringJoePauseAlsoStopsLibraryAndWaitsForBoth() async throws {
+        let model = try model()
+        var releaseProcessing: CheckedContinuation<Void,Never>?
+        var releaseLibrary: CheckedContinuation<Void,Never>?
+        let processing = Task {await withCheckedContinuation {releaseProcessing = $0}}
+        let queue = Task {await processing.value}
+        let library = Task {await withCheckedContinuation {releaseLibrary = $0}}
+        model.task = processing;model.automationTask = queue;model.libraryTask = library
+        model.automationRunning = true;model.libraryBusy = true;model.joeAutomation.enabled = true
+        while releaseProcessing == nil || releaseLibrary == nil {await Task.yield()}
+
+        model.pauseJoe()
+        XCTAssertTrue(model.cancelling)
+        model.cancel()
+        XCTAssertTrue(library.isCancelled,"Cancel must also stop the library while Joe is pausing")
+        releaseProcessing?.resume()
+        await queue.value
+        for _ in 0..<10 {await Task.yield()}
+        XCTAssertTrue(model.cancelling,"Cancellation must remain active until the library drains")
+        releaseLibrary?.resume()
+        await library.value
+        for _ in 0..<100 where model.cancelling {await Task.yield()}
+        XCTAssertFalse(model.cancelling)
+    }
+
+    @MainActor func testPausingLibraryDoesNotWaitForUnrelatedEmailTurn() async throws {
+        for joeRunning in [false,true] {
+            let model = try model()
+            var releaseLibrary: CheckedContinuation<Void,Never>?
+            var releaseEmail: CheckedContinuation<Void,Never>?
+            let library = Task {await withCheckedContinuation {releaseLibrary = $0}}
+            let emailTurn = Task {await withCheckedContinuation {releaseEmail = $0}}
+            model.libraryBusy = true;model.libraryTask = library
+            model.automationRunning = joeRunning;model.automationTask = emailTurn
+            model.email.dispatching = true
+            while releaseLibrary == nil || releaseEmail == nil {await Task.yield()}
+
+            model.pauseTaxstoneLibrary()
+            XCTAssertTrue(library.isCancelled)
+            XCTAssertFalse(emailTurn.isCancelled)
+            releaseLibrary?.resume()
+            await library.value
+            for _ in 0..<100 where model.cancelling {await Task.yield()}
+            XCTAssertFalse(model.cancelling,"Library pause must not wait for an unrelated email turn")
+            releaseEmail?.resume()
+            await emailTurn.value
+            for _ in 0..<100 where model.cancelling {await Task.yield()}
+        }
+    }
+
+    @MainActor func testCancelKeepsCancellationActiveUntilLibraryDrains() async throws {
+        let model = try model()
+        var release: CheckedContinuation<Void,Never>?
+        let library = Task {await withCheckedContinuation {release = $0}}
+        model.libraryBusy = true
+        model.libraryTask = library
+        while release == nil {await Task.yield()}
+        model.cancel()
+        for _ in 0..<10 {await Task.yield()}
+        XCTAssertTrue(model.cancelling)
+        release?.resume()
+        await library.value
+        for _ in 0..<100 where model.cancelling {await Task.yield()}
+        XCTAssertFalse(model.cancelling)
+    }
+
     @MainActor func testLibraryParentCancellationPropagatesAndAwaitsProcessingTask() async throws {
         let model = try model()
         var drained = false
@@ -154,6 +220,10 @@ final class NativeModelRegressionTests: XCTestCase {
         XCTAssertNotNil(blocked.storageRequiredBytes)
         XCTAssertEqual(blocked.state, .processing)
         XCTAssertTrue(model.busy)
+        let waiting = JobPresentation(job:blocked).processControls(isRunning:model.isRunning(blocked))
+        XCTAssertTrue(waiting.status.hasPrefix("Paused while storage blocked — need "))
+        XCTAssertTrue(waiting.showsCancel)
+        XCTAssertFalse(waiting.showsResume)
 
         model.cancel()
         XCTAssertTrue(model.cancelling)
@@ -174,6 +244,59 @@ final class NativeModelRegressionTests: XCTestCase {
         XCTAssertFalse(saved.resumesAutomatically)
         XCTAssertEqual(try saved.request.identityData(), try request.identityData())
         XCTAssertTrue(saved.error?.contains("progress preserved") == true, saved.error ?? "")
+        XCTAssertFalse(model.isRunning(displayed))
+        let stopped = JobPresentation(job:displayed).processControls(isRunning:false)
+        XCTAssertEqual(stopped.status, "Stopped — progress saved")
+        XCTAssertFalse(stopped.showsCancel)
+        XCTAssertTrue(stopped.showsResume)
+    }
+
+    @MainActor func testResumingStoppedJobShowsProcessingBeforeFirstProgress() async throws {
+        let model = try model()
+        let request = try Fixtures.request(dir:model.root,path:"unused synthetic source")
+        var stopped = JobRecord(id:try request.stableID(),request:request)
+        stopped.state = .cancelled
+        model.jobs = [stopped]
+        XCTAssertEqual(model.start(request),.accepted)
+        let processing = try XCTUnwrap(model.task)
+        XCTAssertTrue(model.isRunning(stopped))
+        XCTAssertFalse(model.cancelling)
+        XCTAssertEqual(JobPresentation(job:stopped).status(isRunning:model.isRunning(stopped),isCancelling:model.cancelling),"Processing")
+        model.cancel()
+        await processing.value
+    }
+
+    @MainActor func testStaleProgressCannotOverwriteNewerCheckpointOrStealOwnership() throws {
+        let model = try model()
+        var current = JobRecord(id:"job-a",request:try Fixtures.request(dir:model.root,path:"fixture"))
+        current.state = .cancelled
+        current.stage = "Paused while storage blocked"
+        current.error = "Paused while storage blocked; progress preserved"
+        current.updatedAt = Date(timeIntervalSince1970:200)
+        model.busy = true
+        model.receive(current,select:true)
+        XCTAssertEqual(model.activeJobID, current.id)
+
+        var stale = current
+        stale.state = .processing
+        stale.storageRequiredBytes = 99
+        stale.stage = "Storage blocked — capacity recheck in 60 seconds"
+        stale.error = "Storage blocked: need 99 bytes including operating-system reserve; available 1. Progress retained."
+        stale.updatedAt = Date(timeIntervalSince1970:100)
+        model.receive(stale)
+        XCTAssertEqual(model.jobs.first?.state, .cancelled)
+        XCTAssertNil(model.jobs.first?.storageRequiredBytes)
+        XCTAssertEqual(model.activeJobID, current.id)
+
+        var foreign = JobRecord(id:"job-b",request:try Fixtures.request(dir:model.root,path:"other"))
+        foreign.updatedAt = Date(timeIntervalSince1970:300)
+        model.receive(foreign)
+        XCTAssertEqual(model.activeJobID, current.id)
+        XCTAssertTrue(model.isRunning(current))
+        XCTAssertFalse(model.isRunning(foreign))
+
+        model.receive(stale,generation:99)
+        XCTAssertEqual(model.jobs.first {$0.id == current.id}?.state, .cancelled)
     }
 
     @MainActor func testOrdinaryStartFailureStillShowsAnErrorAlert() async throws {

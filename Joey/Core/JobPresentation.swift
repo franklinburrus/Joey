@@ -67,8 +67,23 @@ struct JobPresentation {
         guard total > 0 else {return "Required for every clip"}
         return (filed == total ? "" : "Required · ")+"\(filed)/\(total) clips verified"
     }
-    var status: String {
+    /// Durable checkpoint wording. Pass `isRunning` when the Process owner still
+    /// holds this job so Cancel/Stopped controls stay truthful mid-transition.
+    var status: String { status(isRunning:false) }
+    func status(isRunning: Bool, isCancelling: Bool = false) -> String {
         if completed { return "Completed" }
+        if isRunning && job.state == .cancelled {
+            return isCancelling ? "Stopping — saving progress" : "Processing"
+        }
+        if let storage = storageBlockedStatus { return storage }
+        if isRunning {
+            if job.error == nil {
+                switch job.state {
+                case .processing, .planned: return "Processing"
+                case .qaPassed, .filed, .failed, .cancelled, .completed: break
+                }
+            }
+        }
         if job.error != nil && job.state != .cancelled { return "Needs attention" }
         switch job.state {
         case .cancelled: return "Stopped — progress saved"
@@ -79,6 +94,28 @@ struct JobPresentation {
         case .planned: return "Ready to process"
         case .completed: return "Delivery incomplete"
         }
+    }
+    /// Active capacity wait keeps required bytes on the checkpoint; available
+    /// bytes are retained in the storage-blocked error text when measured.
+    var storageBlockedStatus: String? {
+        guard let required = job.storageRequiredBytes else { return nil }
+        if let available = Self.availableBytes(from:job.error) {
+            return "Paused while storage blocked — need \(required) bytes; \(available) bytes available when paused"
+        }
+        return "Paused while storage blocked — need \(required) bytes"
+    }
+    /// Process chrome derived from durable state plus live ownership. Open Clips
+    /// stays gated on accepted QA separately from Cancel/Resume.
+    func processControls(isRunning: Bool, isCancelling: Bool = false) -> (status: String, showsCancel: Bool, showsResume: Bool) {
+        (status(isRunning:isRunning,isCancelling:isCancelling), isRunning, !isRunning && !completed)
+    }
+    static func availableBytes(from error: String?) -> Int64? {
+        guard let error else { return nil }
+        guard let availableRange = error.range(of:"available ") else { return nil }
+        let remainder = error[availableRange.upperBound...]
+        let digits = remainder.prefix(while:{"0123456789".contains($0)})
+        guard !digits.isEmpty, let value = Int64(digits) else { return nil }
+        return value
     }
     var stage: String {
         switch job.stage {

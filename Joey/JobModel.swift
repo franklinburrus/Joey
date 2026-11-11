@@ -18,6 +18,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
     @Published var selected: String?
     @Published var busy = false
     @Published private(set) var cancelling = false
+    private var libraryPauseInProgress = false
     @Published var error: String?
     @Published var configuration: Configuration?
     @Published var deliveryCheck: String?
@@ -43,6 +44,9 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
     private var coordinator: Coordinator?
     private(set) var startupTask: Task<Void,Never>?
     private let recentJoeEpisodes: () async throws -> [DiscoveredSource]
+    /// Monotonic owner token so a finished run's late progress cannot revive
+    /// busy state, overwrite a newer checkpoint, or start a duplicate worker.
+    private var processingGeneration = 0
     var task: Task<Void,Never>?
     let root: URL
     let email: EmailIntakeModel
@@ -173,7 +177,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             await processing?.value
             await queue?.value
             joeStatus = "Automatic processing paused. Queue and accepted work retained."
-            if ownsCancellation {cancelling = false}
+            if ownsCancellation && !libraryPauseInProgress {cancelling = false}
         }
     }
     func resumeJoeQueue(includeJoe: Bool = true) {
@@ -331,16 +335,23 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
                                  admitLink: (@Sendable (JobRequest) async throws -> Void)? = nil) -> JobAcceptance {
         guard !removingJobs,!cancelling, !busy, (!libraryBusy || automatic), (!automationRunning || automatic) else {return .deferred}
         guard let coordinator else {return .unavailable}
+        processingGeneration += 1
+        let generation = processingGeneration
         busy = true; error = nil
         activeJobID = jobs.first {$0.request == request}?.id
         if let activeJobID {selected = activeJobID}
         task = Task {
-            defer {busy = false; activeJobID = nil;task = nil;if !automatic {resumeJoeQueue()}}
+            defer {
+                if processingGeneration == generation {
+                    busy = false; activeJobID = nil;task = nil
+                }
+                if !automatic {resumeJoeQueue()}
+            }
             do {
                 let result = try await coordinator.run(request,admitLink:admitLink) { [weak self] job in
-                    await self?.receive(job)
+                    await self?.receive(job, generation:generation)
                 }
-                receive(result,select:true)
+                receive(result,select:true,generation:generation)
             } catch is CancellationError {
                 // Expected user cancellation. Refresh the saved checkpoint below
                 // without presenting cancellation as an application failure.
@@ -429,8 +440,12 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         do {try store.freeze(id,request:request);email.publish()}
         catch {email.failedPersistence(error);throw error}
     }
-    func receive(_ job: JobRecord, select: Bool = false) {
-        if busy {activeJobID = job.id}
+    func receive(_ job: JobRecord, select: Bool = false, generation: Int? = nil) {
+        if let generation, generation != processingGeneration {return}
+        if let existing = jobs.first(where:{$0.id == job.id}), existing.updatedAt > job.updatedAt {return}
+        // Only the owned processing identity may claim activeJobID. A foreign
+        // progress tick must not move Cancel/Import Link ownership.
+        if busy, activeJobID == nil || activeJobID == job.id {activeJobID = job.id}
         jobs.removeAll {$0.id == job.id}; jobs.insert(job,at:0)
         // Progress ticks must not steal selection from another inspected job.
         // Explicit select marks acceptance/completion of a started request.
@@ -451,8 +466,10 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         if automationRunning {pauseJoe()}
         let processing = task
         processing?.cancel()
+        // A library or Joe pause already owns cancellation until its queue drains.
+        guard !cancelling else {return}
         cancelling = true
-        Task {await processing?.value;cancelling = false}
+        Task {await processing?.value;if !libraryPauseInProgress {cancelling = false}}
     }
     func refreshTaxstoneLibrary() {
         guard !cancelling, !busy, !libraryBusy, !preparingSource, let library else {return}
@@ -482,9 +499,11 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         }
     }
     func pauseTaxstoneLibrary() {
-        guard !cancelling else {return}
+        guard !libraryPauseInProgress else {return}
+        libraryPauseInProgress = true
         cancelling = true
         let processing = task, runningLibrary = libraryTask
+        let runningJoe = automationRunning && !email.dispatching ? automationTask:nil
         // Joe can own the active task while the library is between episodes.
         // Stop its queue too, before any completion callback can restart it.
         if automationRunning {pauseJoe()}
@@ -492,9 +511,11 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
         runningLibrary?.cancel()
         Task {
             await processing?.value
+            await runningJoe?.value
             await runningLibrary?.value
             do {try await library?.pause();if let library {taxstoneLibrary = await library.snapshot()}}
             catch {self.error = error.localizedDescription}
+            libraryPauseInProgress = false
             cancelling = false
         }
     }
