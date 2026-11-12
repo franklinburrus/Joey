@@ -160,7 +160,8 @@ public enum Processes {
         }
         defer { try? outputFile?.close() }
         let process = Process(); process.executableURL = try ProcessSupervisor.executable()
-        process.arguments = ["--supervise",String(getpid())]+(storageRoot.map {["--storage-root",$0.path]} ?? [])+[resolvedExecutable]+arguments; process.currentDirectoryURL = directory
+        process.arguments = ["--supervise",String(getpid())]+(storageRoot.map {["--storage-root",$0.path]} ?? [])+[resolvedExecutable]+arguments
+        if let directory { process.currentDirectoryURL = directory }
         process.standardOutput = outputFile ?? stdout.pipe.fileHandleForWriting
         process.standardError = stderr.pipe.fileHandleForWriting
         process.standardInput = FileHandle.nullDevice

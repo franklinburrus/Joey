@@ -55,6 +55,10 @@ Actual proof and acceptance limits are in the leading STATUS section and the con
 **Tech Stack:** Swift, SwiftUI, Foundation, CryptoKit, AppKit/CoreGraphics, FFmpeg/FFprobe, existing yt-dlp/rclone/local ASR.
 **Spec:** REQUIREMENTS.md, sole current requirements document.
 
+## Minimal Process launch repair — 2026-11-11
+
+The nil-directory `Processes.run` crash is repaired at its owning assignment in `Joey/Core/Processes.swift`; regression coverage preserves explicit-directory behavior. Focused and full Swift suites, Release SwiftPM/Xcode builds, strict signature verification and an isolated empty-queue native `Ready` launch passed. Evidence is retained in `/Users/frank/Library/Caches/Joey-processes-repair-20261111/`. No production or provider operation was part of this repair.
+
 ## Historical functionality priorities after independent drift audit — 2026-11-04
 
 **Objective:** Complete and verify native Joey end-to-end functionality, not the production backlog. This section updates execution priority, not product requirements or a new approval process.
@@ -62,8 +66,9 @@ Actual proof and acceptance limits are in the leading STATUS section and the con
 - [x] Verify canonical checkout/origin/main/live history, starting worktree, existing Xcode project and installed artifact; inspect current implementation and retained verification scope.
 - [x] Audit scope, architecture, functionality, verification and priorities; correct current documentation freshness and precedence. Detailed findings and critical-path evidence are in the leading STATUS section.
 - [x] Observe the selected completed native-video recap in the actual installed application. Verify saved Workflow, source/results, clip timings/checks and links; navigate away and back without starting processing. The former unavailable-native-recap blocker is closed.
-- [ ] Next functional task: demonstrate one authorized DUB audio source through installed-native intake/acquisition or verified-original reuse, source-bound transcription, planning, rendering, QA/coverage, exact Drive filing, required register/companion verification and saved recap. The existing two 15-second renderer cases are retained but do not substitute for this native workflow.
-- [ ] Reconcile the remaining required Taxstone/native source-mode and recovery acceptance cases against valid existing evidence. Execute only missing proof, including direct native Resume and actual sleep/wake where still unverified; do not repeat unchanged accepted media or infer functionality from test counts. A concrete reproduced defect requires a minimal owning-layer repair and affected verification plan before implementation.
+- [x] Complete one authorized DUB audio source through installed-native intake or verified-original reuse, source-bound transcription, planning, rendering, QA/coverage, exact Drive filing, required register/companion verification and saved recap. Pocket Watching is the verified run; its receipt, audit and limits are recorded in the current STATUS checkpoint. The existing two 15-second renderer cases remain historical supporting evidence only.
+- [ ] Next functional task: complete one authorized Taxstone audio source through native intake or verified-original reuse, source-bound transcription, episode-matched artwork, planning, rendering, QA/coverage, exact Taxstone Drive filing, separate Taxstone record/readback and saved recap. Selected candidate: **The Jack Thriller Episode feat** (`soundcloud:200921906`, archive `1P8oe89GYmGitFVNUUQOSktLXYIw6Hl3P`). Coexistence with historical clips, folders, publication evidence and records is approved; preserve them and keep any new package distinct. Historical `PREP_ONLY` labels are stale labels, not proof of absent delivery. Source-use, Taxstone processing and external-write authority remain pending. No DUB Master Link List row is part of this lane.
+- [ ] Later acceptance: reconcile the remaining required Taxstone/native source-mode and recovery cases against valid existing evidence. Execute only missing proof, including direct native Resume and actual sleep/wake where still unverified; do not repeat unchanged accepted media or infer functionality from test counts. A concrete reproduced defect requires a minimal owning-layer repair and affected verification plan before implementation.
 
 The audited native-video job `dub-0bc5fc39fef657927e40715b` remains COMPLETED with its retained 48 clips, four companions and 48 required register rows; today's native recap/history observation closes that specific visual gap. No new application-code defect or unavailable dependency was established by this audit. Broader native audio acceptance remains incomplete. This is a verification gap, not authority to rebuild the product or recover every historical job.
 
@@ -71,7 +76,7 @@ Continue using the installed final core-completion artifact and existing SwiftUI
 
 Decision rule for every proposed task: proceed only if it directly improves or verifies a required Joey function, removes a demonstrated blocker, or preserves essential operational integrity. Otherwise defer it. Keep Joe/Taxstone bulk queues paused. Do not activate optional features, clear backlogs, rerender accepted outputs, repeat Git cleanup, change permissions, add paid services/infrastructure, publish/schedule, or commit unrelated work. External failure in one workflow does not stop independent functional development.
 
-Completion remains the product acceptance in REQUIREMENTS section 18, with production, delivery, native observation and platform ingestion reported separately. Completed finite implementation gates are preserved; they do not establish universal readiness. This audit itself is complete after the scoped documentation correction/readback. Its next task is the single DUB audio native workflow above, not another general audit campaign.
+Completion remains the product acceptance in REQUIREMENTS section 18, with production, delivery, native observation and platform ingestion reported separately. Completed finite implementation gates are preserved; they do not establish universal readiness. The Pocket Watching DUB audio lane is complete for its authorized scope. The next task is the single Taxstone audio native workflow above, not another general audit campaign.
 
 ## Completed final integration closeout — 2026-11-03 (historical)
 

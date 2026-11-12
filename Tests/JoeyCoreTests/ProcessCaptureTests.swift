@@ -2,6 +2,24 @@ import XCTest
 @testable import JoeyCore
 
 final class ProcessCaptureTests: XCTestCase {
+    func testProcessWithoutDirectorySucceedsAndReturnsExpectedOutput() async throws {
+        let result = try await Processes.run("/usr/bin/printf", ["expected-output"], timeout: 5)
+        XCTAssertEqual(result.status, 0)
+        XCTAssertEqual(String(data: result.stdout, encoding: .utf8), "expected-output")
+        XCTAssertTrue(result.stderr.isEmpty)
+    }
+
+    func testExplicitDirectoryStillSetsWorkingDirectory() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let result = try await Processes.run("/bin/pwd", [], directory: directory, timeout: 5)
+        XCTAssertEqual(result.status, 0)
+        let outputPath = String(data: result.stdout, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertTrue(outputPath?.hasSuffix("/" + directory.lastPathComponent) == true, outputPath ?? "missing working directory output")
+        XCTAssertTrue(result.stderr.isEmpty)
+    }
+
     func testCapturedStreamsUseAnonymousPipes() async throws {
         let script = "import json,os,stat; print(json.dumps([stat.S_ISFIFO(os.fstat(1).st_mode),stat.S_ISFIFO(os.fstat(2).st_mode)]))"
         let result = try await Processes.run("/usr/bin/python3", ["-c", script], timeout: 5)
