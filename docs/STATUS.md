@@ -1,6 +1,25 @@
+# PR #22 merge verification — 2026-11-12
+
+**MERGED AND VERIFIED.** GitHub PR #22 (`https://github.com/franklinburrus/Joey/pull/22`) merged by the repository's established squash method. Reviewed head `a410c6e649961a21d523f8558faa9faad744ebe5`; reviewed base `b7f4ce5df656d02b17a8c2cabc74ff0d63df7da4`; resulting main commit `2ee28dead792db3febd8fa3d98e24a613e36b778`. GitHub readback reports `MERGED`; the merge tree contains the reviewed four-file repair and documentation correction.
+
+- `Joey/Core/Processes.swift`: nil `directory` no longer assigns `Process.currentDirectoryURL`; explicit-directory behavior remains unchanged.
+- `Tests/JoeyCoreTests/ProcessCaptureTests.swift`: nil-directory completion/output and explicit-directory working-directory regressions present. `Tests/JoeyCoreTests/IsolatedNativeFixtureVerification.swift` remains present from PR #21 and unchanged by PR #22.
+- `docs/STATUS.md` and `docs/IMPLEMENTATION_PLAN.md`: submitted/merged repair status, Pocket Watching isolated current-main description, Jack Thriller selection, approved coexistence, stale `PREP_ONLY` distinction and pending Taxstone authority recorded. `docs/REQUIREMENTS.md` unchanged.
+- Canonical checkout `/Users/frank/Documents/Joey` fast-forwarded safely to `main` at `2ee28dead792db3febd8fa3d98e24a613e36b778`. Existing untracked `Joey Recovery/`, `Joey-process-ui-repair/` and `Joey-reviews/` remain preserved. Installed Joey was not replaced or installed.
+
+The squash merge tree is byte-identical to reviewed head application/test inputs; only commit ancestry changed. Retained evidence therefore still applies: focused Swift 11/0 failures; local full Swift 487 executed, 4 skipped, 0 failures; final CI full Swift 487 executed, 8 skipped, 0 failures; IntegritySecurityRepairTests 6/0 failures; Release SwiftPM/Xcode builds exit 0; strict signatures exit 0; isolated preview `Ready` with an empty queue after isolation proof. Release/preview executable equivalence was established after removing signature bytes. No rerun was needed after merge.
+
+## Remaining Taxstone authorization boundary
+
+Next lane remains one native Taxstone Full Show run for **The Jack Thriller Episode feat** (`soundcloud:200921906`), archive `1P8oe89GYmGitFVNUUQOSktLXYIw6Hl3P`, SHA-256 `b3e41f20044aa780641984efcd16e69dd2582878c2e615c21bad9a6aba283890`. Coexistence with historical clips, folders, publication evidence and records is already approved. Preserve those outputs, treat historical `PREP_ONLY` labels as stale labels rather than delivery proof, and keep new outputs distinct. Do not write the DUB Master Link List.
+
+Existing final preflight evidence remains usable: read-only Taxstone Buffer capability receipt checked `2026-11-12T00:32:19Z` and is valid through `2026-11-13T00:32:19Z`; shared Buffer intersection is 5–140 seconds; storage admission passed with `25,542,094,848` free bytes against `13,973,550,308` required with reserve; archive identity and hash match. The old preflight launch record from main `b7f4ce5df656d02b17a8c2cabc74ff0d63df7da4` crashed before Ready on the repaired nil-directory defect; superseding PR #22 Ready evidence applies to the merged source. Recheck disk space, source/archive readback, Drive/register access, duplicate aliases and isolated current-main runtime immediately before any run. Renew capability evidence if the run starts after its validity window.
+
+Processing, transcription, rendering, Drive/register writes, publication, scheduling and installation remain unauthorized. Exact authorization still needed: one isolated native Taxstone Full Show run using the verified Jack Thriller archive, required Taxstone Drive filing and companion/readback, separate Taxstone record write/readback, and in-app recap; exclude social publication, scheduling and all DUB Master Link List writes. Episode 979 remains unresolved; no global production-preservation claim is made.
+
 # Process nil-directory launch repair — 2026-11-11
 
-**REPAIR VERIFIED — PR #22 submitted; merge pending.** On branch `codex/processes-nil-directory-repair-20261111`, submitted at `23e0f1bf9cd5dbb42a4029f45a418bab57bc05cd` against source base `b7f4ce5df656d02b17a8c2cabc74ff0d63df7da4`, `Processes.run` now assigns `currentDirectoryURL` only when a directory is present. The defect reproduced as `NSInvalidArgumentException: must provide a directory path` when the argument was nil. Explicit-directory behavior remains unchanged.
+**REPAIR VERIFIED — PR #22 submitted; merge was pending at this 2026-11-11 checkpoint.** On branch `codex/processes-nil-directory-repair-20261111`, submitted at `23e0f1bf9cd5dbb42a4029f45a418bab57bc05cd` against source base `b7f4ce5df656d02b17a8c2cabc74ff0d63df7da4`, `Processes.run` now assigns `currentDirectoryURL` only when a directory is present. The defect reproduced as `NSInvalidArgumentException: must provide a directory path` when the argument was nil. Explicit-directory behavior remains unchanged.
 
 - Regression coverage in `Tests/JoeyCoreTests/ProcessCaptureTests.swift`: nil-directory `/usr/bin/printf` completion/output and explicit-directory `/bin/pwd` working-directory assertions.
 - Focused Swift test: exit **0**, **11 executed**, **0 failures**. Full Swift suite: exit **0**, **487 executed**, **4 skipped**, **0 failures**. Skips are existing optional/live cases; no repair test skipped.
