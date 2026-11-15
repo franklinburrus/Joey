@@ -437,6 +437,66 @@ public struct DriveReceipt: Codable, Equatable, Sendable {
     public var destination: FilingDestination?
     public var permissionFingerprint: String?
 }
+
+/// Taxstone keeps a separate register and schema from the DUB Master Link List.
+/// Store the exact read-back rows so completion is bound to the accepted clip
+/// bytes, source identity and provider row identities.
+public enum TaxstoneRegisterContract {
+    public static let spreadsheetID = "17vZSpWtTRoZxhdIP6JF_yxi2sfxSy3q9bNV3N_q5X4U"
+    public static let tab = "Master"
+    public static let headers = [
+        "Clip #", "Derivative ID", "Friendly Title", "Episode", "Episode ID", "Episode Date",
+        "Parent Source Drive File ID", "Source Filename", "Start", "End", "Duration",
+        "Transcript Status", "Transcript Evidence / File ID", "Source Clip File ID",
+        "Buffer Delivery File ID", "Buffer Delivery Link", "Technical Status", "Duplicate Status",
+        "Title Status", "Manifest Status", "QA Status", "READY_FOR_BUFFER",
+        "Review / Exception Reason", "Delivery Status", "Last Updated", "Run ID",
+        "Control Center Job ID"
+    ]
+    public static let episodeIDColumn = 4
+    public static let parentSourceColumn = 6
+    public static let sourceFilenameColumn = 7
+    public static let sourceClipIDColumn = 13
+    public static let derivativeIDColumn = 1
+    public static let runIDColumn = 25
+    public static let jobIDColumn = 26
+
+    public static func rowDigest(_ values: [String]) -> String {
+        let data = (try? Persistence.encoder.encode(values)) ?? Data()
+        return Integrity.textHash(String(decoding: data, as: UTF8.self))
+    }
+
+    public static func readbackDigest(_ rows: [TaxstoneRegisterRowReceipt]) -> String {
+        let sorted = rows.sorted { $0.clipID < $1.clipID }
+        let data = (try? Persistence.encoder.encode(sorted)) ?? Data()
+        return Integrity.textHash(String(decoding: data, as: UTF8.self))
+    }
+}
+
+public struct TaxstoneRegisterRowReceipt: Codable, Equatable, Sendable {
+    public var clipID: Int
+    public var rowNumber: Int
+    public var driveID: String
+    public var clipSHA256: String
+    public var clipBytes: Int64
+    public var values: [String]
+    public var rowDigest: String
+}
+
+public struct TaxstoneRegisterEvidence: Codable, Equatable, Sendable {
+    public var spreadsheetID: String
+    public var tab: String
+    public var sourceID: String
+    public var sourceSHA256: String
+    public var folderID: String
+    public var schema: [String]
+    public var rows: [TaxstoneRegisterRowReceipt]
+    public var rowsReadBack: Int
+    public var sourceRowsAfterWrite: Int
+    public var readbackDigest: String
+    public var observedAt: Date
+}
+
 public struct JobRecord: Codable, Identifiable, Sendable {
     public var id: String
     public var request: JobRequest
@@ -450,6 +510,9 @@ public struct JobRecord: Codable, Identifiable, Sendable {
     public var folderID: String?
     public var companions: [String: DriveReceipt] = [:]
     public var registerRows: [String] = []
+    /// Separate Taxstone register evidence. Optional for backward-compatible
+    /// decoding; missing evidence must not satisfy Taxstone completion.
+    public var taxstoneRegisterEvidence: TaxstoneRegisterEvidence?
     /// Binds the reconciled plan and accepted QA to their immutable inputs.
     /// Absent on historical checkpoints, whose available manifests are checked
     /// during reopening without requiring a network connection or cache refill.
@@ -504,14 +567,48 @@ public struct JobRecord: Codable, Identifiable, Sendable {
         return identities == acceptedIDs
     }
 
-    public var hasRequiredCompletionEvidence: Bool {
+    private var hasBoundTaxstoneRegisterEvidence: Bool {
+        guard request.owner == .taxstone, registerRows.isEmpty,
+              let evidence = taxstoneRegisterEvidence,
+              let source, let folderID,
+              evidence.spreadsheetID == TaxstoneRegisterContract.spreadsheetID,
+              evidence.tab == TaxstoneRegisterContract.tab,
+              evidence.sourceID == source.id,
+              evidence.sourceSHA256 == source.sha256,
+              evidence.folderID == folderID,
+              evidence.schema == TaxstoneRegisterContract.headers,
+              evidence.rows.count == clips.count,
+              evidence.rowsReadBack == clips.count,
+              evidence.sourceRowsAfterWrite >= clips.count,
+              evidence.readbackDigest == TaxstoneRegisterContract.readbackDigest(evidence.rows) else {return false}
+        let expectedEpisodeID = source.id.replacingOccurrences(of:"soundcloud:",with:"")
+        let groupedRows = Dictionary(grouping:evidence.rows,by:\.clipID)
+        guard groupedRows.count == clips.count, groupedRows.values.allSatisfy({$0.count == 1}),
+              Set(evidence.rows.map(\.rowNumber)).count == clips.count else {return false}
+        for clip in clips {
+            guard let row = groupedRows[clip.id]?.first, row.rowNumber >= 2,
+                  let drive = clip.drive, let hash = clip.sha256, let bytes = clip.bytes,
+                  row.driveID == drive.id, row.clipSHA256 == hash, row.clipBytes == bytes,
+                  row.values.count == TaxstoneRegisterContract.headers.count,
+                  let expectedValues = try? Records.taxstoneRegisterValues(job:self,clip:clip),
+                  row.values == expectedValues,
+                  row.values[TaxstoneRegisterContract.episodeIDColumn] == expectedEpisodeID,
+                  row.values[TaxstoneRegisterContract.sourceClipIDColumn] == drive.id,
+                  row.values[TaxstoneRegisterContract.jobIDColumn] == id,
+                  row.rowDigest == TaxstoneRegisterContract.rowDigest(row.values) else {return false}
+        }
+        return true
+    }
+
+    /// All accepted package evidence except the owner-specific register. A
+    /// completed checkpoint can use this predicate to reconcile a missing
+    /// Taxstone receipt without rerendering or retranscribing accepted work.
+    public var hasRequiredPackageEvidence: Bool {
         guard !clips.isEmpty, unavailableTranscriptFeatures.isEmpty,
               (try? validateAcceptedPlan()) != nil,
               verifiedDriveClipCount == clips.count,let source,let folderID,
               let destination = try? DestinationResolver.resolve(source:source,request:request,asset:.clip),
               Set(clips.compactMap { $0.drive?.id }).count == clips.count,
-              !DestinationResolver.requiresDUBRegister(request) ||
-                hasBoundRegisterReceipts,
               Set(companions.keys) == Set(Records.companionNames(source:source)),
               let transcript,
               (try? transcript.validate(sourceID:source.id,sha256:source.sha256,duration:source.duration)) != nil else {return false}
@@ -521,6 +618,17 @@ public struct JobRecord: Codable, Identifiable, Sendable {
             $0.bytes > 0 && $0.sha256.count == 64 && $0.md5?.count == 32 &&
             !$0.permissions.isEmpty && $0.permissionFingerprint?.count == 64
         } && companions.allSatisfy {$0.key == $0.value.name}
+    }
+
+    public var verifiedTaxstoneRegisterRowCount: Int {
+        hasBoundTaxstoneRegisterEvidence ? (taxstoneRegisterEvidence?.rows.count ?? 0) : 0
+    }
+
+    public var hasRequiredCompletionEvidence: Bool {
+        guard hasRequiredPackageEvidence else {return false}
+        if request.owner == .taxstone {return hasBoundTaxstoneRegisterEvidence}
+        return taxstoneRegisterEvidence == nil &&
+            (!DestinationResolver.requiresDUBRegister(request) || hasBoundRegisterReceipts)
     }
 
     /// Validate the saved plan itself, independently of its receipt count.

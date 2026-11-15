@@ -48,6 +48,72 @@ public enum Records {
             "Platform destination":job.request.productionWorkflow == .joeBudden ? "Drive only; no platform ingestion claim":"Shared X + Instagram","Block number":String(clip.id)]
         return Dictionary(uniqueKeysWithValues:headers.enumerated().compactMap { index,header in values[header].map {(index,$0)} })
     }
+
+    /// Build the separate Taxstone register row. Buffer identifiers remain
+    /// empty: filing and register reconciliation do not claim publication.
+    public static func taxstoneRegisterValues(job: JobRecord, clip: ClipRecord) throws -> [String] {
+        guard job.request.owner == .taxstone,
+              let source = job.source, let drive = clip.drive, let folder = job.folderID,
+              let duration = clip.measuredDuration, clip.qa?.passed == true,
+              let hash = clip.sha256, let bytes = clip.bytes else {
+            throw JoeyError.failed("Incomplete verified Taxstone register input")
+        }
+        let episodeID = source.id.replacingOccurrences(of:"soundcloud:",with:"")
+        let transcriptName = companionNames(source:source).first { $0.hasSuffix(" — Full Transcript.txt") }
+        let transcriptEvidence: String
+        if let transcriptName, let receipt = job.companions[transcriptName] {
+            transcriptEvidence = "DRIVE:\(receipt.id); SHA-256:\(receipt.sha256)"
+        } else {
+            transcriptEvidence = "LOCAL:source-bound transcript in job checkpoint"
+        }
+        let runID = "joey-taxstone-\(job.id)"
+        let values: [String:String] = [
+            "Clip #":String(clip.id),
+            "Derivative ID":String(format:"taxstone-%@-C%02d_JOEY_FULLSHOW",episodeID,clip.id),
+            "Friendly Title":clip.title,
+            "Episode":source.title,
+            "Episode ID":episodeID,
+            "Episode Date":source.episodeDate ?? "",
+            "Parent Source Drive File ID":archiveID(source.archiveReference) ?? "",
+            "Source Filename":URL(fileURLWithPath:source.path).lastPathComponent,
+            "Start":String(format:"%.6f",clip.intervals.first?.start ?? 0),
+            "End":String(format:"%.6f",clip.intervals.last?.end ?? 0),
+            "Duration":String(format:"%.6f",duration),
+            "Transcript Status":"COMPLETE_TIMESTAMPED_LOCAL_EVIDENCE",
+            "Transcript Evidence / File ID":transcriptEvidence,
+            "Source Clip File ID":drive.id,
+            "Buffer Delivery File ID":"",
+            "Buffer Delivery Link":"",
+            "Technical Status":"PASS",
+            "Duplicate Status":"NEW_PACKAGE; HISTORICAL_SOURCE_ROWS_PRESERVED",
+            "Title Status":"PASS",
+            "Manifest Status":"VERIFIED_CLIP_MANIFEST",
+            "QA Status":"PASS",
+            "READY_FOR_BUFFER":"YES",
+            "Review / Exception Reason":"One native Joey Full Show package; no social publication or scheduling authorized.",
+            "Delivery Status":"FILED_NOT_PUBLISHED",
+            "Last Updated":ISO8601DateFormatter().string(from:drive.verifiedAt),
+            "Run ID":runID,
+            "Control Center Job ID":job.id
+        ]
+        let row = TaxstoneRegisterContract.headers.map {values[$0] ?? ""}
+        guard row.count == TaxstoneRegisterContract.headers.count,
+              row[TaxstoneRegisterContract.sourceClipIDColumn] == drive.id,
+              row[TaxstoneRegisterContract.jobIDColumn] == job.id,
+              bytes > 0, hash.count == 64, !folder.isEmpty else {
+            throw JoeyError.failed("Taxstone register row identity is incomplete")
+        }
+        return row
+    }
+
+    private static func archiveID(_ reference: String?) -> String? {
+        guard let reference, let url = URL(string:reference) else {return reference}
+        let components = url.path.split(separator:"/").map(String.init)
+        if let index = components.firstIndex(of:"d"), components.count > index + 1 {
+            return components[index + 1]
+        }
+        return components.last
+    }
     public static func csv(_ rows: [[String]]) -> String {
         rows.map {row in row.map {value in
             // Spreadsheet formula injection protection for user/source titles.
@@ -88,7 +154,7 @@ public enum Records {
         Planned clips: \(job.clips.count)
         Automatic QA passed: \(accepted)
         Independently verified Drive clips: \(filed)
-        Required register rows read back: \(job.registerRows.count)
+        Required register rows read back: \(job.request.owner == .taxstone ? job.verifiedTaxstoneRegisterRowCount : job.registerRows.count)
         Coverage: \(job.request.mode.rawValue); exact fractional source/output mappings are in clip_manifest.json.
         Exclusions: \(job.exclusions.count); uncertain material retained.
         Planning basis: \(job.planningBasis?.rawValue ?? "Legacy transcript-assisted checkpoint")

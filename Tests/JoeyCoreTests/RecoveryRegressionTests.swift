@@ -445,7 +445,17 @@ final class RecoveryRegressionTests: XCTestCase {
             var companion = job.clips[0].drive!;companion.name = name;companion.id = "synthetic_"+name
             job.companions[name] = companion
         }
-        job.registerRows = request.owner == .dub ? ["Master Library!2:\(receipt.id)"] : []
+        if request.owner == .dub {
+            job.registerRows = ["Master Library!2:\(receipt.id)"]
+        } else {
+            let values = try Records.taxstoneRegisterValues(job:job,clip:job.clips[0])
+            let row = TaxstoneRegisterRowReceipt(clipID:1,rowNumber:2,driveID:receipt.id,
+                clipSHA256:hash,clipBytes:bytes,values:values,rowDigest:TaxstoneRegisterContract.rowDigest(values))
+            job.taxstoneRegisterEvidence = TaxstoneRegisterEvidence(spreadsheetID:TaxstoneRegisterContract.spreadsheetID,
+                tab:TaxstoneRegisterContract.tab,sourceID:job.source!.id,sourceSHA256:job.source!.sha256,
+                folderID:receipt.parent,schema:TaxstoneRegisterContract.headers,rows:[row],rowsReadBack:1,
+                sourceRowsAfterWrite:1,readbackDigest:TaxstoneRegisterContract.readbackDigest([row]),observedAt:Date())
+        }
         job.state = .completed;job.stage = "complete"
         try Persistence.save(job.transcript,to:directory.appendingPathComponent("transcript.json"))
         try Persistence.save(job,to:directory.appendingPathComponent("job.json"))
@@ -543,6 +553,35 @@ final class RecoveryRegressionTests: XCTestCase {
             let creations = await provider.clipCreations
             XCTAssertEqual(creations,1,"Interrupted filing must not create a second media file")
         }
+    }
+
+    func testMissingTaxstoneRegisterRecoveryDoesNotRerenderOrRetranscribe() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.owner = .taxstone;request.fileToDrive = true
+        var (saved,directory) = try completed(request,root:root)
+        saved.taxstoneRegisterEvidence = nil
+        let acceptedHash = try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename))
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let provider = RecoveryDelivery()
+        let result = try await Coordinator.$deliveryOverride.withValue(provider) {
+            try await Coordinator(root:root).run(request) {job in
+                XCTAssertFalse(job.stage.hasPrefix("render clip"),"Register-only recovery must not rerender accepted media")
+                XCTAssertFalse(job.stage == "transcription","Register-only recovery must not retranscribe accepted source")
+            }
+        }
+        XCTAssertEqual(result.state,.completed,result.error ?? "")
+        XCTAssertTrue(result.hasRequiredCompletionEvidence)
+        XCTAssertEqual(try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename)),acceptedHash)
+        let downloads = await provider.downloads
+        let artworkCalls = await provider.artworkCalls
+        let clipCreations = await provider.clipCreations
+        let clipAttempts = await provider.clipAttempts
+        XCTAssertEqual(downloads,0)
+        XCTAssertEqual(artworkCalls,0)
+        XCTAssertEqual(clipCreations,0)
+        XCTAssertEqual(clipAttempts,0)
+        XCTAssertNotNil(result.taxstoneRegisterEvidence)
     }
 
     func testAcceptedClipsWithoutCompanionReceiptsRecoverInterruptedCompanionsAndReopenSafely() async throws {
@@ -1117,6 +1156,23 @@ private actor RecoveryDelivery: CoordinatorDelivery {
     }
     func reconcileRegister(job: JobRecord, tab: String) async throws -> [String] {
         calls += 1;return DestinationResolver.requiresDUBRegister(job.request) && filingFault != "register" ? job.clips.enumerated().map {"\(tab)!\($0.offset+2):\($0.element.drive!.id)"} : []
+    }
+    func reconcileTaxstoneRegister(job: JobRecord) async throws -> TaxstoneRegisterEvidence {
+        calls += 1
+        guard job.request.owner == .taxstone, filingFault != "register" else {
+            throw JoeyError.failed("Synthetic Taxstone register failure")
+        }
+        let rows = try job.clips.map { clip -> TaxstoneRegisterRowReceipt in
+            let values = try Records.taxstoneRegisterValues(job:job,clip:clip)
+            return TaxstoneRegisterRowReceipt(clipID:clip.id,rowNumber:clip.id+1,
+                driveID:clip.drive!.id,clipSHA256:clip.sha256!,clipBytes:clip.bytes!,values:values,
+                rowDigest:TaxstoneRegisterContract.rowDigest(values))
+        }
+        return TaxstoneRegisterEvidence(spreadsheetID:TaxstoneRegisterContract.spreadsheetID,
+            tab:TaxstoneRegisterContract.tab,sourceID:job.source!.id,sourceSHA256:job.source!.sha256,
+            folderID:job.folderID!,schema:TaxstoneRegisterContract.headers,rows:rows,
+            rowsReadBack:rows.count,sourceRowsAfterWrite:rows.count,
+            readbackDigest:TaxstoneRegisterContract.readbackDigest(rows),observedAt:Date())
     }
     func upload(_ local: URL, name: String?, parent: String, destination: FilingDestination, replaceCompanion: Bool) async throws -> DriveReceipt {
         calls += 1

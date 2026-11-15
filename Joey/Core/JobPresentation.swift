@@ -141,6 +141,9 @@ struct JobPresentation {
     var clipProgress: Double? { total > 0 ? Double(accepted)/Double(total) : nil }
     var recordStatus: String {
         if completed { return "Verified" }
+        if job.request.owner == .taxstone {
+            return "\(job.verifiedTaxstoneRegisterRowCount)/\(total) Taxstone register rows verified"
+        }
         if DestinationResolver.requiresDUBRegister(job.request) { return "\(job.registerRows.count)/\(total) register rows verified" }
         return "\(job.companions.count)/4 companion records verified"
     }

@@ -183,6 +183,14 @@ private final class TaxstoneInventoryFixture: @unchecked Sendable {
                 try Data(("synthetic companion "+name).utf8).write(to:file)
                 job.companions[name] = try receipt(local:file,id:"companion_\(track)_\(index)",folder:folder,route:route)
             }
+            let values = try Records.taxstoneRegisterValues(job:job,clip:job.clips[0])
+            let row = TaxstoneRegisterRowReceipt(clipID:1,rowNumber:2,driveID:accepted.id,
+                clipSHA256:accepted.sha256,clipBytes:accepted.bytes,values:values,
+                rowDigest:TaxstoneRegisterContract.rowDigest(values))
+            job.taxstoneRegisterEvidence = TaxstoneRegisterEvidence(spreadsheetID:TaxstoneRegisterContract.spreadsheetID,
+                tab:TaxstoneRegisterContract.tab,sourceID:source.id,sourceSHA256:source.sha256,
+                folderID:folder,schema:TaxstoneRegisterContract.headers,rows:[row],rowsReadBack:1,
+                sourceRowsAfterWrite:1,readbackDigest:TaxstoneRegisterContract.readbackDigest([row]),observedAt:Date())
             job.state = .completed
             XCTAssertTrue(job.hasRequiredCompletionEvidence)
         } else {job.state = .qaPassed;job.stage = "delivery"}

@@ -8,9 +8,16 @@ protocol CoordinatorDelivery: TaxstoneReuseProvider, Sendable {
     func upload(_ local: URL, name: String?, parent: String, destination: FilingDestination, replaceCompanion: Bool) async throws -> DriveReceipt
     func resolveArtwork(source: SourceRecord, configuration: Configuration, root: URL) async throws -> Artwork
     func reconcileRegister(job: JobRecord, tab: String) async throws -> [String]
+    func reconcileTaxstoneRegister(job: JobRecord) async throws -> TaxstoneRegisterEvidence
     func verifyPackage(job: JobRecord, directory: URL) async throws
 }
 extension DriveDelivery: CoordinatorDelivery {}
+
+extension CoordinatorDelivery {
+    func reconcileTaxstoneRegister(job: JobRecord) async throws -> TaxstoneRegisterEvidence {
+        throw JoeyError.dependency("Native Taxstone register adapter unavailable; no completion evidence created")
+    }
+}
 
 public struct CheckpointFailure: Identifiable, Sendable {
     public enum Kind: Sendable {case missing, unreadable, malformed, identityMismatch}
@@ -252,11 +259,43 @@ public actor Coordinator {
             try request.profile.validate()
         }
         var completedReadbackPassed = false
-        let reopeningCompleted = job.state == .completed || job.completionReconciliationRequired == true
+        // A Taxstone completed checkpoint with missing owner-specific register
+        // evidence re-enters delivery reconciliation. Other invalid completed
+        // checkpoints retain the existing guard and never present green.
+        let reopenAttempt = job.state == .completed || job.completionReconciliationRequired == true
+        let taxstoneNeedsReconciliation = request.owner == .taxstone && reopenAttempt &&
+            job.hasRequiredPackageEvidence && !job.hasRequiredCompletionEvidence
+        let reopeningCompleted = reopenAttempt && !taxstoneNeedsReconciliation
         var sourceValidationSnapshot = job
         var validatingSource = false
         var validatingAcceptedPlan = false
         do {
+            if taxstoneNeedsReconciliation {
+                try renewCapabilityEvidence(requireCurrent:true)
+                guard job.hasRequiredPackageEvidence else {
+                    throw JoeyError.failed("Completed Taxstone checkpoint lacks package evidence; register reconciliation skipped")
+                }
+                try Records.validateSavedManifest(job:job,directory:dir)
+                let delivery: any CoordinatorDelivery = try Self.deliveryOverride ?? DriveDelivery(remote:config.rcloneRemote)
+                job.state = .filed; job.stage = "register reconciliation"; job.error = nil; try await save()
+                try authorizeNewOperation()
+                if job.verifiedTaxstoneRegisterRowCount != job.clips.count {
+                    job.taxstoneRegisterEvidence = try await delivery.reconcileTaxstoneRegister(job:job)
+                    try await save()
+                }
+                var final = job; final.state = .filed; final.stage = "Final companion readback; completion authority is the durable app checkpoint"; final.error = nil
+                let finalFiles = try Records.write(job:final,directory:dir)
+                for file in finalFiles where ["clip_manifest.json","RECONCILE.md"].contains(file.lastPathComponent) {
+                    try authorizeNewOperation()
+                    job.companions[file.lastPathComponent] = try await delivery.upload(file,name:nil,parent:job.folderID!,destination:try DestinationResolver.resolve(source:job.source!,request:job.request,asset:.clip),replaceCompanion:true)
+                    try await save()
+                }
+                job.stage = "final Drive package verification"; try await save()
+                guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Required Taxstone register evidence is missing or incorrectly routed")}
+                job.state = .completed; job.stage = "complete"; job.error = nil; job.completionReconciliationRequired = nil
+                try await save(); completedReadbackPassed = true
+                return job
+            }
             if reopeningCompleted {
                 guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Completed checkpoint lacks required delivery evidence")}
                 try Records.validateSavedManifest(job:job,directory:dir)
@@ -567,7 +606,12 @@ public actor Coordinator {
             }
             job.stage = "register reconciliation"; try await save()
             try authorizeNewOperation()
-            job.registerRows = try await delivery.reconcileRegister(job:job,tab:config.registerTab); try await save()
+            if request.owner == .taxstone {
+                job.taxstoneRegisterEvidence = try await delivery.reconcileTaxstoneRegister(job:job)
+            } else {
+                job.registerRows = try await delivery.reconcileRegister(job:job,tab:config.registerTab)
+            }
+            try await save()
             // Stage final records with all clip/index/transcript/register proofs.
             // Completion is committed locally only after their own readback.
             var final = job; final.state = .filed; final.stage = "Final companion readback; completion authority is the durable app checkpoint"; final.error = nil
@@ -601,7 +645,7 @@ public actor Coordinator {
                 return job
             }
             let hasAccepted = !job.clips.isEmpty && job.clips.allSatisfy {$0.qa?.passed == true}
-            if reopeningCompleted {job.completionReconciliationRequired = true}
+            if reopeningCompleted || taxstoneNeedsReconciliation {job.completionReconciliationRequired = true}
             job.state = error is CancellationError ? .cancelled : (hasAccepted ? .qaPassed : .failed)
             if let blocked = error as? StorageBlocked {
                 job.state = .processing;job.stage = "Storage blocked — capacity recheck in 60 seconds"
