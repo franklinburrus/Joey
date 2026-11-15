@@ -277,6 +277,10 @@ public actor Coordinator {
                 }
                 try Records.validateSavedManifest(job:job,directory:dir)
                 let delivery: any CoordinatorDelivery = try Self.deliveryOverride ?? DriveDelivery(remote:config.rcloneRemote)
+                // Persist the recovery route before any externally visible
+                // transition. A termination after this checkpoint must resume
+                // register-only reconciliation, not normal processing.
+                job.completionReconciliationRequired = true
                 job.state = .filed; job.stage = "register reconciliation"; job.error = nil; try await save()
                 try authorizeNewOperation()
                 if job.verifiedTaxstoneRegisterRowCount != job.clips.count {
@@ -292,6 +296,7 @@ public actor Coordinator {
                 }
                 job.stage = "final Drive package verification"; try await save()
                 guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Required Taxstone register evidence is missing or incorrectly routed")}
+                try await delivery.verifyPackage(job:job,directory:dir)
                 job.state = .completed; job.stage = "complete"; job.error = nil; job.completionReconciliationRequired = nil
                 try await save(); completedReadbackPassed = true
                 return job
@@ -653,7 +658,12 @@ public actor Coordinator {
             } else {job.storageRequiredBytes = nil}
             job.error = error is CancellationError ? "Cancelled; progress preserved for resume" : error.localizedDescription
             try await save()
-            if job.source != nil, !reopeningCompleted, !validatingAcceptedPlan {_ = try? Records.write(job:job,directory:dir)}
+            // Register-only recovery may already have uploaded final companion
+            // bytes. Rewriting those files after a later verification failure
+            // would make their saved receipts stale and block the next retry.
+            if job.source != nil, !reopeningCompleted, !taxstoneNeedsReconciliation, !validatingAcceptedPlan {
+                _ = try? Records.write(job:job,directory:dir)
+            }
             return job
         }
     }

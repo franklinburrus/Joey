@@ -97,6 +97,23 @@ final class TaxstoneInventoryTests: XCTestCase {
         XCTAssertEqual(try fixture.checkpointBytes(),before)
         XCTAssertEqual(fixture.mutations,0)
     }
+
+    func testPackageValidTaxstoneJobMissingRegisterIsResumable() async throws {
+        let fixture = try TaxstoneInventoryFixture()
+        defer {fixture.remove()}
+        let job = try fixture.addJob(track:"5001",completed:true)
+        var incomplete = job
+        incomplete.taxstoneRegisterEvidence = nil
+        try Persistence.save(incomplete,to:fixture.root.appendingPathComponent("jobs/"+job.id+"/job.json"))
+
+        let state = try await fixture.library().inventory()
+        let episode = try XCTUnwrap(state.episodes.first)
+        XCTAssertEqual(episode.status,"RESUMABLE")
+        XCTAssertTrue(episode.error?.contains("register evidence missing") == true)
+        XCTAssertEqual(state.completedCount,0)
+        XCTAssertEqual(try fixture.checkpointBytes()[job.id],try Data(contentsOf:fixture.root.appendingPathComponent("jobs/"+job.id+"/job.json")))
+        XCTAssertEqual(fixture.mutations,0)
+    }
 }
 
 private final class TaxstoneInventoryFixture: @unchecked Sendable {

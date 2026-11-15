@@ -584,6 +584,35 @@ final class RecoveryRegressionTests: XCTestCase {
         XCTAssertNotNil(result.taxstoneRegisterEvidence)
     }
 
+    func testTaxstoneRegisterRecoveryRequiresFinalPackageVerificationAndPersistsRoute() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.owner = .taxstone;request.fileToDrive = true
+        var (saved,directory) = try completed(request,root:root)
+        saved.taxstoneRegisterEvidence = nil
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+
+        let failedProvider = RecoveryDelivery(filingFault:"package-verify")
+        let failed = try await Coordinator.$deliveryOverride.withValue(failedProvider) {
+            try await Coordinator(root:root).run(request)
+        }
+        XCTAssertNotEqual(failed.state,.completed)
+        XCTAssertTrue(failed.completionReconciliationRequired == true)
+        let checkpoint: JobRecord = try Persistence.load(directory.appendingPathComponent("job.json"))
+        XCTAssertTrue(checkpoint.completionReconciliationRequired == true)
+
+        let recoveredProvider = RecoveryDelivery()
+        let recovered = try await Coordinator.$deliveryOverride.withValue(recoveredProvider) {
+            try await Coordinator(root:root).run(request) {job in
+                XCTAssertFalse(job.stage.hasPrefix("render clip"),"Register-only retry must not rerender accepted media")
+                XCTAssertFalse(job.stage == "transcription","Register-only retry must not retranscribe accepted source")
+            }
+        }
+        XCTAssertEqual(recovered.state,.completed,recovered.error ?? "")
+        XCTAssertNil(recovered.completionReconciliationRequired)
+        XCTAssertTrue(recovered.hasRequiredCompletionEvidence)
+    }
+
     func testAcceptedClipsWithoutCompanionReceiptsRecoverInterruptedCompanionsAndReopenSafely() async throws {
         for companionIndex in 0..<4 {
             for afterCommit in [false,true] {
@@ -1145,6 +1174,7 @@ private actor RecoveryDelivery: CoordinatorDelivery {
     func verifyPackage(job: JobRecord, directory: URL) async throws {
         guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Synthetic package incomplete")}
         if filingFault == "final-readback" {throw JoeyError.failed("Synthetic final parent readback failure")}
+        if filingFault == "package-verify" {throw JoeyError.failed("Synthetic package verification failure")}
         if companionFailureName != nil {
             for receipt in job.clips.compactMap(\.drive) + Array(job.companions.values) {
                 guard committed[receipt.name] == receipt,
