@@ -12,14 +12,15 @@ reconciliation with bounded retries and cancellation, strict completion and
 legacy checkpoints remain readable; REQUIREMENTS.md stays unchanged.
 
 Verified acceptance scope: external Taxstone processing, QA, Drive filing,
-separate register reconciliation and recap. Native Taxstone register
-completion, restart validation and repair-runtime acceptance remain unverified
-until the focused repair is submitted and its isolated Ready evidence is tied
-to the submitted source. No accepted job, provider object, historical row,
-production queue or source byte is changed.
+separate register reconciliation and recap. The focused native Taxstone register
+repair is submitted locally at commit
+`8e67a1fa9955cd1dd7056f9cc1f56cfcb1f0d6d7`; 65 focused tests pass, the Release
+build and strict signature pass, and an isolated current-source preview reaches
+native `Ready` with an empty queue. No accepted job, provider object,
+historical row, production queue or source byte is changed.
 
-Next lane after repair review: repeat only the missing native register-path
-proof, then continue the remaining Taxstone/native Resume and sleep/wake
+Next lane after repair publication: review remote checks and the focused PR,
+then continue only the remaining Taxstone/native Resume and sleep/wake
 acceptance gaps. Preserve the earlier joe-automation.json mutation caveat and
 Episode 979 caveat. Do not infer platform ingestion or global production
 preservation.

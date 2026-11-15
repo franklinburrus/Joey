@@ -1,8 +1,9 @@
 # Native Taxstone register completion audit — 2026-11-15
 
-**REPAIR IN PROGRESS — native register path gap confirmed.** The authorized
-Taxstone run completed its local processing, QA, Drive filing and separate
-Sheets readback, but Joey did not perform the Taxstone register reconciliation.
+**REPAIR SUBMITTED — native register path gap repaired and verified locally.** The
+authorized Taxstone run completed its local processing, QA, Drive filing and
+separate Sheets readback, but Joey did not perform the Taxstone register
+reconciliation.
 The accepted job `taxstone-eabaa7d6b2f610c35b5f8714` has `registerRows: []` and no
 `taxstoneRegisterEvidence`; its native recap's `Records · Verified` was therefore
 not supported by a native receipt. The external receipt remains preserved and is
@@ -14,8 +15,11 @@ not rewritten or promoted to native evidence.
 - New regression proof covers valid/stale/missing/unreadable Taxstone receipts, DUB/Taxstone separation, exact-row reuse, conflicting historical-row preservation, native register readback, safe reopen and missing-register recovery without render/transcribe.
 - REQUIREMENTS.md unchanged. No accepted job, source bytes, Drive objects, register rows, queue or production record modified.
 - Earlier production caveat remains: `/Users/frank/Library/Application Support/Joey Native/joe-automation.json` prior bytes unavailable; do not claim global production preservation. Episode 979 remains unresolved.
+- Repair branch: `codex/taxstone-register-completion-repair-20261115`; commit `8e67a1fa9955cd1dd7056f9cc1f56cfcb1f0d6d7`.
+- Focused Swift proof: `65` executed, `0` failures. Release Xcode build exit `0`; Release executable SHA-256 `f18fdd17dd5bdb8d074440fd95cf698613270e9b773c3fc98439ef5dfc253e8a`; strict deep signature exit `0`.
+- Isolated native preview proof: isolation probe passed before launch; network, production runtime, Keychain, rclone config and outside writes denied; accessibility readback shows `Ready`, `Process`, `No jobs in queue`. Preview executable SHA-256 `d4d1cd9efd4a33f8976e7ed50a306282d85a33d77d63126b69a7f555e09f4148`; evidence `/Users/frank/Library/Caches/Joey-taxstone-register-repair-20261115/native-isolation-repair/`.
 
-Evidence root: `/Users/frank/Library/Caches/Joey-taxstone-acceptance-20261115`. Repair tests/build/isolated Ready evidence will be recorded after the focused branch is submitted.
+Evidence roots: `/Users/frank/Library/Caches/Joey-taxstone-acceptance-20261115` (accepted run) and `/Users/frank/Library/Caches/Joey-taxstone-register-repair-20261115/native-isolation-repair` (repair verification). PR publication and remote checks remain pending.
 
 # Taxstone Full Show acceptance — Jack Thriller — 2026-11-15
 
