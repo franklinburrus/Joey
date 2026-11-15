@@ -4,26 +4,28 @@ The Jack Thriller acceptance run is externally substantiated through local QA,
 Taxstone Drive readback, separate Sheets reconciliation and native recap, but
 the native checkpoint has no Taxstone register receipt (`registerRows: []` is a
 DUB-specific field). External Sheets assistance does not prove native
-integration. A focused owning-layer repair is required and is being prepared
-against current main. It adds a separate Taxstone register contract and
-source/accepted-output/readback-bound receipt, native schema/duplicate/readback
-reconciliation with bounded retries and cancellation, strict completion and
-`Records` gating, and register-only recovery. DUB records remain separate;
-legacy checkpoints remain readable; REQUIREMENTS.md stays unchanged.
+integration. The owning-layer repair is implemented and submitted in PR #23.
+It adds a separate Taxstone register contract and source/accepted-output/
+readback-bound receipt, native schema/duplicate/readback reconciliation with
+bounded retries and cancellation, strict completion and `Records` gating, and
+register-only recovery. DUB records remain separate; legacy checkpoints remain
+readable; REQUIREMENTS.md stays unchanged.
 
 Verified acceptance scope: external Taxstone processing, QA, Drive filing,
-separate register reconciliation and recap. The focused native Taxstone register
-repair is submitted locally at commit
-`8e67a1fa9955cd1dd7056f9cc1f56cfcb1f0d6d7`; 65 focused tests pass, the Release
-build and strict signature pass, and an isolated current-source preview reaches
-native `Ready` with an empty queue. No accepted job, provider object,
-historical row, production queue or source byte is changed.
+separate register reconciliation and recap. Code/test commit
+`dfbe5319e9d79274bc72e3a373cf4121a3f8a006` adds route persistence before
+external reconciliation, final package verification, safe companion handling on
+register-only failure and native Resume classification. Focused proof: 59
+tests pass. Full proof: 498 tests pass, 4 existing optional/live skips. Release
+SwiftPM/Xcode builds and strict signatures pass. Isolated current-source preview
+reaches native `Ready` with an empty queue after isolation proof; unsigned
+executable and Resources match the Release build. No accepted job, provider
+object, historical row, production queue or source byte is changed.
 
-Next lane after repair publication: review remote checks and the focused PR,
-then continue only the remaining Taxstone/native Resume and sleep/wake
-acceptance gaps. Preserve the earlier joe-automation.json mutation caveat and
-Episode 979 caveat. Do not infer platform ingestion or global production
-preservation.
+Next lane after PR #23 checks: continue only the remaining Taxstone/native
+Resume and sleep/wake acceptance gaps. Preserve the earlier joe-automation.json
+mutation caveat and Episode 979 caveat. Do not infer platform ingestion or
+global production preservation.
 
 ## Final engineering integration and candidate — 2026-11-06
 
