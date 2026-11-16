@@ -1,3 +1,71 @@
+# Taxstone register repair — final isolated reopen — 2026-11-16
+
+**REPAIR SUBMITTED — native completion and restart proof PASS.** PR #23 keeps
+Taxstone register evidence separate from DUB `registerRows`. The current patch
+adds owner-specific receipt binding, strict completion/Records gating and
+register-only recovery. It does not rerender, retranscribe or repeat provider
+writes.
+
+- Current PR worktree: `/private/tmp/joey-taxstone-pr23-20261115`, base commit
+  `22b8dd8c86286a0e16f1e47ac225b155fbb06221` plus the preserved five-file
+  repair patch. `git diff --binary` SHA-256 before documentation was
+  `7b3b6827bc5087f89932a9098a6ea593a49bc8a4a42eb7fa17a654e2bdd05a14`.
+- Focused rerun: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+  python3 Tools/run-local.py /usr/bin/swift test --filter
+  'RecoveryRegressionTests|TaxstoneRegisterCompletionTests' --scratch-path
+  /Users/frank/Library/Caches/Joey-taxstone-register-repair-20261115/SwiftScratch-final-rerun2
+  --jobs 2`; direct exit `0`; `49` executed (`40` recovery, `9` register),
+  `0` failures, `0` skips. Existing full-suite proof remains applicable:
+  `500` executed, `4` intentional skips, `0` failures.
+- Current-patch Release Xcode build: direct exit `0`, `BUILD SUCCEEDED`;
+  executable SHA-256
+  `6eb410863b9eda6d2d04fdc6f4aa2b0981226a62d79d0f29b2ca22ab2bf9218e`;
+  strict deep signature exit `0`. Preview executable SHA-256 is
+  `a7c3484659a8822f9f24d904c9a58665e196c6bcda980e929bbf5494001697e7`.
+  After removing signatures from task-owned copies, the preview executable
+  SHA-256 is `43c8149d616fdb61304c775336e2eb03984f9da408644c42a18d93b808da0ae1`,
+  byte-identical to the Release executable; Resources manifests are
+  byte-identical. Preview changes are bundle metadata and ad-hoc signing only.
+- Taxstone job copied into task-owned runtime:
+  `taxstone-eabaa7d6b2f610c35b5f8714`. Source is
+  `soundcloud:200921906`; state `COMPLETED`; `26/26` QA; `26/26` Drive
+  receipts; `taxstoneRegisterEvidence.rows=26`; DUB `registerRows=[]` remains
+  intentionally empty. The original accepted package and external receipt
+  remain untouched.
+- Isolated preview bundle ID:
+  `devplaceholder.C88ISLGM.JoeyTaxstoneRegisterRepairPR23Current`.
+  Deny-by-default task profile:
+  `/Users/frank/Library/Caches/Joey-taxstone-register-repair-20261115/native-pr23-current-20261115a/isolation.sb`,
+  SHA-256 `190d48eed302aa0ccd5a60971cdbc6841624e0807fa5dba704a2cf185173833c`.
+  Valid probe receipt:
+  `/Users/frank/Library/Caches/Joey-taxstone-register-repair-20261115/native-pr23-current-20261115a/probe-result-v5.json`,
+  SHA-256 `76202cbfeaff509b93f32c29b053fab332d5f4db278bac333f3fd19ded510b0e`.
+  Task-root creation and atomic settings save passed; production runtime,
+  Keychain, rclone, CloudStorage, outside writes, network and DNS denied.
+- Native first launch and post-restart evidence:
+  `/Users/frank/Library/Caches/Joey-taxstone-register-repair-20261115/native-pr23-current-20261115a/native-run4.png`
+  SHA-256 `ff00d0e1b8978b17eed9aa1fc2fb5d76b8d68990d65f4478d14894fd4e5f9659`,
+  accessibility SHA-256
+  `c8e8bfab3abb582c3c9a138affad296a43d2a5609b1a111d98235357d1694e62`;
+  post-restart screenshot
+  `native-run5.png` SHA-256
+  `1c006d16c35eda2a3ceb6d56093b4899cfbd4bd14e6ace7009cfc20ca9305d20`,
+  accessibility SHA-256
+  `c8e8bfab3abb582c3c9a138affad296a43d2a5609b1a111d98235357d1694e62`.
+  Both targeted the preview bundle and showed `Ready`, Process, The Jack
+  Thriller Episode feat, `Completed`, `Delivery verified`, `QA · 26/26 clips`,
+  `Drive · 26/26 clips verified` and a verified Records checkmark.
+- Protected job tree hash manifest had `113` files before and after restart;
+  hashes were unchanged. Preview quit and relaunch used the same executable,
+  profile, task-owned `HOME`/`CFFIXED_USER_HOME`/`TMPDIR`, Metal-disabled
+  rendering flags and `JOEY_NETWORK_DENIED_PREVIEW=1`. Installed Joey remained
+  a separate process. No provider write, production queue change, installation
+  or deployment occurred.
+- The three-blocker repair remains separately submitted as PR #24. Its durable
+  profile renderer and corrected preview behavior are documented in that PR;
+  live YouTube discovery remains untested by design. Earlier production
+  mutation uncertainty and unresolved Episode 979 remain in force.
+
 # Native Taxstone register completion audit — 2026-11-15
 
 **REPAIR SUBMITTED — native register path gap repaired and verified locally.** The

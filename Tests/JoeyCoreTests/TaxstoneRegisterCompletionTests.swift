@@ -141,6 +141,28 @@ final class TaxstoneRegisterCompletionTests: XCTestCase {
         XCTAssertEqual(rows,before)
     }
 
+    func testTaxstoneDerivativeIDsSeparateFullShowAndHighlightPackages() throws {
+        let root = try workspace(); defer {try? FileManager.default.removeItem(at:root)}
+        let full = try validJob(root:root)
+        let fullValues = try Records.taxstoneRegisterValues(job:full,clip:full.clips[0])
+
+        var highlightA = full
+        highlightA.id = "taxstone-highlight-a"
+        highlightA.request.mode = .highlights
+        let highlightAValues = try Records.taxstoneRegisterValues(job:highlightA,clip:highlightA.clips[0])
+
+        var highlightB = highlightA
+        highlightB.id = "taxstone-highlight-b"
+        let highlightBValues = try Records.taxstoneRegisterValues(job:highlightB,clip:highlightB.clips[0])
+
+        XCTAssertTrue(fullValues[TaxstoneRegisterContract.derivativeIDColumn].hasSuffix("_JOEY_FULLSHOW"))
+        XCTAssertNotEqual(fullValues[TaxstoneRegisterContract.derivativeIDColumn],
+                          highlightAValues[TaxstoneRegisterContract.derivativeIDColumn])
+        XCTAssertNotEqual(highlightAValues[TaxstoneRegisterContract.derivativeIDColumn],
+                          highlightBValues[TaxstoneRegisterContract.derivativeIDColumn])
+        XCTAssertTrue(highlightAValues[TaxstoneRegisterContract.derivativeIDColumn].contains("HIGHLIGHTS_taxstone-highlight-a"))
+    }
+
     private func workspace() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("joey-taxstone-register-"+UUID().uuidString)
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)

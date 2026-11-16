@@ -604,20 +604,40 @@ public struct JobRecord: Codable, Identifiable, Sendable {
     /// completed checkpoint can use this predicate to reconcile a missing
     /// Taxstone receipt without rerendering or retranscribing accepted work.
     public var hasRequiredPackageEvidence: Bool {
+        guard let source else {return false}
+        let expected = Set(Records.companionNames(source:source))
+        guard Set(companions.keys) == expected else {return false}
+        return hasRequiredPackageEvidence(companionNames:expected)
+    }
+
+    /// Register-only recovery may have saved one final companion before the
+    /// other final companion upload was interrupted. Accepted clips and
+    /// non-final package inputs remain valid; both final companions must be
+    /// regenerated and read back before completion.
+    public var hasRequiredPackageEvidenceBeforeFinalCompanions: Bool {
+        guard let source else {return false}
+        let expected = Set(Records.companionNames(source:source))
+        let final = Set(["clip_manifest.json","RECONCILE.md"])
+        guard Set(companions.keys).subtracting(expected).isEmpty,
+              expected.subtracting(final).isSubset(of:Set(companions.keys)) else {return false}
+        return hasRequiredPackageEvidence(companionNames:expected.subtracting(final))
+    }
+
+    private func hasRequiredPackageEvidence(companionNames: Set<String>) -> Bool {
         guard !clips.isEmpty, unavailableTranscriptFeatures.isEmpty,
               (try? validateAcceptedPlan()) != nil,
               verifiedDriveClipCount == clips.count,let source,let folderID,
               let destination = try? DestinationResolver.resolve(source:source,request:request,asset:.clip),
               Set(clips.compactMap { $0.drive?.id }).count == clips.count,
-              Set(companions.keys) == Set(Records.companionNames(source:source)),
               let transcript,
-              (try? transcript.validate(sourceID:source.id,sha256:source.sha256,duration:source.duration)) != nil else {return false}
-        let receipts = clips.compactMap(\.drive) + Array(companions.values)
+              (try? transcript.validate(sourceID:source.id,sha256:source.sha256,duration:source.duration)) != nil,
+              companionNames.allSatisfy({companions[$0] != nil}) else {return false}
+        let receipts = clips.compactMap(\.drive) + companionNames.compactMap {companions[$0]}
         return Set(receipts.map(\.id)).count == receipts.count && receipts.allSatisfy {
             !$0.id.isEmpty && $0.parent == folderID && $0.destination == destination &&
             $0.bytes > 0 && $0.sha256.count == 64 && $0.md5?.count == 32 &&
             !$0.permissions.isEmpty && $0.permissionFingerprint?.count == 64
-        } && companions.allSatisfy {$0.key == $0.value.name}
+        } && companionNames.allSatisfy {companions[$0]?.name == $0}
     }
 
     public var verifiedTaxstoneRegisterRowCount: Int {

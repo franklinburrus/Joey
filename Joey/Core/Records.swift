@@ -67,9 +67,11 @@ public enum Records {
             transcriptEvidence = "LOCAL:source-bound transcript in job checkpoint"
         }
         let runID = "joey-taxstone-\(job.id)"
+        let packageIdentity = job.request.mode == .fullShow ? "FULLSHOW" :
+            "HIGHLIGHTS_"+Persistence.safeName(job.id)
         let values: [String:String] = [
             "Clip #":String(clip.id),
-            "Derivative ID":String(format:"taxstone-%@-C%02d_JOEY_FULLSHOW",episodeID,clip.id),
+            "Derivative ID":String(format:"taxstone-%@-C%02d_JOEY_%@",episodeID,clip.id,packageIdentity),
             "Friendly Title":clip.title,
             "Episode":source.title,
             "Episode ID":episodeID,

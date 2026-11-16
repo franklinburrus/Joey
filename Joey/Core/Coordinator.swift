@@ -264,7 +264,8 @@ public actor Coordinator {
         // checkpoints retain the existing guard and never present green.
         let reopenAttempt = job.state == .completed || job.completionReconciliationRequired == true
         let taxstoneNeedsReconciliation = request.owner == .taxstone && reopenAttempt &&
-            job.hasRequiredPackageEvidence && !job.hasRequiredCompletionEvidence
+            ((job.hasRequiredPackageEvidence && !job.hasRequiredCompletionEvidence) ||
+             (job.completionReconciliationRequired == true && job.hasRequiredPackageEvidenceBeforeFinalCompanions))
         let reopeningCompleted = reopenAttempt && !taxstoneNeedsReconciliation
         var sourceValidationSnapshot = job
         var validatingSource = false
@@ -272,10 +273,17 @@ public actor Coordinator {
         do {
             if taxstoneNeedsReconciliation {
                 try renewCapabilityEvidence(requireCurrent:true)
-                guard job.hasRequiredPackageEvidence else {
+                let packageReady = job.hasRequiredPackageEvidence
+                guard packageReady || job.hasRequiredPackageEvidenceBeforeFinalCompanions else {
                     throw JoeyError.failed("Completed Taxstone checkpoint lacks package evidence; register reconciliation skipped")
                 }
-                try Records.validateSavedManifest(job:job,directory:dir)
+                if job.completionReconciliationRequired == true {
+                    try job.validateAcceptedPlan()
+                } else if packageReady {
+                    try Records.validateSavedManifest(job:job,directory:dir)
+                } else {
+                    try job.validateAcceptedPlan()
+                }
                 let delivery: any CoordinatorDelivery = try Self.deliveryOverride ?? DriveDelivery(remote:config.rcloneRemote)
                 // Persist the recovery route before any externally visible
                 // transition. A termination after this checkpoint must resume
