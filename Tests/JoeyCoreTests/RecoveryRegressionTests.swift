@@ -630,6 +630,7 @@ final class RecoveryRegressionTests: XCTestCase {
         receipt.sha256 = try Integrity.sha256(manifest)
         saved.companions[manifest.lastPathComponent] = receipt
         try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let preservedManifestBytes = try Data(contentsOf:manifest)
         let provider = RecoveryDelivery()
 
         for _ in 0..<2 {
@@ -640,6 +641,8 @@ final class RecoveryRegressionTests: XCTestCase {
             XCTAssertTrue(result.completionReconciliationRequired == true)
             XCTAssertNil(result.completionManifestValidated)
             XCTAssertTrue(result.error?.contains("Saved manifest disagrees") == true,result.error ?? "")
+            XCTAssertEqual(try Data(contentsOf:manifest),preservedManifestBytes,
+                "A rejected manifest must remain byte-identical across recovery retries")
             let calls = await provider.calls
             XCTAssertEqual(calls,0)
         }
