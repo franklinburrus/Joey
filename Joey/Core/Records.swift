@@ -122,7 +122,8 @@ public enum Records {
               source.id.hasPrefix("soundcloud:"), source.kind == .audio, source.hasAudio,
               source.sha256.count == 64,
               job.request.expectedSourceSHA256 == nil || job.request.expectedSourceSHA256 == source.sha256,
-              job.request.archiveReference == source.archiveReference,
+              archiveID(job.request.archiveReference) != nil,
+              archiveID(job.request.archiveReference) == archiveID(source.archiveReference),
               let folderID = job.folderID, job.hasRequiredPackageEvidence else {
             throw JoeyError.failed("Only a completed, package-verified Taxstone Full Show checkpoint without register evidence can adopt a readback")
         }
@@ -315,7 +316,7 @@ public enum Records {
         return (column,row)
     }
 
-    private static func archiveID(_ reference: String?) -> String? {
+    public static func archiveID(_ reference: String?) -> String? {
         guard let reference, let url = URL(string:reference) else {return reference}
         let components = url.path.split(separator:"/").map(String.init)
         if let index = components.firstIndex(of:"d"), components.count > index + 1 {

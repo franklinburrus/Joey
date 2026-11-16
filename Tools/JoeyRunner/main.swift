@@ -91,7 +91,8 @@ import Darwin
                       source.id.hasPrefix("soundcloud:"),source.kind == .audio,source.hasAudio,
                       source.sha256.count == 64,
                       job.request.expectedSourceSHA256 == nil || job.request.expectedSourceSHA256 == source.sha256,
-                      job.request.archiveReference == source.archiveReference,
+                      let requestArchiveID = Records.archiveID(job.request.archiveReference),
+                      requestArchiveID == Records.archiveID(source.archiveReference),
                       job.folderID != nil,job.hasRequiredPackageEvidence else {
                     throw JoeyError.failed("Selected checkpoint is not a package-verified Taxstone Full Show without pending register reconciliation")
                 }

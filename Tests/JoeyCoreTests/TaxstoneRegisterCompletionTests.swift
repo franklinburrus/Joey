@@ -201,6 +201,10 @@ final class TaxstoneRegisterCompletionTests: XCTestCase {
         let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
         let job = try adoptionFixture(root:root)
         let original = try externalReadback(for:job)
+        var mismatchedArchive = job
+        mismatchedArchive.request.archiveReference = "https://drive.google.com/file/d/other-archive/view"
+        XCTAssertThrowsError(try Records.adoptTaxstoneRegisterEvidence(job:mismatchedArchive,
+            receiptData:original.receipt,readbackData:original.readback))
         for mutation in 0..<7 {
             var receipt = original.receipt, readback = original.readback
             switch mutation {
@@ -258,6 +262,7 @@ final class TaxstoneRegisterCompletionTests: XCTestCase {
         job.source!.sha256 = hash
         job.source!.kind = .audio
         job.source!.hasAudio = true
+        job.request.archiveReference = "https://drive.google.com/file/d/archive-source/view?usp=drivesdk"
         job.transcript!.sourceSHA256 = hash
         let destination = try DestinationResolver.resolve(source:job.source!,request:job.request,asset:.clip)
         for index in job.clips.indices {
