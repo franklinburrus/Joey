@@ -4,7 +4,7 @@ public enum Records {
     /// Cached companion absence is not evidence that a verified remote object
     /// disappeared. When the manifest is present, its receipt and acceptance
     /// inputs must agree before the completed fast path can reuse it offline.
-    static func validateSavedManifest(job: JobRecord, directory: URL) throws {
+    public static func validateSavedManifest(job: JobRecord, directory: URL) throws {
         let url = directory.appendingPathComponent("clip_manifest.json")
         guard FileManager.default.fileExists(atPath:url.path) else {return}
         guard let receipt = job.companions[url.lastPathComponent],
