@@ -250,6 +250,27 @@ final class TaxstoneRegisterCompletionTests: XCTestCase {
         XCTAssertThrowsError(try Records.adoptTaxstoneRegisterEvidence(job:changedArchive,receiptData:original.receipt,readbackData:original.readback))
     }
 
+    func testExternalReadbackAdoptionPadsSheetsTrailingBlankCells() throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        let job = try adoptionFixture(root:root)
+        let original = try externalReadback(for:job)
+        var receipt = try JSONSerialization.jsonObject(with:original.receipt) as! [String:Any]
+        receipt["updatedRange"] = "Master!A3:AA3"
+        receipt["sourceRowsAfterWrite"] = 2
+        var readback = try JSONSerialization.jsonObject(with:original.readback) as! [String:Any]
+        readback["range"] = "Master!A1:AA3"
+        var values = readback["values"] as! [[String]]
+        var historicalRow = Array(repeating:"",count:TaxstoneRegisterContract.headers.count-1)
+        historicalRow[0] = "326"
+        values.insert(historicalRow,at:1)
+        readback["values"] = values
+
+        let evidence = try Records.adoptTaxstoneRegisterEvidence(job:job,
+            receiptData:JSONSerialization.data(withJSONObject:receipt),
+            readbackData:JSONSerialization.data(withJSONObject:readback))
+        XCTAssertEqual(evidence.rows.map(\.rowNumber),[3])
+    }
+
     private func adoptionFixture(root:URL) throws -> JobRecord {
         var job = try validJob(root:root)
         job.taxstoneRegisterEvidence = nil

@@ -172,15 +172,18 @@ public enum Records {
             throw JoeyError.failed("Taxstone register readback range or row data is incomplete")
         }
         let values = try rawRows.map { row -> [String] in
-            guard row.count == TaxstoneRegisterContract.headers.count else {
+            guard row.count <= TaxstoneRegisterContract.headers.count else {
                 throw JoeyError.failed("Taxstone register readback row has the wrong schema width")
             }
-            return try row.map { cell in
+            var normalized = try row.map { cell in
                 if cell is NSNull {return ""}
                 if let text = cell as? String {return text}
                 if let number = cell as? NSNumber {return number.stringValue}
                 throw JoeyError.failed("Taxstone register readback contains an unsupported cell value")
             }
+            // Sheets omits trailing empty cells from returned row arrays.
+            normalized.append(contentsOf:repeatElement("",count:TaxstoneRegisterContract.headers.count-normalized.count))
+            return normalized
         }
         guard values.first == TaxstoneRegisterContract.headers else {
             throw JoeyError.failed("Taxstone register readback schema changed; no evidence adopted")
