@@ -454,7 +454,8 @@ final class RecoveryRegressionTests: XCTestCase {
             job.taxstoneRegisterEvidence = TaxstoneRegisterEvidence(spreadsheetID:TaxstoneRegisterContract.spreadsheetID,
                 tab:TaxstoneRegisterContract.tab,sourceID:job.source!.id,sourceSHA256:job.source!.sha256,
                 folderID:receipt.parent,schema:TaxstoneRegisterContract.headers,rows:[row],rowsReadBack:1,
-                sourceRowsAfterWrite:1,readbackDigest:TaxstoneRegisterContract.readbackDigest([row]),observedAt:Date())
+                sourceRowsAfterWrite:1,readbackDigest:TaxstoneRegisterContract.readbackDigest([row]),observedAt:Date(),
+                provenance:.nativeReconciliation)
         }
         job.state = .completed;job.stage = "complete"
         try Persistence.save(job.transcript,to:directory.appendingPathComponent("transcript.json"))
@@ -1293,7 +1294,8 @@ private actor RecoveryDelivery: CoordinatorDelivery {
             tab:TaxstoneRegisterContract.tab,sourceID:job.source!.id,sourceSHA256:job.source!.sha256,
             folderID:job.folderID!,schema:TaxstoneRegisterContract.headers,rows:rows,
             rowsReadBack:rows.count,sourceRowsAfterWrite:rows.count,
-            readbackDigest:TaxstoneRegisterContract.readbackDigest(rows),observedAt:Date())
+            readbackDigest:TaxstoneRegisterContract.readbackDigest(rows),observedAt:Date(),
+            provenance:.nativeReconciliation)
     }
     func upload(_ local: URL, name: String?, parent: String, destination: FilingDestination, replaceCompanion: Bool) async throws -> DriveReceipt {
         calls += 1

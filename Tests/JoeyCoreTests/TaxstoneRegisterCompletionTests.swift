@@ -163,6 +163,150 @@ final class TaxstoneRegisterCompletionTests: XCTestCase {
         XCTAssertTrue(highlightAValues[TaxstoneRegisterContract.derivativeIDColumn].contains("HIGHLIGHTS_taxstone-highlight-a"))
     }
 
+    func testAdoptedExternalReadbackBindsOriginalJobAndReopensWithoutProviderWrites() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var job = try adoptionFixture(root:root)
+        let input = try externalReadback(for:job)
+        let evidence = try Records.adoptTaxstoneRegisterEvidence(job:job,receiptData:input.receipt,readbackData:input.readback)
+        XCTAssertEqual(evidence.rows.count,1)
+        XCTAssertEqual(evidence.rows[0].driveID,job.clips[0].drive?.id)
+        XCTAssertEqual(evidence.provenance?.kind,.adoptedExternalReadback)
+        XCTAssertEqual(evidence.provenance?.externalRunID,"joey-taxstone-acceptance-20261115")
+        XCTAssertEqual(evidence.provenance?.archiveSHA256,job.source?.sha256)
+
+        job.taxstoneRegisterEvidence = evidence
+        XCTAssertTrue(job.hasRequiredCompletionEvidence)
+        XCTAssertTrue(JobPresentation(job:job).completed)
+        XCTAssertEqual(JobPresentation(job:job).recordStatus,
+            "Verified from prior external readback; Joey did not perform the original write.")
+
+        let jobDirectory = root.appendingPathComponent("jobs/\(job.id)",isDirectory:true)
+        try FileManager.default.createDirectory(at:jobDirectory,withIntermediateDirectories:true)
+        let acceptedFile = URL(fileURLWithPath:job.source!.path).deletingLastPathComponent().appendingPathComponent(job.clips[0].filename)
+        try FileManager.default.copyItem(at:acceptedFile,
+            to:jobDirectory.appendingPathComponent(job.clips[0].filename))
+        // Missing cache media does not invalidate verified Drive/register evidence.
+        try FileManager.default.removeItem(at:jobDirectory.appendingPathComponent(job.clips[0].filename))
+        XCTAssertEqual(JobPresentation(job:job,runtimeRoot:root).localPlaybackMessage,
+            "Local playback unavailable for 1 of 1 clips; verified Drive copies remain available.")
+        try Persistence.save(job,to:jobDirectory.appendingPathComponent("job.json"))
+        let before = try Data(contentsOf:jobDirectory.appendingPathComponent("job.json"))
+        let reopened = try await Coordinator(root:root).run(job.request)
+        XCTAssertTrue(reopened.hasRequiredCompletionEvidence)
+        XCTAssertEqual(reopened.taxstoneRegisterEvidence?.provenance,evidence.provenance)
+        XCTAssertEqual(try Data(contentsOf:jobDirectory.appendingPathComponent("job.json")),before)
+    }
+
+    func testExternalReadbackAdoptionRejectsMismatchedJobSourceArchiveAndRows() throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        let job = try adoptionFixture(root:root)
+        let original = try externalReadback(for:job)
+        for mutation in 0..<7 {
+            var receipt = original.receipt, readback = original.readback
+            switch mutation {
+            case 0:
+                var object = try JSONSerialization.jsonObject(with:receipt) as! [String:Any]
+                object["jobID"] = "other-job"
+                receipt = try JSONSerialization.data(withJSONObject:object)
+            case 1:
+                var object = try JSONSerialization.jsonObject(with:receipt) as! [String:Any]
+                object["sourceID"] = "soundcloud:other-source"
+                receipt = try JSONSerialization.data(withJSONObject:object)
+            case 2:
+                var object = try JSONSerialization.jsonObject(with:receipt) as! [String:Any]
+                object["folderID"] = "other-folder"
+                receipt = try JSONSerialization.data(withJSONObject:object)
+            case 3:
+                var object = try JSONSerialization.jsonObject(with:readback) as! [String:Any]
+                var values = object["values"] as! [[String]]
+                values[1][TaxstoneRegisterContract.sourceClipIDColumn] = "other-drive"
+                object["values"] = values
+                readback = try JSONSerialization.data(withJSONObject:object)
+            case 4:
+                var object = try JSONSerialization.jsonObject(with:readback) as! [String:Any]
+                var values = object["values"] as! [[String]]
+                values[1][TaxstoneRegisterContract.parentSourceColumn] = "other-archive"
+                object["values"] = values
+                readback = try JSONSerialization.data(withJSONObject:object)
+            case 5:
+                var object = try JSONSerialization.jsonObject(with:receipt) as! [String:Any]
+                object["publication"] = true
+                receipt = try JSONSerialization.data(withJSONObject:object)
+            default:
+                var object = try JSONSerialization.jsonObject(with:readback) as! [String:Any]
+                object["range"] = "Master!A1:Z2"
+                readback = try JSONSerialization.data(withJSONObject:object)
+            }
+            XCTAssertThrowsError(try Records.adoptTaxstoneRegisterEvidence(job:job,receiptData:receipt,readbackData:readback),
+                "mutation \(mutation) must be rejected")
+        }
+
+        var changedArchive = job
+        try Data("changed archive".utf8).write(to:URL(fileURLWithPath:job.source!.path),options:.atomic)
+        XCTAssertThrowsError(try Records.adoptTaxstoneRegisterEvidence(job:changedArchive,receiptData:original.receipt,readbackData:original.readback))
+    }
+
+    private func adoptionFixture(root:URL) throws -> JobRecord {
+        var job = try validJob(root:root)
+        let sourceURL = root.appendingPathComponent("2015-04-15__fixture-200921906__fixture-taxstone.mp3")
+        try Data("synthetic accepted archive bytes".utf8).write(to:sourceURL)
+        let hash = try Integrity.sha256(sourceURL)
+        job.request.expectedSourceSHA256 = hash
+        job.source!.path = sourceURL.path
+        job.source!.bytes = Int64(try Data(contentsOf:sourceURL).count)
+        job.source!.sha256 = hash
+        job.source!.kind = .audio
+        job.source!.hasAudio = true
+        job.transcript!.sourceSHA256 = hash
+        job.acceptedPlanSHA256 = try job.acceptancePlanHash()
+        return job
+    }
+
+    private func externalReadback(for job:JobRecord) throws -> (receipt:Data,readback:Data) {
+        let source = try XCTUnwrap(job.source)
+        let clip = try XCTUnwrap(job.clips.first)
+        let drive = try XCTUnwrap(clip.drive)
+        let episodeID = source.id.replacingOccurrences(of:"soundcloud:",with:"")
+        let sourceFilename = "2015-04-15__\(episodeID)__fixture-taxstone.mp3"
+        let headers = TaxstoneRegisterContract.headers
+        var row = Dictionary(uniqueKeysWithValues:headers.map {($0,"")})
+        row["Clip #"] = "327"
+        row["Derivative ID"] = String(format:"taxstone-%@-C%02d_JOEY_FULLSHOW",episodeID,clip.id)
+        row["Friendly Title"] = source.title+" — "+clip.title
+        row["Episode"] = source.title
+        row["Episode ID"] = episodeID
+        row["Episode Date"] = source.episodeDate ?? ""
+        row["Parent Source Drive File ID"] = "archive-source"
+        row["Source Filename"] = sourceFilename
+        row["Start"] = "0"
+        row["End"] = "10"
+        row["Duration"] = "10"
+        row["Transcript Status"] = "COMPLETE_TIMESTAMPED_LOCAL_EVIDENCE"
+        let transcriptName = try XCTUnwrap(Records.companionNames(source:source).first {$0.hasSuffix(" — Full Transcript.txt")})
+        let transcript = try XCTUnwrap(job.companions[transcriptName])
+        row["Transcript Evidence / File ID"] = "DRIVE:\(transcript.id); SHA-256:\(transcript.sha256)"
+        row["Source Clip File ID"] = drive.id
+        row["Technical Status"] = "PASS"
+        row["Duplicate Status"] = "NEW_PACKAGE; HISTORICAL_SOURCE_ROWS_PRESERVED"
+        row["Title Status"] = "PASS"
+        row["Manifest Status"] = "VERIFIED_CLIP_MANIFEST"
+        row["QA Status"] = "PASS"
+        row["READY_FOR_BUFFER"] = "YES"
+        row["Review / Exception Reason"] = "One Full Show package; no social publication or scheduling authorized."
+        row["Delivery Status"] = "FILED_NOT_PUBLISHED"
+        row["Last Updated"] = "2026-11-15T19:05:33Z"
+        row["Run ID"] = "joey-taxstone-acceptance-20261115"
+        row["Control Center Job ID"] = job.id
+        let rowValues = headers.map {row[$0] ?? ""}
+        let receipt:[String:Any] = ["schemaVersion":1,"observedAt":"2026-11-15T19:06:54Z","jobID":job.id,
+            "sourceID":source.id,"folderID":job.folderID!,"spreadsheetId":TaxstoneRegisterContract.spreadsheetID,
+            "tab":TaxstoneRegisterContract.tab,"updatedRange":"Master!A2:AA2","rowsReadBack":1,
+            "sourceRowsAfterWrite":1,"exactRowsMatch":true,"newDriveIDsUnique":true,"publication":false,"scheduling":false]
+        let readback:[String:Any] = ["range":"Master!A1:AA2","majorDimension":"ROWS","values":[headers,rowValues]]
+        return (try JSONSerialization.data(withJSONObject:receipt,options:[.sortedKeys]),
+                try JSONSerialization.data(withJSONObject:readback,options:[.sortedKeys]))
+    }
+
     private func workspace() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("joey-taxstone-register-"+UUID().uuidString)
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
@@ -207,7 +351,8 @@ final class TaxstoneRegisterCompletionTests: XCTestCase {
             values:values,rowDigest:TaxstoneRegisterContract.rowDigest(values))
         job.taxstoneRegisterEvidence = TaxstoneRegisterEvidence(spreadsheetID:TaxstoneRegisterContract.spreadsheetID,tab:"Master",
             sourceID:source.id,sourceSHA256:source.sha256,folderID:job.folderID!,schema:TaxstoneRegisterContract.headers,
-            rows:[row],rowsReadBack:1,sourceRowsAfterWrite:1,readbackDigest:TaxstoneRegisterContract.readbackDigest([row]),observedAt:Date())
+            rows:[row],rowsReadBack:1,sourceRowsAfterWrite:1,readbackDigest:TaxstoneRegisterContract.readbackDigest([row]),observedAt:Date(),
+            provenance:.nativeReconciliation)
         job.acceptedPlanSHA256 = try job.acceptancePlanHash()
         job.state = .completed; job.stage = "complete"
         return job

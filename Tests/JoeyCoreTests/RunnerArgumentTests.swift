@@ -11,7 +11,11 @@ final class RunnerArgumentTests: XCTestCase {
             ["taxstone-run", "--limit", "0"], ["taxstone-run", "--limit", "-1"],
             ["taxstone-run", "--limit", "999999999999999999999999999"],
             ["taxstone-run", "--limit", "1", "--limit", "2"],
-            ["run"], ["run", "one.json", "two.json"], ["unknown"]
+            ["run"], ["run", "one.json", "two.json"], ["unknown"],
+            ["taxstone-adopt-register-evidence"],
+            ["taxstone-adopt-register-evidence", "--job-id", "../job", "--receipt", "receipt.json", "--readback", "readback.json"],
+            ["taxstone-adopt-register-evidence", "--job-id", "job", "--receipt", "receipt.json"],
+            ["list", "--job-id", "job", "--receipt", "receipt.json", "--readback", "readback.json"]
         ] {
             XCTAssertThrowsError(try RunnerArguments(arguments), arguments.joined(separator: " "))
         }
@@ -29,6 +33,13 @@ final class RunnerArgumentTests: XCTestCase {
         let defaults = try RunnerArguments(["list"])
         XCTAssertEqual(defaults.root, Persistence.defaultRoot)
         XCTAssertNil(defaults.request)
+        let adoption = try RunnerArguments(["taxstone-adopt-register-evidence","--root","/tmp/Joey Runtime",
+            "--job-id","taxstone-fixture","--receipt","/tmp/receipt.json","--readback","/tmp/readback.json","--apply"])
+        XCTAssertEqual(adoption.command,.taxstoneRegisterAdopt)
+        XCTAssertEqual(adoption.jobID,"taxstone-fixture")
+        XCTAssertEqual(adoption.receipt?.path,"/tmp/receipt.json")
+        XCTAssertEqual(adoption.readback?.path,"/tmp/readback.json")
+        XCTAssertTrue(adoption.applyMigration)
     }
 
     func testMalformedOptionsFailBeforeOpeningRuntime() throws {

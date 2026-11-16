@@ -495,6 +495,44 @@ public struct TaxstoneRegisterEvidence: Codable, Equatable, Sendable {
     public var sourceRowsAfterWrite: Int
     public var readbackDigest: String
     public var observedAt: Date
+    /// Historical register evidence can be adopted from a preserved external
+    /// receipt. Its provenance must remain visible and bound after reopening.
+    public var provenance: TaxstoneRegisterEvidenceProvenance?
+}
+
+public struct TaxstoneRegisterEvidenceProvenance: Codable, Equatable, Sendable {
+    public enum Kind: String, Codable, Equatable, Sendable {
+        case nativeReconciliation
+        case adoptedExternalReadback
+    }
+
+    public var kind: Kind
+    public var receiptSHA256: String?
+    public var readbackSHA256: String?
+    public var archiveSHA256: String?
+    public var externalRunID: String?
+    public var updatedRange: String?
+    public var readbackRange: String?
+    public var observedAt: Date?
+
+    public static var nativeReconciliation: Self {
+        Self(kind:.nativeReconciliation,receiptSHA256:nil,readbackSHA256:nil,archiveSHA256:nil,
+            externalRunID:nil,updatedRange:nil,readbackRange:nil,observedAt:nil)
+    }
+
+    public var isWellFormed: Bool {
+        switch kind {
+        case .nativeReconciliation:
+            return receiptSHA256 == nil && readbackSHA256 == nil && archiveSHA256 == nil &&
+                externalRunID == nil && updatedRange == nil && readbackRange == nil && observedAt == nil
+        case .adoptedExternalReadback:
+            return [receiptSHA256,readbackSHA256,archiveSHA256].allSatisfy {
+                guard let value = $0 else {return false}
+                return value.count == 64 && value.allSatisfy {"0123456789abcdef".contains($0)}
+            } && externalRunID?.isEmpty == false && updatedRange?.isEmpty == false &&
+                readbackRange?.isEmpty == false && observedAt != nil
+        }
+    }
 }
 
 public struct JobRecord: Codable, Identifiable, Sendable {
@@ -575,6 +613,7 @@ public struct JobRecord: Codable, Identifiable, Sendable {
     private var hasBoundTaxstoneRegisterEvidence: Bool {
         guard request.owner == .taxstone, registerRows.isEmpty,
               let evidence = taxstoneRegisterEvidence,
+              let provenance = evidence.provenance, provenance.isWellFormed,
               let source, let folderID,
               evidence.spreadsheetID == TaxstoneRegisterContract.spreadsheetID,
               evidence.tab == TaxstoneRegisterContract.tab,
@@ -586,10 +625,14 @@ public struct JobRecord: Codable, Identifiable, Sendable {
               evidence.rowsReadBack == clips.count,
               evidence.sourceRowsAfterWrite >= clips.count,
               evidence.readbackDigest == TaxstoneRegisterContract.readbackDigest(evidence.rows) else {return false}
+        if provenance.kind == .adoptedExternalReadback && provenance.archiveSHA256 != source.sha256 {return false}
         let expectedEpisodeID = source.id.replacingOccurrences(of:"soundcloud:",with:"")
         let groupedRows = Dictionary(grouping:evidence.rows,by:\.clipID)
         guard groupedRows.count == clips.count, groupedRows.values.allSatisfy({$0.count == 1}),
-              Set(evidence.rows.map(\.rowNumber)).count == clips.count else {return false}
+              Set(evidence.rows.map(\.rowNumber)).count == clips.count,
+              Set(evidence.rows.map(\.driveID)).count == clips.count,
+              Set(evidence.rows.map { $0.values.indices.contains(TaxstoneRegisterContract.derivativeIDColumn) ? $0.values[TaxstoneRegisterContract.derivativeIDColumn] : "" }).count == clips.count,
+              Set(evidence.rows.map { $0.values.indices.contains(0) ? $0.values[0] : "" }).count == clips.count else {return false}
         for clip in clips {
             guard let row = groupedRows[clip.id]?.first, row.rowNumber >= 2,
                   let drive = clip.drive, let hash = clip.sha256, let bytes = clip.bytes,
@@ -601,6 +644,13 @@ public struct JobRecord: Codable, Identifiable, Sendable {
                   row.values[TaxstoneRegisterContract.sourceClipIDColumn] == drive.id,
                   row.values[TaxstoneRegisterContract.jobIDColumn] == id,
                   row.rowDigest == TaxstoneRegisterContract.rowDigest(row.values) else {return false}
+            if provenance.kind == .nativeReconciliation {
+                guard row.values == expectedValues else {return false}
+            } else if !Records.validatesAdoptedTaxstoneRegisterRow(job:self,clip:clip,values:row.values,
+                                                                    externalRunID:provenance.externalRunID,
+                                                                    observedAt:provenance.observedAt) {
+                return false
+            }
         }
         return true
     }

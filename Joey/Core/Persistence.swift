@@ -4,6 +4,9 @@ import Darwin
 
 public enum Integrity {
     public static func sha256(_ url: URL) throws -> String { try digest(url, md5: false) }
+    public static func sha256(_ data: Data) -> String {
+        SHA256.hash(data:data).map {String(format:"%02x",$0)}.joined()
+    }
     public static func md5(_ url: URL) throws -> String { try digest(url, md5: true) }
     private static func digest(_ url: URL, md5: Bool) throws -> String {
         let handle = try FileHandle(forReadingFrom: url); defer { try? handle.close() }

@@ -207,7 +207,8 @@ private final class TaxstoneInventoryFixture: @unchecked Sendable {
             job.taxstoneRegisterEvidence = TaxstoneRegisterEvidence(spreadsheetID:TaxstoneRegisterContract.spreadsheetID,
                 tab:TaxstoneRegisterContract.tab,sourceID:source.id,sourceSHA256:source.sha256,
                 folderID:folder,schema:TaxstoneRegisterContract.headers,rows:[row],rowsReadBack:1,
-                sourceRowsAfterWrite:1,readbackDigest:TaxstoneRegisterContract.readbackDigest([row]),observedAt:Date())
+                sourceRowsAfterWrite:1,readbackDigest:TaxstoneRegisterContract.readbackDigest([row]),observedAt:Date(),
+                provenance:.nativeReconciliation)
             job.state = .completed
             XCTAssertTrue(job.hasRequiredCompletionEvidence)
         } else {job.state = .qaPassed;job.stage = "delivery"}

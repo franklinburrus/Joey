@@ -495,7 +495,7 @@ public actor DriveDelivery {
             throw JoeyError.failed("Companion replacement rolled back; previous remote object preserved: \(filename)")
         }
     }
-    private func verify(id: String, local: URL, parent: String, name: String, sha: String, md5: String, bytes: Int64,
+    func verify(id: String, local: URL?, parent: String, name: String, sha: String, md5: String, bytes: Int64,
                         destination: FilingDestination?, expectedPermissions: String) async throws -> DriveReceipt {
         if let destination {_ = try await verifyLocation(parent:parent,destination:destination)}
         let value = try await metadata(id)
@@ -504,13 +504,17 @@ public actor DriveDelivery {
               value["trashed"] as? Bool == false, (value["parents"] as? [String]) == [parent],
               Int64(value["size"] as? String ?? "") == bytes, value["md5Checksum"] as? String == md5,
               matches.count == 1,matches.first?["id"] as? String == id,
-              try Integrity.sha256(local) == sha,
               try Self.permissionFingerprint(value) == expectedPermissions,
               let link = value["webViewLink"] as? String,let permissions = value["permissions"] as? [[String:Any]] else {
             throw JoeyError.failed("Independent Drive ID/name/parent/size/checksum/permissions/duplicate readback failed: \(id)")
         }
+        if let local {
+            guard try Integrity.sha256(local) == sha else {throw JoeyError.failed("Local accepted bytes differ from saved Drive receipt: \(name)")}
+        }
         // Filename/size/MD5 are never enough. Prefer provider SHA-256; otherwise
-        // require an authenticated full-content download comparison.
+        // require an authenticated full-content download comparison. Missing
+        // local cache bytes do not invalidate an independently verified remote
+        // object and are never restored or overwritten by this read-only check.
         if let remoteSHA = value["sha256Checksum"] as? String, !remoteSHA.isEmpty {
             guard remoteSHA == sha else {throw JoeyError.failed("Independent Drive SHA-256 mismatch: \(id)")}
         } else {
@@ -536,7 +540,10 @@ public actor DriveDelivery {
         let destination = try DestinationResolver.resolve(source:source,request:job.request,asset:.clip)
         for receipt in job.clips.compactMap(\.drive) + Array(job.companions.values) {
             guard let md5 = receipt.md5,let fingerprint = receipt.permissionFingerprint else {throw JoeyError.failed("Saved filing receipt lacks integrity/access proof: \(receipt.id)")}
-            _ = try await verify(id:receipt.id,local:directory.appendingPathComponent(receipt.name),parent:folder,
+            let localURL = directory.appendingPathComponent(receipt.name)
+            let values = try? localURL.resourceValues(forKeys:[.isRegularFileKey,.isSymbolicLinkKey])
+            let local = values?.isRegularFile == true && values?.isSymbolicLink != true ? localURL : nil
+            _ = try await verify(id:receipt.id,local:local,parent:folder,
                 name:receipt.name,sha:receipt.sha256,md5:md5,bytes:receipt.bytes,destination:destination,expectedPermissions:fingerprint)
         }
         let names = try await children(folder).compactMap {$0["name"] as? String}
@@ -752,7 +759,8 @@ public actor DriveDelivery {
         return TaxstoneRegisterEvidence(spreadsheetID:Self.taxstoneMasterSheet,tab:Self.taxstoneRegisterTab,
             sourceID:source.id,sourceSHA256:source.sha256,folderID:folderID,schema:TaxstoneRegisterContract.headers,
             rows:ordered,rowsReadBack:ordered.count,sourceRowsAfterWrite:sourceRowsAfterWrite,
-            readbackDigest:TaxstoneRegisterContract.readbackDigest(ordered),observedAt:Date())
+            readbackDigest:TaxstoneRegisterContract.readbackDigest(ordered),observedAt:Date(),
+            provenance:.nativeReconciliation)
     }
 
     public func reconcileRegister(job: JobRecord, tab: String) async throws -> [String] {
