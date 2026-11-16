@@ -638,14 +638,13 @@ public struct JobRecord: Codable, Identifiable, Sendable {
                   let drive = clip.drive, let hash = clip.sha256, let bytes = clip.bytes,
                   row.driveID == drive.id, row.clipSHA256 == hash, row.clipBytes == bytes,
                   row.values.count == TaxstoneRegisterContract.headers.count,
-                  let expectedValues = try? Records.taxstoneRegisterValues(job:self,clip:clip),
-                  row.values == expectedValues,
                   row.values[TaxstoneRegisterContract.episodeIDColumn] == expectedEpisodeID,
                   row.values[TaxstoneRegisterContract.sourceClipIDColumn] == drive.id,
                   row.values[TaxstoneRegisterContract.jobIDColumn] == id,
                   row.rowDigest == TaxstoneRegisterContract.rowDigest(row.values) else {return false}
             if provenance.kind == .nativeReconciliation {
-                guard row.values == expectedValues else {return false}
+                guard let expectedValues = try? Records.taxstoneRegisterValues(job:self,clip:clip),
+                      row.values == expectedValues else {return false}
             } else if !Records.validatesAdoptedTaxstoneRegisterRow(job:self,clip:clip,values:row.values,
                                                                     externalRunID:provenance.externalRunID,
                                                                     observedAt:provenance.observedAt) {

@@ -259,7 +259,19 @@ final class TaxstoneRegisterCompletionTests: XCTestCase {
         job.source!.kind = .audio
         job.source!.hasAudio = true
         job.transcript!.sourceSHA256 = hash
+        let destination = try DestinationResolver.resolve(source:job.source!,request:job.request,asset:.clip)
+        for index in job.clips.indices {
+            job.clips[index].drive?.destination = destination
+        }
+        for name in Array(job.companions.keys) {
+            job.companions[name]?.destination = destination
+        }
         job.acceptedPlanSHA256 = try job.acceptancePlanHash()
+        XCTAssertTrue(job.unavailableTranscriptFeatures.isEmpty)
+        XCTAssertNoThrow(try job.validateAcceptedPlan())
+        XCTAssertEqual(job.verifiedDriveClipCount,job.clips.count)
+        XCTAssertEqual(Set(job.companions.keys),Set(Records.companionNames(source:job.source!)))
+        XCTAssertTrue(job.hasRequiredPackageEvidence,"Adoption fixture must preserve valid package evidence without register evidence")
         return job
     }
 
