@@ -84,6 +84,26 @@ import Darwin
                 let receiptData = try readEvidence(receiptURL)
                 let readbackData = try readEvidence(readbackURL)
                 let receiptHash = Integrity.sha256(receiptData),readbackHash = Integrity.sha256(readbackData)
+                guard job.request.owner == .taxstone,job.request.mode == .fullShow,job.request.fileToDrive,
+                      job.state == .completed,job.completionReconciliationRequired != true,
+                      job.registerRows.isEmpty,let source = job.source,source.owner == .taxstone,
+                      source.id == job.request.sourceID,source.title == job.request.title,
+                      source.id.hasPrefix("soundcloud:"),source.kind == .audio,source.hasAudio,
+                      source.sha256.count == 64,
+                      job.request.expectedSourceSHA256 == nil || job.request.expectedSourceSHA256 == source.sha256,
+                      job.request.archiveReference == source.archiveReference,
+                      job.folderID != nil,job.hasRequiredPackageEvidence else {
+                    throw JoeyError.failed("Selected checkpoint is not a package-verified Taxstone Full Show without pending register reconciliation")
+                }
+                let copiedSource = jobDirectory.appendingPathComponent(URL(fileURLWithPath:source.path).lastPathComponent)
+                let copiedSourceValues = try copiedSource.resourceValues(forKeys:[.isRegularFileKey,.isSymbolicLinkKey,.fileSizeKey])
+                guard copiedSourceValues.isRegularFile == true,copiedSourceValues.isSymbolicLink != true,
+                      let copiedBytes = copiedSourceValues.fileSize,Int64(copiedBytes) == source.bytes,
+                      try Integrity.sha256(copiedSource) == source.sha256 else {
+                    throw JoeyError.failed("Task/runtime job copy lacks the verified accepted archive; no migration applied")
+                }
+                job.source!.path = copiedSource.path
+                try Records.validateSavedManifest(job:job,directory:jobDirectory)
                 if let current = job.taxstoneRegisterEvidence {
                     guard job.hasRequiredCompletionEvidence,
                           current.provenance?.kind == .adoptedExternalReadback,
@@ -94,15 +114,6 @@ import Darwin
                     print("Taxstone register evidence already adopted and validated; no files changed.")
                     return
                 }
-                guard let source = job.source else {throw JoeyError.failed("Taxstone accepted source is missing")}
-                let copiedSource = jobDirectory.appendingPathComponent(URL(fileURLWithPath:source.path).lastPathComponent)
-                let copiedSourceValues = try copiedSource.resourceValues(forKeys:[.isRegularFileKey,.isSymbolicLinkKey,.fileSizeKey])
-                guard copiedSourceValues.isRegularFile == true,copiedSourceValues.isSymbolicLink != true,
-                      let copiedBytes = copiedSourceValues.fileSize,Int64(copiedBytes) == source.bytes,
-                      try Integrity.sha256(copiedSource) == source.sha256 else {
-                    throw JoeyError.failed("Task/runtime job copy lacks the verified accepted archive; no migration applied")
-                }
-                job.source!.path = copiedSource.path
                 let evidence = try Records.adoptTaxstoneRegisterEvidence(job:job,receiptData:receiptData,readbackData:readbackData)
                 job.taxstoneRegisterEvidence = evidence
                 guard job.hasRequiredCompletionEvidence,job.registerRows.isEmpty else {
