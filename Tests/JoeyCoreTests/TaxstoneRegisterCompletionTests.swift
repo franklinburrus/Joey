@@ -241,13 +241,14 @@ final class TaxstoneRegisterCompletionTests: XCTestCase {
                 "mutation \(mutation) must be rejected")
         }
 
-        var changedArchive = job
+        let changedArchive = job
         try Data("changed archive".utf8).write(to:URL(fileURLWithPath:job.source!.path),options:.atomic)
         XCTAssertThrowsError(try Records.adoptTaxstoneRegisterEvidence(job:changedArchive,receiptData:original.receipt,readbackData:original.readback))
     }
 
     private func adoptionFixture(root:URL) throws -> JobRecord {
         var job = try validJob(root:root)
+        job.taxstoneRegisterEvidence = nil
         let sourceURL = root.appendingPathComponent("2015-04-15__fixture-200921906__fixture-taxstone.mp3")
         try Data("synthetic accepted archive bytes".utf8).write(to:sourceURL)
         let hash = try Integrity.sha256(sourceURL)
