@@ -613,6 +613,37 @@ final class RecoveryRegressionTests: XCTestCase {
         XCTAssertTrue(recovered.hasRequiredCompletionEvidence)
     }
 
+    func testTaxstoneManifestValidationFailureRemainsBlockedAcrossRetries() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.owner = .taxstone; request.fileToDrive = true
+        var (saved,directory) = try completed(request,root:root)
+        saved.taxstoneRegisterEvidence = nil
+        var conflicting = saved
+        conflicting.clips[0].title = "Conflicting manifest"
+        _ = try Records.write(job:conflicting,directory:directory)
+        let manifest = directory.appendingPathComponent("clip_manifest.json")
+        var receipt = try XCTUnwrap(saved.companions[manifest.lastPathComponent])
+        receipt.bytes = Int64(try Data(contentsOf:manifest).count)
+        receipt.md5 = try Integrity.md5(manifest)
+        receipt.sha256 = try Integrity.sha256(manifest)
+        saved.companions[manifest.lastPathComponent] = receipt
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let provider = RecoveryDelivery()
+
+        for _ in 0..<2 {
+            let result = try await Coordinator.$deliveryOverride.withValue(provider) {
+                try await Coordinator(root:root).run(request)
+            }
+            XCTAssertNotEqual(result.state,.completed)
+            XCTAssertTrue(result.completionReconciliationRequired == true)
+            XCTAssertNil(result.completionManifestValidated)
+            XCTAssertTrue(result.error?.contains("Saved manifest disagrees") == true,result.error ?? "")
+            let calls = await provider.calls
+            XCTAssertEqual(calls,0)
+        }
+    }
+
     func testInterruptedTaxstoneFinalCompanionRecoveryRetriesWithoutProcessing() async throws {
         let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
         var request = try Fixtures.request(dir:root,path:"unused")

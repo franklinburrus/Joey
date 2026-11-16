@@ -1,3 +1,35 @@
+# Taxstone register repair — manifest retry guard verification — 2026-11-16
+
+## Manifest validation retry guard
+
+`Coordinator` persists `completionReconciliationRequired` for a Taxstone
+register-only retry, but now persists `completionManifestValidated` only after
+the saved manifest or accepted plan passes. A missing/changed/mismatched
+manifest therefore fails the same validation again after restart; it cannot be
+treated as an interrupted final-companion write. The valid interrupted-
+companion path retains its passed marker and remains register-only.
+
+Focused command:
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+python3 Tools/run-local.py /usr/bin/swift test \
+  --filter 'RecoveryRegressionTests|TaxstoneRegisterCompletionTests' \
+  --scratch-path /Users/frank/Library/Caches/Joey-taxstone-register-repair-20261115/SwiftScratch-final-rerun5 \
+  --jobs 2
+```
+
+Direct exit `0`; `50` executed, `0` failures, `0` skips. The new regression
+reuses a package-valid Taxstone checkpoint with a conflicting manifest, retries
+twice, observes the same rejection, preserves the marker and performs zero
+provider calls. Existing valid receipt/reopen and interrupted final-companion
+tests also pass.
+
+Release Xcode build after this code/test change returned exit `0`
+(`BUILD SUCCEEDED`). Executable SHA-256:
+`9ee26fdb2328a0cb379d5f6ce4e58839e7f937908f5da99b892e1509397f500e`.
+`codesign --verify --deep --strict` returned exit `0`.
+
 # Taxstone register repair — current-patch and restart verification — 2026-11-16
 
 ## Source, tests and build

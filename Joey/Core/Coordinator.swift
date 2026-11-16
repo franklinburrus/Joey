@@ -277,13 +277,14 @@ public actor Coordinator {
                 guard packageReady || job.hasRequiredPackageEvidenceBeforeFinalCompanions else {
                     throw JoeyError.failed("Completed Taxstone checkpoint lacks package evidence; register reconciliation skipped")
                 }
-                if job.completionReconciliationRequired == true {
+                if job.completionManifestValidated == true {
                     try job.validateAcceptedPlan()
                 } else if packageReady {
                     try Records.validateSavedManifest(job:job,directory:dir)
                 } else {
                     try job.validateAcceptedPlan()
                 }
+                job.completionManifestValidated = true
                 let delivery: any CoordinatorDelivery = try Self.deliveryOverride ?? DriveDelivery(remote:config.rcloneRemote)
                 // Persist the recovery route before any externally visible
                 // transition. A termination after this checkpoint must resume
@@ -305,7 +306,9 @@ public actor Coordinator {
                 job.stage = "final Drive package verification"; try await save()
                 guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Required Taxstone register evidence is missing or incorrectly routed")}
                 try await delivery.verifyPackage(job:job,directory:dir)
-                job.state = .completed; job.stage = "complete"; job.error = nil; job.completionReconciliationRequired = nil
+                job.state = .completed; job.stage = "complete"; job.error = nil
+                job.completionReconciliationRequired = nil
+                job.completionManifestValidated = nil
                 try await save(); completedReadbackPassed = true
                 return job
             }

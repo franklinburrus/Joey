@@ -520,6 +520,11 @@ public struct JobRecord: Codable, Identifiable, Sendable {
     /// A rejected historical completion retries its evidence reconciliation
     /// without entering processing or overwriting contradictory companions.
     public var completionReconciliationRequired: Bool?
+    /// Records that the saved manifest/accepted plan passed before a
+    /// register-only retry began. A missing value is conservative: validate
+    /// the saved manifest before any reconciliation. The marker remains
+    /// backward-compatible with older checkpoints.
+    public var completionManifestValidated: Bool?
     public var storageRequiredBytes: Int64?
     public var storageWarnings: [String]?
     public var error: String?

@@ -1,3 +1,24 @@
+# Taxstone register repair — manifest retry guard — 2026-11-16
+
+**REPAIR SUBMITTED — validation-gap follow-up PASS.** A failed saved-manifest
+validation now remains a blocked Taxstone register recovery on every retry. The
+durable `completionManifestValidated` marker is set only after the saved
+manifest/accepted plan passes; interrupted final-companion recovery preserves
+the passed marker and still avoids rerendering or retranscribing. Missing,
+mismatched or unreadable manifest evidence cannot reach `COMPLETED` or
+`Records · Verified` by a later reopen.
+
+- New regression: `testTaxstoneManifestValidationFailureRemainsBlockedAcrossRetries`.
+  Focused rerun: `RecoveryRegressionTests|TaxstoneRegisterCompletionTests`,
+  direct exit `0`, `50` executed, `0` failures, `0` skips.
+- Release Xcode build after the guard: direct exit `0`, `BUILD SUCCEEDED`;
+  executable SHA-256 `9ee26fdb2328a0cb379d5f6ce4e58839e7f937908f5da99b892e1509397f500e`;
+  `codesign --verify --deep --strict` exit `0`.
+- Existing valid-receipt, stale/missing/malformed receipt, creator-separation,
+  native readback, register-only recovery and restart tests remain passing.
+- REQUIREMENTS.md unchanged. Accepted Taxstone package, source bytes, Drive
+  objects, register rows, receipts, queues and installed app untouched.
+
 # Taxstone register repair — final isolated reopen — 2026-11-16
 
 **REPAIR SUBMITTED — native completion and restart proof PASS.** PR #23 keeps
@@ -10,7 +31,7 @@ writes.
   `22b8dd8c86286a0e16f1e47ac225b155fbb06221` plus the preserved five-file
   repair patch. `git diff --binary` SHA-256 before documentation was
   `7b3b6827bc5087f89932a9098a6ea593a49bc8a4a42eb7fa17a654e2bdd05a14`.
-- Focused rerun: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+- Focused rerun before this follow-up: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
   python3 Tools/run-local.py /usr/bin/swift test --filter
   'RecoveryRegressionTests|TaxstoneRegisterCompletionTests' --scratch-path
   /Users/frank/Library/Caches/Joey-taxstone-register-repair-20261115/SwiftScratch-final-rerun2
