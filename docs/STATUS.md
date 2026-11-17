@@ -1,3 +1,133 @@
+# Taxstone register repair — manifest retry guard — 2026-11-16
+
+**REPAIR SUBMITTED — validation-gap follow-up PASS.** A failed saved-manifest
+validation now remains a blocked Taxstone register recovery on every retry. The
+durable `completionManifestValidated` marker is set only after the saved
+manifest/accepted plan passes; interrupted final-companion recovery preserves
+the passed marker and still avoids rerendering or retranscribing. Missing,
+mismatched or unreadable manifest evidence cannot reach `COMPLETED` or
+`Records · Verified` by a later reopen.
+
+- New regression: `testTaxstoneManifestValidationFailureRemainsBlockedAcrossRetries`.
+  Focused rerun: `RecoveryRegressionTests|TaxstoneRegisterCompletionTests`,
+  direct exit `0`, `50` executed, `0` failures, `0` skips.
+- Release Xcode build after the guard: direct exit `0`, `BUILD SUCCEEDED`;
+  executable SHA-256 `9ee26fdb2328a0cb379d5f6ce4e58839e7f937908f5da99b892e1509397f500e`;
+  `codesign --verify --deep --strict` exit `0`.
+- Existing valid-receipt, stale/missing/malformed receipt, creator-separation,
+  native readback, register-only recovery and restart tests remain passing.
+- REQUIREMENTS.md unchanged. Accepted Taxstone package, source bytes, Drive
+  objects, register rows, receipts, queues and installed app untouched.
+
+# Taxstone register repair — final isolated reopen — 2026-11-16
+
+**REPAIR SUBMITTED — native completion and restart proof PASS.** PR #23 keeps
+Taxstone register evidence separate from DUB `registerRows`. The current patch
+adds owner-specific receipt binding, strict completion/Records gating and
+register-only recovery. It does not rerender, retranscribe or repeat provider
+writes.
+
+- Current PR worktree: `/private/tmp/joey-taxstone-pr23-20261115`, base commit
+  `22b8dd8c86286a0e16f1e47ac225b155fbb06221` plus the preserved five-file
+  repair patch. `git diff --binary` SHA-256 before documentation was
+  `7b3b6827bc5087f89932a9098a6ea593a49bc8a4a42eb7fa17a654e2bdd05a14`.
+- Focused rerun before this follow-up: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+  python3 Tools/run-local.py /usr/bin/swift test --filter
+  'RecoveryRegressionTests|TaxstoneRegisterCompletionTests' --scratch-path
+  /Users/frank/Library/Caches/Joey-taxstone-register-repair-20261115/SwiftScratch-final-rerun2
+  --jobs 2`; direct exit `0`; `49` executed (`40` recovery, `9` register),
+  `0` failures, `0` skips. Existing full-suite proof remains applicable:
+  `500` executed, `4` intentional skips, `0` failures.
+- Current-patch Release Xcode build: direct exit `0`, `BUILD SUCCEEDED`;
+  executable SHA-256
+  `6eb410863b9eda6d2d04fdc6f4aa2b0981226a62d79d0f29b2ca22ab2bf9218e`;
+  strict deep signature exit `0`. Preview executable SHA-256 is
+  `a7c3484659a8822f9f24d904c9a58665e196c6bcda980e929bbf5494001697e7`.
+  After removing signatures from task-owned copies, the preview executable
+  SHA-256 is `43c8149d616fdb61304c775336e2eb03984f9da408644c42a18d93b808da0ae1`,
+  byte-identical to the Release executable; Resources manifests are
+  byte-identical. Preview changes are bundle metadata and ad-hoc signing only.
+- Taxstone job copied into task-owned runtime:
+  `taxstone-eabaa7d6b2f610c35b5f8714`. Source is
+  `soundcloud:200921906`; state `COMPLETED`; `26/26` QA; `26/26` Drive
+  receipts; `taxstoneRegisterEvidence.rows=26`; DUB `registerRows=[]` remains
+  intentionally empty. The original accepted package and external receipt
+  remain untouched.
+- Isolated preview bundle ID:
+  `devplaceholder.C88ISLGM.JoeyTaxstoneRegisterRepairPR23Current`.
+  Deny-by-default task profile:
+  `/Users/frank/Library/Caches/Joey-taxstone-register-repair-20261115/native-pr23-current-20261115a/isolation.sb`,
+  SHA-256 `190d48eed302aa0ccd5a60971cdbc6841624e0807fa5dba704a2cf185173833c`.
+  Valid probe receipt:
+  `/Users/frank/Library/Caches/Joey-taxstone-register-repair-20261115/native-pr23-current-20261115a/probe-result-v5.json`,
+  SHA-256 `76202cbfeaff509b93f32c29b053fab332d5f4db278bac333f3fd19ded510b0e`.
+  Task-root creation and atomic settings save passed; production runtime,
+  Keychain, rclone, CloudStorage, outside writes, network and DNS denied.
+- Native first launch and post-restart evidence:
+  `/Users/frank/Library/Caches/Joey-taxstone-register-repair-20261115/native-pr23-current-20261115a/native-run4.png`
+  SHA-256 `ff00d0e1b8978b17eed9aa1fc2fb5d76b8d68990d65f4478d14894fd4e5f9659`,
+  accessibility SHA-256
+  `c8e8bfab3abb582c3c9a138affad296a43d2a5609b1a111d98235357d1694e62`;
+  post-restart screenshot
+  `native-run5.png` SHA-256
+  `1c006d16c35eda2a3ceb6d56093b4899cfbd4bd14e6ace7009cfc20ca9305d20`,
+  accessibility SHA-256
+  `c8e8bfab3abb582c3c9a138affad296a43d2a5609b1a111d98235357d1694e62`.
+  Both targeted the preview bundle and showed `Ready`, Process, The Jack
+  Thriller Episode feat, `Completed`, `Delivery verified`, `QA · 26/26 clips`,
+  `Drive · 26/26 clips verified` and a verified Records checkmark.
+- Protected job tree hash manifest had `113` files before and after restart;
+  hashes were unchanged. Preview quit and relaunch used the same executable,
+  profile, task-owned `HOME`/`CFFIXED_USER_HOME`/`TMPDIR`, Metal-disabled
+  rendering flags and `JOEY_NETWORK_DENIED_PREVIEW=1`. Installed Joey remained
+  a separate process. No provider write, production queue change, installation
+  or deployment occurred.
+- The three-blocker repair remains separately submitted as PR #24. Its durable
+  profile renderer and corrected preview behavior are documented in that PR;
+  live YouTube discovery remains untested by design. Earlier production
+  mutation uncertainty and unresolved Episode 979 remain in force.
+
+# Native Taxstone register completion audit — 2026-11-15
+
+**REPAIR SUBMITTED — native register path gap repaired and verified locally.** The
+authorized Taxstone run completed its local processing, QA, Drive filing and
+separate Sheets readback, but Joey did not perform the Taxstone register
+reconciliation.
+The accepted job `taxstone-eabaa7d6b2f610c35b5f8714` has `registerRows: []` and no
+`taxstoneRegisterEvidence`; its native recap's `Records · Verified` was therefore
+not supported by a native receipt. The external receipt remains preserved and is
+not rewritten or promoted to native evidence.
+
+- External register assistance: `/Users/frank/Library/Caches/Joey-taxstone-acceptance-20261115/taxstone-register-receipt.json`, `Master!A328:AA353`, 26 exact rows, 29 source rows after write. This proves external reconciliation only.
+- Confirmed owning-layer gap: Taxstone used the DUB-only `registerRows` path, while completion and presentation did not require a separate bound Taxstone receipt.
+- Repair scope: separate Taxstone schema/receipt contract; source/hash, accepted clip hash/bytes, Drive IDs, row values, row numbers and readback digest binding; native schema/duplicate/readback reconciliation; completion and `Records` gating; register-only recovery without rerender or retranscription; DUB separation and legacy decoding preserved.
+- New regression proof covers valid/stale/missing/unreadable Taxstone receipts, DUB/Taxstone separation, exact-row reuse, conflicting historical-row preservation, native register readback, safe reopen and missing-register recovery without render/transcribe.
+- Follow-up fixes persist the register-only recovery route before external reconciliation, require final package verification before completion, preserve final companion receipts after register-only failure, and classify package-valid register-incomplete jobs as `RESUMABLE` for native Resume.
+- REQUIREMENTS.md unchanged. No accepted job, source bytes, Drive objects, register rows, queue or production record modified.
+- Earlier production caveat remains: `/Users/frank/Library/Application Support/Joey Native/joe-automation.json` prior bytes unavailable; do not claim global production preservation. Episode 979 remains unresolved.
+- Repair branch: `codex/taxstone-register-completion-repair-20261115`; code/test commit `dfbe5319e9d79274bc72e3a373cf4121a3f8a006`; PR #23 remains open.
+- Focused Swift proof: `59` executed, `0` failures. Full Swift proof: `498` executed, `4` skipped, `0` failures. Release SwiftPM build exit `0`; Release Xcode build exit `0`; Release executable SHA-256 `3e8706faa184a59ad789ec9382bd359b3d84e0364056574f1adfca51ffde0897`; strict deep signature exit `0`.
+- Isolated native preview proof: isolation probe passed before launch; network, production runtime, Keychain, rclone config and outside writes denied; accessibility readback shows `Ready`, `Process`, `No jobs in queue`. Preview executable SHA-256 `59c7951c3d35a47d012aa9fc999d8f7a20fd3645e5e8dc9f1bb9ffbff4277083`; unsigned executable and Resources byte-identical to Release; evidence `/Users/frank/Library/Caches/Joey-taxstone-register-repair-20261115/native-isolation-final-dfbe531/`.
+
+Evidence roots: `/Users/frank/Library/Caches/Joey-taxstone-acceptance-20261115` (accepted run) and `/Users/frank/Library/Caches/Joey-taxstone-register-repair-20261115/native-isolation-final-dfbe531` (final repair verification). Remote check readback follows push. No installed app or production runtime was used.
+
+# Taxstone Full Show acceptance — Jack Thriller — 2026-11-15
+
+**COMPLETED for the one authorized isolated native run.** Job `taxstone-eabaa7d6b2f610c35b5f8714` processed source `soundcloud:200921906`, **The Jack Thriller Episode feat**, from archived Drive file `1P8oe89GYmGitFVNUUQOSktLXYIw6Hl3P`. Source readback: `42,942,463` bytes, `3577.798667` seconds, SHA-256 `b3e41f20044aa780641984efcd16e69dd2582878c2e615c21bad9a6aba283890`. Current main: `d270de9a141c48d9190869c0a6fdddea633bfb9f`; origin `https://github.com/franklinburrus/Joey.git`; branch `main`. Installed Joey was not replaced.
+
+- Complete source-bound transcript: MLX Whisper, `1,921` segments, `0.000000–3577.798667` coverage, zero ad exclusions.
+- Full Show planning retained chronology. Shared X/Instagram `140`-second limit required `26` clips; count was source-derived. Automated QA passed `26/26`; all outputs decoded, matched source intervals/fidelity, used approved Taxstone artwork and fresh final-audio white waveform checks.
+- Read-only capability receipt: Buffer X account `JailCallwithTax` and Instagram account `thejailcallwithtaxstone`; checked `2026-11-15T17:58:21–22Z`; limits `140` seconds (X) and `900` seconds (Instagram); receipt valid through `2026-11-16T17:58:22Z`. Queues remained unchanged.
+- Drive filing completed and read back in Taxstone Clips folder `1FZXCglTrJzK_4sPsoTQS1-SFhw75ROH1`: `26` clips plus four canonical companions. IDs, parents, names, bytes, SHA-256, links and permissions read back. Permissions remained `anyone:reader`, `user:commenter`, `user:owner`.
+- Separate Taxstone register write/readback completed through the authorized Sheets connection: `Master!A328:AA353`, `26` exact rows, `29` source rows after write, unique new Drive IDs, no duplicate row. Historical outputs and rows remain distinct. Joey's `job.json` reports `registerRows: []` because its current register writer is DUB-only; this external receipt is authoritative for the external run only, not proof of native register integration.
+- Native recap evidence: screenshot [native-taxstone-completed-window.png](/Users/frank/Library/Caches/Joey-taxstone-acceptance-20261115/native-taxstone-completed-window.png), SHA-256 `b9c26f25c411ffa8e26337d3c3e9e5912220aa4a433bff8100c5df72dc477727`; accessibility readback [native-taxstone-accessibility.txt](/Users/frank/Library/Caches/Joey-taxstone-acceptance-20261115/native-taxstone-accessibility.txt), SHA-256 `0940e69c26e57099e7c8374111f23134ea293e964a9b5ff43dadf1016892bca8`; both show `Ready`, source title, `Completed`, `Delivery verified`, `QA · 26/26 clips`, `Drive · 26/26 clips verified` and `Records · Verified`. Full receipt: [native-taxstone-recap-receipt.json](/Users/frank/Library/Caches/Joey-taxstone-acceptance-20261115/native-taxstone-recap-receipt.json).
+- Isolated current-main Release preview: executable SHA-256 `b66fd3edfab6a68c8045d03e6a4c9375477b62ce76dfdf8ebe47eee6c7c1ae29`; strict deep signature exit `0`; build exit `0`. Build log and checkout readback bind it to main `d270de9a141c48d9190869c0a6fdddea633bfb9f`; no immutable source snapshot was retained. Isolation probes passed before launch: disposable home/runtime, production runtime/keychain/rclone unreadable, outside writes denied and network denied. Installed app and production queues were not used by the accepted run.
+- First completed-job detail launch crashed in macOS VisionKit/CoreImage/Metal. Retry with `CI_DISABLE_METAL=1`, `CA_DISABLE_METAL=1`, `CG_RENDERING_MODE=1` stayed alive and produced the retained recap. No Joey source change was made for this OS rendering issue.
+- No publication, scheduling or Buffer post. This proves local processing, Drive filing, separate Taxstone register reconciliation and native recap only; it does not prove platform ingestion.
+- **Production caveat:** an earlier incorrectly ordered launch inherited Frank's production home and changed `/Users/frank/Library/Application Support/Joey Native/joe-automation.json` (`b44989fa3518e984059c41171112cc3d629ef0bcb2da0b677d5b38b98588f166` current hash). Exact pre-launch bytes are unavailable. Do not claim global production preservation. Episode 979 remains unresolved.
+
+Evidence root: `/Users/frank/Library/Caches/Joey-taxstone-acceptance-20261115`. Closeout free-space measurement: `177,221,087,232` bytes available, above the recorded `13,973,550,308`-byte admission requirement. No further production processing or external write authorized by this closeout.
+
 # PR #22 merge verification — 2026-11-12
 
 **MERGED AND VERIFIED.** GitHub PR #22 (`https://github.com/franklinburrus/Joey/pull/22`) merged by the repository's established squash method. Reviewed head `a410c6e649961a21d523f8558faa9faad744ebe5`; reviewed base `b7f4ce5df656d02b17a8c2cabc74ff0d63df7da4`; resulting main commit `2ee28dead792db3febd8fa3d98e24a613e36b778`. GitHub readback reports `MERGED`; the merge tree contains the reviewed four-file repair and documentation correction.

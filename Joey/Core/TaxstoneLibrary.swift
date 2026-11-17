@@ -136,8 +136,23 @@ public actor TaxstoneLibrary {
             episode.duration = source.duration
             episode.missingSeconds = try missing(duration:source.duration,exclusions:job.exclusions.map(\.interval),accepted:accepted.map(\.intervals))
         }
-        episode.status = job.state == .completed ? "VERIFYING DELIVERY" : "RESUMABLE"
-        episode.error = job.error
+        if job.state == .completed {
+            if job.hasRequiredCompletionEvidence {
+                episode.status = "VERIFYING DELIVERY"
+                episode.error = job.error
+            } else if job.hasRequiredPackageEvidence {
+                // Taxstone register evidence is owner-specific. A historical
+                // package can be valid and safely resumable without it.
+                episode.status = "RESUMABLE"
+                episode.error = "Taxstone register evidence missing; register reconciliation required"
+            } else {
+                episode.status = "BLOCKED"
+                episode.error = "Completed Taxstone checkpoint evidence is incomplete"
+            }
+        } else {
+            episode.status = "RESUMABLE"
+            episode.error = job.error
+        }
     }
     private func libraryLock() throws -> ProcessingLock {
         let directory = root.appendingPathComponent("taxstone-assets")
@@ -304,9 +319,16 @@ public actor TaxstoneLibrary {
             episode.reuseCandidates = candidates
             if !candidates.isEmpty {episode.notes.append("\(candidates.count) legacy candidates require full source/presentation QA before adoption; candidate filenames are not acceptance evidence.")}
             let blockingError = episode.status == "BLOCKED" ? episode.error : nil
-            if let job = currentJob,job.state == .completed {
+            if let job = currentJob,job.state == .completed,episode.status != "BLOCKED" {
                 do {
-                    try await verifyDelivery(job,provider:provider);episode.status = "COMPLETED";episode.error = nil
+                    if job.hasRequiredCompletionEvidence {
+                        try await verifyDelivery(job,provider:provider);episode.status = "COMPLETED";episode.error = nil
+                    } else {
+                        // Package-valid, register-incomplete Taxstone jobs must
+                        // reach Coordinator register-only recovery on Resume.
+                        episode.status = "RESUMABLE"
+                        episode.error = "Taxstone register evidence missing; register reconciliation required"
+                    }
                 } catch {episode.status = "BLOCKED";episode.error = error.localizedDescription}
             }
             if let blockingError {episode.status = "BLOCKED";episode.error = blockingError}

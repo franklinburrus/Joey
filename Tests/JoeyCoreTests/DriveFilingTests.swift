@@ -123,6 +123,23 @@ final class DriveFilingTests: XCTestCase {
         catch {XCTAssertTrue(error.localizedDescription.contains("different bytes"))}
         XCTAssertEqual(provider.writes,1);XCTAssertEqual(provider.files,before)
     }
+    func testMissingLocalCacheUsesVerifiedRemoteBytesWithoutRestoringOrOverwriting() async throws {
+        for providerHasSHA256 in [true,false] {
+            let (dir,_,_,route,provider,delivery) = try setup()
+            let local = dir.appendingPathComponent("01_clip.mp4")
+            let receipt = try await delivery.upload(local,parent:FilingProvider.folder,destination:route)
+            try FileManager.default.removeItem(at:local)
+            provider.omitSHA256 = !providerHasSHA256
+            let verified = try await delivery.verify(id:receipt.id,local:nil,parent:receipt.parent,name:receipt.name,
+                sha:receipt.sha256,md5:try XCTUnwrap(receipt.md5),bytes:receipt.bytes,destination:route,
+                expectedPermissions:try XCTUnwrap(receipt.permissionFingerprint))
+            XCTAssertEqual(verified.id,receipt.id)
+            XCTAssertFalse(FileManager.default.fileExists(atPath:local.path),"Remote verification must not recreate cached media")
+            XCTAssertEqual(provider.writes,1,"Verification performs no Drive write")
+            XCTAssertEqual(provider.downloads,providerHasSHA256 ? 0:1,
+                "Use provider SHA-256 when available; otherwise verify a full remote download")
+        }
+    }
     func testEquivalentMediaUnderAnotherNameIsNotDuplicated() async throws {
         let (dir,_,_,route,provider,delivery) = try setup(),file = dir.appendingPathComponent("01_clip.mp4")
         _ = try await delivery.upload(file,parent:FilingProvider.folder,destination:route)

@@ -65,7 +65,8 @@ final class TaxstoneLibraryTests: XCTestCase {
         XCTAssertEqual(episode.acceptedClips,1);XCTAssertEqual(episode.missingSeconds,60)
         job.state = .completed
         try TaxstoneLibrary.reconcile(&episode,job:job,directory:root)
-        XCTAssertEqual(episode.status,"VERIFYING DELIVERY")
+        XCTAssertEqual(episode.status,"BLOCKED")
+        XCTAssertTrue(episode.error?.contains("checkpoint evidence is incomplete") == true)
         try Data("changed".utf8).write(to:output)
         XCTAssertThrowsError(try TaxstoneLibrary.reconcile(&episode,job:job,directory:root))
     }

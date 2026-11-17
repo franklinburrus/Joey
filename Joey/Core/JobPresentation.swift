@@ -4,6 +4,7 @@ import Foundation
 /// or elapsed-time estimates are invented, and no checkpoint is mutated.
 struct JobPresentation {
     let job: JobRecord
+    var runtimeRoot: URL? = nil
     static func selectedJob(in jobs: [JobRecord], id: String?) -> JobRecord? {
         jobs.first {$0.id == id} ?? jobs.first
     }
@@ -63,6 +64,13 @@ struct JobPresentation {
     var accepted: Int { job.clips.filter { $0.qa?.passed == true }.count }
     var filed: Int { job.verifiedDriveClipCount }
     var completed: Bool { job.state == .completed && job.hasRequiredCompletionEvidence }
+    var localPlaybackMessage: String? {
+        guard completed, total > 0, let runtimeRoot else {return nil}
+        let jobDirectory = runtimeRoot.appendingPathComponent("jobs/\(job.id)",isDirectory:true)
+        let missing = job.clips.filter {!FileManager.default.fileExists(atPath:jobDirectory.appendingPathComponent($0.filename).path)}.count
+        guard missing > 0 else {return nil}
+        return "Local playback unavailable for \(missing) of \(total) clips; verified Drive copies remain available."
+    }
     var deliveryStatus: String {
         guard total > 0 else {return "Required for every clip"}
         return (filed == total ? "" : "Required · ")+"\(filed)/\(total) clips verified"
@@ -140,7 +148,17 @@ struct JobPresentation {
     // The bar is explicitly clip QA, never a percentage of complete delivery.
     var clipProgress: Double? { total > 0 ? Double(accepted)/Double(total) : nil }
     var recordStatus: String {
-        if completed { return "Verified" }
+        if completed {
+            if job.request.owner == .taxstone,
+               job.taxstoneRegisterEvidence?.provenance?.kind == .adoptedExternalReadback {
+                return "Verified from prior external readback; Joey did not perform the original write."
+            }
+            if job.request.owner == .taxstone {return "Verified from native Taxstone register readback."}
+            return "Verified"
+        }
+        if job.request.owner == .taxstone {
+            return "\(job.verifiedTaxstoneRegisterRowCount)/\(total) Taxstone register rows verified"
+        }
         if DestinationResolver.requiresDUBRegister(job.request) { return "\(job.registerRows.count)/\(total) register rows verified" }
         return "\(job.companions.count)/4 companion records verified"
     }

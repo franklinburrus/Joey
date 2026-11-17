@@ -445,7 +445,18 @@ final class RecoveryRegressionTests: XCTestCase {
             var companion = job.clips[0].drive!;companion.name = name;companion.id = "synthetic_"+name
             job.companions[name] = companion
         }
-        job.registerRows = request.owner == .dub ? ["Master Library!2:\(receipt.id)"] : []
+        if request.owner == .dub {
+            job.registerRows = ["Master Library!2:\(receipt.id)"]
+        } else {
+            let values = try Records.taxstoneRegisterValues(job:job,clip:job.clips[0])
+            let row = TaxstoneRegisterRowReceipt(clipID:1,rowNumber:2,driveID:receipt.id,
+                clipSHA256:hash,clipBytes:bytes,values:values,rowDigest:TaxstoneRegisterContract.rowDigest(values))
+            job.taxstoneRegisterEvidence = TaxstoneRegisterEvidence(spreadsheetID:TaxstoneRegisterContract.spreadsheetID,
+                tab:TaxstoneRegisterContract.tab,sourceID:job.source!.id,sourceSHA256:job.source!.sha256,
+                folderID:receipt.parent,schema:TaxstoneRegisterContract.headers,rows:[row],rowsReadBack:1,
+                sourceRowsAfterWrite:1,readbackDigest:TaxstoneRegisterContract.readbackDigest([row]),observedAt:Date(),
+                provenance:.nativeReconciliation)
+        }
         job.state = .completed;job.stage = "complete"
         try Persistence.save(job.transcript,to:directory.appendingPathComponent("transcript.json"))
         try Persistence.save(job,to:directory.appendingPathComponent("job.json"))
@@ -543,6 +554,152 @@ final class RecoveryRegressionTests: XCTestCase {
             let creations = await provider.clipCreations
             XCTAssertEqual(creations,1,"Interrupted filing must not create a second media file")
         }
+    }
+
+    func testMissingTaxstoneRegisterRecoveryDoesNotRerenderOrRetranscribe() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.owner = .taxstone;request.fileToDrive = true
+        var (saved,directory) = try completed(request,root:root)
+        saved.taxstoneRegisterEvidence = nil
+        let acceptedHash = try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename))
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let provider = RecoveryDelivery()
+        let result = try await Coordinator.$deliveryOverride.withValue(provider) {
+            try await Coordinator(root:root).run(request) {job in
+                XCTAssertFalse(job.stage.hasPrefix("render clip"),"Register-only recovery must not rerender accepted media")
+                XCTAssertFalse(job.stage == "transcription","Register-only recovery must not retranscribe accepted source")
+            }
+        }
+        XCTAssertEqual(result.state,.completed,result.error ?? "")
+        XCTAssertTrue(result.hasRequiredCompletionEvidence)
+        XCTAssertEqual(try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename)),acceptedHash)
+        let downloads = await provider.downloads
+        let artworkCalls = await provider.artworkCalls
+        let clipCreations = await provider.clipCreations
+        let clipAttempts = await provider.clipAttempts
+        XCTAssertEqual(downloads,0)
+        XCTAssertEqual(artworkCalls,0)
+        XCTAssertEqual(clipCreations,0)
+        XCTAssertEqual(clipAttempts,0)
+        XCTAssertNotNil(result.taxstoneRegisterEvidence)
+    }
+
+    func testTaxstoneRegisterRecoveryRequiresFinalPackageVerificationAndPersistsRoute() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.owner = .taxstone;request.fileToDrive = true
+        var (saved,directory) = try completed(request,root:root)
+        saved.taxstoneRegisterEvidence = nil
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+
+        let failedProvider = RecoveryDelivery(filingFault:"package-verify")
+        let failed = try await Coordinator.$deliveryOverride.withValue(failedProvider) {
+            try await Coordinator(root:root).run(request)
+        }
+        XCTAssertNotEqual(failed.state,.completed)
+        XCTAssertTrue(failed.completionReconciliationRequired == true)
+        let checkpoint: JobRecord = try Persistence.load(directory.appendingPathComponent("job.json"))
+        XCTAssertTrue(checkpoint.completionReconciliationRequired == true)
+
+        let recoveredProvider = RecoveryDelivery()
+        let recovered = try await Coordinator.$deliveryOverride.withValue(recoveredProvider) {
+            try await Coordinator(root:root).run(request) {job in
+                XCTAssertFalse(job.stage.hasPrefix("render clip"),"Register-only retry must not rerender accepted media")
+                XCTAssertFalse(job.stage == "transcription","Register-only retry must not retranscribe accepted source")
+            }
+        }
+        XCTAssertEqual(recovered.state,.completed,recovered.error ?? "")
+        XCTAssertNil(recovered.completionReconciliationRequired)
+        XCTAssertTrue(recovered.hasRequiredCompletionEvidence)
+    }
+
+    func testTaxstoneManifestValidationFailureRemainsBlockedAcrossRetries() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.owner = .taxstone; request.fileToDrive = true
+        var (saved,directory) = try completed(request,root:root)
+        saved.taxstoneRegisterEvidence = nil
+        var conflicting = saved
+        conflicting.clips[0].title = "Conflicting manifest"
+        _ = try Records.write(job:conflicting,directory:directory)
+        let manifest = directory.appendingPathComponent("clip_manifest.json")
+        var receipt = try XCTUnwrap(saved.companions[manifest.lastPathComponent])
+        receipt.bytes = Int64(try Data(contentsOf:manifest).count)
+        receipt.md5 = try Integrity.md5(manifest)
+        receipt.sha256 = try Integrity.sha256(manifest)
+        saved.companions[manifest.lastPathComponent] = receipt
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let preservedManifestBytes = try Data(contentsOf:manifest)
+        let provider = RecoveryDelivery()
+
+        for _ in 0..<2 {
+            let result = try await Coordinator.$deliveryOverride.withValue(provider) {
+                try await Coordinator(root:root).run(request)
+            }
+            XCTAssertNotEqual(result.state,.completed)
+            XCTAssertTrue(result.completionReconciliationRequired == true)
+            XCTAssertNil(result.completionManifestValidated)
+            XCTAssertTrue(result.error?.contains("Saved manifest disagrees") == true,result.error ?? "")
+            XCTAssertEqual(try Data(contentsOf:manifest),preservedManifestBytes,
+                "A rejected manifest must remain byte-identical across recovery retries")
+            let calls = await provider.calls
+            XCTAssertEqual(calls,0)
+        }
+    }
+
+    func testInterruptedTaxstoneFinalCompanionRecoveryRetriesWithoutProcessing() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.owner = .taxstone;request.fileToDrive = true
+        var (saved,directory) = try completed(request,root:root)
+        saved.state = .qaPassed
+        saved.stage = "final Drive package verification"
+        saved.completionReconciliationRequired = true
+        saved.taxstoneRegisterEvidence = nil
+        let generated = try Records.write(job:saved,directory:directory)
+        for file in generated {
+            var receipt = try XCTUnwrap(saved.companions[file.lastPathComponent])
+            receipt.bytes = Int64(try Data(contentsOf:file).count)
+            receipt.md5 = try Integrity.md5(file)
+            receipt.sha256 = try Integrity.sha256(file)
+            saved.companions[file.lastPathComponent] = receipt
+        }
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let acceptedHash = try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename))
+        let failedName = "clip_manifest.json"
+        let provider = RecoveryDelivery(companionFailureName:failedName,companionFailureAfterCommit:true)
+        await provider.seed(try XCTUnwrap(saved.clips[0].drive))
+        for receipt in saved.companions.values {await provider.seed(receipt)}
+        let progress: @Sendable (JobRecord) async throws -> Void = {job in
+            XCTAssertFalse(job.stage.hasPrefix("render clip"),"Pending final-companion recovery must not rerender accepted media")
+            XCTAssertFalse(job.stage == "transcription","Pending final-companion recovery must not retranscribe accepted source")
+        }
+        let interrupted = try await Coordinator.$deliveryOverride.withValue(provider) {
+            try await Coordinator(root:root).run(request,progress:progress)
+        }
+        XCTAssertEqual(interrupted.state,.qaPassed)
+        XCTAssertTrue(interrupted.completionReconciliationRequired == true)
+        XCTAssertNotNil(interrupted.companions[failedName])
+        XCTAssertNotEqual(interrupted.companions[failedName]?.sha256,
+                          try Integrity.sha256(directory.appendingPathComponent(failedName)))
+        XCTAssertNotNil(interrupted.companions["RECONCILE.md"])
+
+        let recovered = try await Coordinator.$deliveryOverride.withValue(provider) {
+            try await Coordinator(root:root).run(request,progress:progress)
+        }
+        XCTAssertEqual(recovered.state,.completed,recovered.error ?? "")
+        XCTAssertNil(recovered.completionReconciliationRequired)
+        XCTAssertTrue(recovered.hasRequiredCompletionEvidence)
+        XCTAssertEqual(try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename)),acceptedHash)
+        let clipCreations = await provider.clipCreations
+        let clipAttempts = await provider.clipAttempts
+        let downloads = await provider.downloads
+        let artworkCalls = await provider.artworkCalls
+        XCTAssertEqual(clipCreations,0)
+        XCTAssertEqual(clipAttempts,0)
+        XCTAssertEqual(downloads,0)
+        XCTAssertEqual(artworkCalls,0)
     }
 
     func testAcceptedClipsWithoutCompanionReceiptsRecoverInterruptedCompanionsAndReopenSafely() async throws {
@@ -1106,10 +1263,17 @@ private actor RecoveryDelivery: CoordinatorDelivery {
     func verifyPackage(job: JobRecord, directory: URL) async throws {
         guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Synthetic package incomplete")}
         if filingFault == "final-readback" {throw JoeyError.failed("Synthetic final parent readback failure")}
+        if filingFault == "package-verify" {throw JoeyError.failed("Synthetic package verification failure")}
         if companionFailureName != nil {
             for receipt in job.clips.compactMap(\.drive) + Array(job.companions.values) {
-                guard committed[receipt.name] == receipt,
-                      try Integrity.sha256(directory.appendingPathComponent(receipt.name)) == receipt.sha256 else {
+                let stored = committed[receipt.name]
+                let localHash = try Integrity.sha256(directory.appendingPathComponent(receipt.name))
+                let identityMatches = stored?.id == receipt.id && stored?.name == receipt.name &&
+                    stored?.parent == receipt.parent && stored?.bytes == receipt.bytes &&
+                    stored?.sha256 == receipt.sha256 && stored?.destination == receipt.destination &&
+                    stored?.permissions == receipt.permissions &&
+                    stored?.permissionFingerprint == receipt.permissionFingerprint
+                guard identityMatches, localHash == receipt.sha256 else {
                     throw JoeyError.failed("Synthetic provider bytes differ from current package")
                 }
             }
@@ -1117,6 +1281,24 @@ private actor RecoveryDelivery: CoordinatorDelivery {
     }
     func reconcileRegister(job: JobRecord, tab: String) async throws -> [String] {
         calls += 1;return DestinationResolver.requiresDUBRegister(job.request) && filingFault != "register" ? job.clips.enumerated().map {"\(tab)!\($0.offset+2):\($0.element.drive!.id)"} : []
+    }
+    func reconcileTaxstoneRegister(job: JobRecord) async throws -> TaxstoneRegisterEvidence {
+        calls += 1
+        guard job.request.owner == .taxstone, filingFault != "register" else {
+            throw JoeyError.failed("Synthetic Taxstone register failure")
+        }
+        let rows = try job.clips.map { clip -> TaxstoneRegisterRowReceipt in
+            let values = try Records.taxstoneRegisterValues(job:job,clip:clip)
+            return TaxstoneRegisterRowReceipt(clipID:clip.id,rowNumber:clip.id+1,
+                driveID:clip.drive!.id,clipSHA256:clip.sha256!,clipBytes:clip.bytes!,values:values,
+                rowDigest:TaxstoneRegisterContract.rowDigest(values))
+        }
+        return TaxstoneRegisterEvidence(spreadsheetID:TaxstoneRegisterContract.spreadsheetID,
+            tab:TaxstoneRegisterContract.tab,sourceID:job.source!.id,sourceSHA256:job.source!.sha256,
+            folderID:job.folderID!,schema:TaxstoneRegisterContract.headers,rows:rows,
+            rowsReadBack:rows.count,sourceRowsAfterWrite:rows.count,
+            readbackDigest:TaxstoneRegisterContract.readbackDigest(rows),observedAt:Date(),
+            provenance:.nativeReconciliation)
     }
     func upload(_ local: URL, name: String?, parent: String, destination: FilingDestination, replaceCompanion: Bool) async throws -> DriveReceipt {
         calls += 1

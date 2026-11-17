@@ -1,3 +1,131 @@
+# Taxstone register repair — manifest retry guard verification — 2026-11-16
+
+## Manifest validation retry guard
+
+`Coordinator` persists `completionReconciliationRequired` for a Taxstone
+register-only retry, but now persists `completionManifestValidated` only after
+the saved manifest or accepted plan passes. A missing/changed/mismatched
+manifest therefore fails the same validation again after restart; it cannot be
+treated as an interrupted final-companion write. The valid interrupted-
+companion path retains its passed marker and remains register-only.
+
+Focused command:
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+python3 Tools/run-local.py /usr/bin/swift test \
+  --filter 'RecoveryRegressionTests|TaxstoneRegisterCompletionTests' \
+  --scratch-path /Users/frank/Library/Caches/Joey-taxstone-register-repair-20261115/SwiftScratch-final-rerun5 \
+  --jobs 2
+```
+
+Direct exit `0`; `50` executed, `0` failures, `0` skips. The new regression
+reuses a package-valid Taxstone checkpoint with a conflicting manifest, retries
+twice, observes the same rejection, preserves the marker and performs zero
+provider calls. Existing valid receipt/reopen and interrupted final-companion
+tests also pass.
+
+Release Xcode build after this code/test change returned exit `0`
+(`BUILD SUCCEEDED`). Executable SHA-256:
+`9ee26fdb2328a0cb379d5f6ce4e58839e7f937908f5da99b892e1509397f500e`.
+`codesign --verify --deep --strict` returned exit `0`.
+
+# Taxstone register repair — current-patch and restart verification — 2026-11-16
+
+## Source, tests and build
+
+- Worktree `/private/tmp/joey-taxstone-pr23-20261115` contains only the five
+  intended application/test files plus this documentation update. Base is
+  `22b8dd8c86286a0e16f1e47ac225b155fbb06221`; the preserved code/test patch
+  SHA-256 is
+  `7b3b6827bc5087f89932a9098a6ea593a49bc8a4a42eb7fa17a654e2bdd05a14`.
+- Focused command and result:
+
+  ```sh
+  DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  python3 Tools/run-local.py /usr/bin/swift test \
+    --filter 'RecoveryRegressionTests|TaxstoneRegisterCompletionTests' \
+    --scratch-path /Users/frank/Library/Caches/Joey-taxstone-register-repair-20261115/SwiftScratch-final-rerun2 \
+    --jobs 2
+  ```
+
+  Direct exit `0`; `49` executed, `0` failures, `0` skips. Recovery coverage
+  executed `40`; Taxstone register coverage executed `9`. Existing matching
+  full-suite proof remains reused: `500` executed, `4` intentional skips,
+  `0` failures. Existing warnings remain nonblocking and unchanged.
+- Current-patch Release command was the task-owned Xcode build recorded in
+  `xcodebuild-current-patch-rerun.log`; direct exit `0`, `BUILD SUCCEEDED`.
+  Release executable SHA-256:
+  `6eb410863b9eda6d2d04fdc6f4aa2b0981226a62d79d0f29b2ca22ab2bf9218e`;
+  strict deep signature exit `0`.
+
+## Preview source binding and isolation
+
+- Preview app is a task-owned copy with bundle ID
+  `devplaceholder.C88ISLGM.JoeyTaxstoneRegisterRepairPR23Current`; its signed
+  executable SHA-256 is
+  `a7c3484659a8822f9f24d904c9a58665e196c6bcda980e929bbf5494001697e7`.
+  Signature-stripped preview and Release executable copies both hash to
+  `43c8149d616fdb61304c775336e2eb03984f9da408644c42a18d93b808da0ae1`.
+  Resources manifests are byte-identical. Differences are limited to bundle
+  name/display name/identifier and ad-hoc signing.
+- Launch used the task-owned app with no secrets:
+
+  ```sh
+  python3 Tools/run-local.py /usr/bin/sandbox-exec \
+    -f <task-root>/isolation.sb /usr/bin/env -i \
+    PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin \
+    HOME=<task-root>/home CFFIXED_USER_HOME=<task-root>/home \
+    TMPDIR=<task-root>/tmp/ JOEY_NETWORK_DENIED_PREVIEW=1 \
+    CI_DISABLE_METAL=1 CA_DISABLE_METAL=1 CG_RENDERING_MODE=1 \
+    <task-root>/Joey Taxstone Register Repair PR23 Current.app/Contents/MacOS/Joey
+  ```
+
+  Task profile SHA-256:
+  `190d48eed302aa0ccd5a60971cdbc6841624e0807fa5dba704a2cf185173833c`.
+  Valid probe receipt SHA-256:
+  `76202cbfeaff509b93f32c29b053fab332d5f4db278bac333f3fd19ded510b0e`.
+  Task-root creation and atomic settings save passed. Production runtime read
+  and write, Keychain, rclone, CloudStorage, outside writes, network and DNS
+  were denied before launch and remained denied after restart.
+- The app loaded the copied accepted job without provider access:
+  `taxstone-eabaa7d6b2f610c35b5f8714`, Taxstone, source
+  `soundcloud:200921906`, `COMPLETED`, `26` clips, `26` QA passes, `26` Drive
+  receipts, and `26` bound Taxstone register rows. DUB `registerRows` remains
+  empty by creator separation.
+
+## Native recap and restart
+
+- First observable preview capture: `native-run4.png`, SHA-256
+  `ff00d0e1b8978b17eed9aa1fc2fb5d76b8d68990d65f4478d14894fd4e5f9659`;
+  accessibility SHA-256
+  `c8e8bfab3abb582c3c9a138affad296a43d2a5609b1a111d98235357d1694e62`.
+- Preview quit by its bundle ID. The protected job manifest contained `113`
+  files. Relaunch used the same source-bound executable, profile and task
+  paths. Post-restart capture: `native-run5.png`, SHA-256
+  `1c006d16c35eda2a3ceb6d56093b4899cfbd4bd14e6ace7009cfc20ca9305d20`;
+  accessibility SHA-256
+  `c8e8bfab3abb582c3c9a138affad296a43d2a5609b1a111d98235357d1694e62`.
+  Before/after hashes for all `113` job files were identical.
+- Both accessibility readbacks targeted the preview bundle and showed `Ready`,
+  `Process`, The Jack Thriller Episode feat, `Completed`, `Delivery verified`,
+  `QA · 26/26 clips`, `Drive · 26/26 clips verified`, source `original.mp3`,
+  duration `0:59:38`, and the Records verified checkmark. This is native
+  reopen/recap evidence, not a new processing or provider-write run.
+
+## Scope limits
+
+The three-blocker repair is PR #24 and carries the durable parameterized
+profile renderer plus the combined storage/settings/network verification. Its
+retained profile `/tmp/joey-three-blockers-profile.sb` has SHA-256
+`12970f1b81d6f1c4af75e7b932ae8a44701d6abc21c2614c9ae241d1767451b2`; the
+current hardened v2 profile has SHA-256
+`0e0d42a431d8b957e62493fbec4fdfb78edde2a562087b2ff7166015b5d15253`.
+`JOEY_NETWORK_DENIED_PREVIEW=1` changes messaging only; it does not grant
+network access, alter queues or bypass completion checks. Live YouTube
+discovery remains untested. No installed app, provider write, publication,
+scheduling, deletion, queue change or F4 change occurred.
+
 # PR #18 merged and closed — 2026-11-07
 
 Current GitHub review readback found no inline comments or review threads, completed code/security reviews and no code findings for exact head f83b270482c04c362253d7a30cc1f27999cd6ff1. Main is unprotected with no rulesets, and there are no check runs. No code correction was required. An explicit expected-head merge closed PR #18 at 2026-11-07T21:35:18Z with merge commit e38fe8af2d991afde242e853ea6ad455282773e8.

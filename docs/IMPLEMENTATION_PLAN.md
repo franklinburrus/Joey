@@ -1,3 +1,32 @@
+## Native Taxstone register completion repair — 2026-11-15
+
+The Jack Thriller acceptance run is externally substantiated through local QA,
+Taxstone Drive readback, separate Sheets reconciliation and native recap, but
+the native checkpoint has no Taxstone register receipt (`registerRows: []` is a
+DUB-specific field). External Sheets assistance does not prove native
+integration. The owning-layer repair is implemented and submitted in PR #23.
+It adds a separate Taxstone register contract and source/accepted-output/
+readback-bound receipt, native schema/duplicate/readback reconciliation with
+bounded retries and cancellation, strict completion and `Records` gating, and
+register-only recovery. DUB records remain separate; legacy checkpoints remain
+readable; REQUIREMENTS.md stays unchanged.
+
+Verified acceptance scope: external Taxstone processing, QA, Drive filing,
+separate register reconciliation and recap. Code/test commit
+`dfbe5319e9d79274bc72e3a373cf4121a3f8a006` adds route persistence before
+external reconciliation, final package verification, safe companion handling on
+register-only failure and native Resume classification. Focused proof: 59
+tests pass. Full proof: 498 tests pass, 4 existing optional/live skips. Release
+SwiftPM/Xcode builds and strict signatures pass. Isolated current-source preview
+reaches native `Ready` with an empty queue after isolation proof; unsigned
+executable and Resources match the Release build. No accepted job, provider
+object, historical row, production queue or source byte is changed.
+
+Next lane after PR #23 checks: continue only the remaining Taxstone/native
+Resume and sleep/wake acceptance gaps. Preserve the earlier joe-automation.json
+mutation caveat and Episode 979 caveat. Do not infer platform ingestion or
+global production preservation.
+
 ## Final engineering integration and candidate — 2026-11-06
 
 Frank's current instruction supersedes the earlier PR-only merge hold: PR #15 is now merged ordinarily as `093aa5bb47ebda345746ebc5d2fe7d5d0656fbb5`. The exact repaired application tree passes fresh full Swift (454 passed, 4 intentional skips, 0 failed), Python (22 passed), Debug/Release builds, strict signatures and independent review. No further source modification or requirement change was needed. All 12 drift dispositions remain valid. The standalone Release candidate is copied, signed, independently hash-verified and natively observed with isolated history. Exact commands/evidence and limits are in the leading VERIFICATION section.
@@ -67,7 +96,7 @@ The nil-directory `Processes.run` crash is repaired at its owning assignment in 
 - [x] Audit scope, architecture, functionality, verification and priorities; correct current documentation freshness and precedence. Detailed findings and critical-path evidence are in the leading STATUS section.
 - [x] Observe the selected completed native-video recap in the actual installed application. Verify saved Workflow, source/results, clip timings/checks and links; navigate away and back without starting processing. The former unavailable-native-recap blocker is closed.
 - [x] Complete one authorized DUB audio source through installed-native intake or verified-original reuse, source-bound transcription, planning, rendering, QA/coverage, exact Drive filing, required register/companion verification and saved recap. Pocket Watching is the verified run; its receipt, audit and limits are recorded in the current STATUS checkpoint. The existing two 15-second renderer cases remain historical supporting evidence only.
-- [ ] Next functional task: complete one authorized Taxstone audio source through native intake or verified-original reuse, source-bound transcription, episode-matched artwork, planning, rendering, QA/coverage, exact Taxstone Drive filing, separate Taxstone record/readback and saved recap. Selected candidate: **The Jack Thriller Episode feat** (`soundcloud:200921906`, archive `1P8oe89GYmGitFVNUUQOSktLXYIw6Hl3P`). Coexistence with historical clips, folders, publication evidence and records is approved; preserve them and keep any new package distinct. Historical `PREP_ONLY` labels are stale labels, not proof of absent delivery. Source-use, Taxstone processing and external-write authority remain pending. No DUB Master Link List row is part of this lane.
+- [x] Complete one authorized Taxstone audio source through native intake or verified-original reuse, source-bound transcription, episode-matched artwork, planning, rendering, QA/coverage, exact Taxstone Drive filing, separate Taxstone record/readback and saved recap. Selected candidate: **The Jack Thriller Episode feat** (`soundcloud:200921906`, archive `1P8oe89GYmGitFVNUUQOSktLXYIw6Hl3P`). External processing and filing are verified; the separate register reconciliation was externally assisted, not performed by Joey, and the native completion/recap predicate is under focused repair. Coexistence with historical clips, folders, publication evidence and records remains approved; preserve them and keep any new package distinct. Historical `PREP_ONLY` labels are stale labels, not proof of absent delivery. No DUB Master Link List row is part of this lane.
 - [ ] Later acceptance: reconcile the remaining required Taxstone/native source-mode and recovery cases against valid existing evidence. Execute only missing proof, including direct native Resume and actual sleep/wake where still unverified; do not repeat unchanged accepted media or infer functionality from test counts. A concrete reproduced defect requires a minimal owning-layer repair and affected verification plan before implementation.
 
 The audited native-video job `dub-0bc5fc39fef657927e40715b` remains COMPLETED with its retained 48 clips, four companions and 48 required register rows; today's native recap/history observation closes that specific visual gap. No new application-code defect or unavailable dependency was established by this audit. Broader native audio acceptance remains incomplete. This is a verification gap, not authority to rebuild the product or recover every historical job.

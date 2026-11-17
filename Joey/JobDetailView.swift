@@ -13,7 +13,7 @@ struct JobDetailView: View {
     @State private var capabilityDetails: [String] = []
     @State private var expandedStage: String?
     @State private var showingAllClips = false
-    private var presentation: JobPresentation {JobPresentation(job:job)}
+    private var presentation: JobPresentation {JobPresentation(job:job,runtimeRoot:model.root)}
     private var processControls: (status: String, showsCancel: Bool, showsResume: Bool) {
         presentation.processControls(isRunning:isRunning,isCancelling:model.cancelling)
     }
@@ -25,7 +25,7 @@ struct JobDetailView: View {
         // a synthetic waveform over native video or pretend artwork is playback.
         if let source = job.source, source.kind == .nativeVideo,
            FileManager.default.fileExists(atPath:source.path) {return URL(fileURLWithPath:source.path)}
-        if let clip = job.clips.first(where:{$0.qa?.passed == true}) {
+        for clip in job.clips where clip.qa?.passed == true {
             let url = model.root.appendingPathComponent("jobs/\(job.id)/\(clip.filename)")
             if FileManager.default.fileExists(atPath:url.path) {return url}
         }
@@ -84,7 +84,8 @@ struct JobDetailView: View {
             JobPreview(url:previewURL,isAudio:job.source?.kind == .audio)
                 .aspectRatio(16.0 / 9,contentMode:.fit)
         } else {
-            Label(job.source?.kind == .audio ? "Preview after first verified clip" : "Preview unavailable",systemImage:job.source?.kind == .audio ? "waveform" : "film")
+            let title = presentation.completed ? "Local playback unavailable" : job.source?.kind == .audio ? "Preview after first verified clip" : "Preview unavailable"
+            Label(title,systemImage:job.source?.kind == .audio ? "waveform" : "film")
                 .font(JoeyTheme.font(12)).foregroundStyle(.secondary)
                 .padding(16).frame(maxWidth:.infinity,alignment:.leading)
                 .background(Color.primary.opacity(0.035),in:RoundedRectangle(cornerRadius:4))
@@ -236,6 +237,9 @@ struct JobDetailView: View {
             LabeledContent("QA passed",value:"\(presentation.accepted)/\(presentation.total)")
             LabeledContent("Drive",value:presentation.deliveryStatus)
             Text(presentation.recordStatus).foregroundStyle(.secondary)
+            if let localPlaybackMessage = presentation.localPlaybackMessage {
+                Label(localPlaybackMessage,systemImage:"info.circle").font(JoeyTheme.font(11)).foregroundStyle(.secondary)
+            }
             if let folder = job.folderID, let url = URL(string:"https://drive.google.com/drive/folders/"+folder) {
                 Link("Episode folder",destination:url)
             }

@@ -10,6 +10,8 @@ public actor DriveDelivery {
     public static let videoRoot = DriveDestination.dubVideoClips.id
     public static let audioRoot = DriveDestination.dubAudioClips.id
     public static let masterSheet = "17uhDO06vmVEz96YrUnA6aHyV5fL_3AAs3ylOjrYRLwI"
+    public static let taxstoneMasterSheet = TaxstoneRegisterContract.spreadsheetID
+    public static let taxstoneRegisterTab = TaxstoneRegisterContract.tab
     private let remote: String
     private var token: String?
     private let session: URLSession
@@ -493,7 +495,7 @@ public actor DriveDelivery {
             throw JoeyError.failed("Companion replacement rolled back; previous remote object preserved: \(filename)")
         }
     }
-    private func verify(id: String, local: URL, parent: String, name: String, sha: String, md5: String, bytes: Int64,
+    func verify(id: String, local: URL?, parent: String, name: String, sha: String, md5: String, bytes: Int64,
                         destination: FilingDestination?, expectedPermissions: String) async throws -> DriveReceipt {
         if let destination {_ = try await verifyLocation(parent:parent,destination:destination)}
         let value = try await metadata(id)
@@ -502,13 +504,17 @@ public actor DriveDelivery {
               value["trashed"] as? Bool == false, (value["parents"] as? [String]) == [parent],
               Int64(value["size"] as? String ?? "") == bytes, value["md5Checksum"] as? String == md5,
               matches.count == 1,matches.first?["id"] as? String == id,
-              try Integrity.sha256(local) == sha,
               try Self.permissionFingerprint(value) == expectedPermissions,
               let link = value["webViewLink"] as? String,let permissions = value["permissions"] as? [[String:Any]] else {
             throw JoeyError.failed("Independent Drive ID/name/parent/size/checksum/permissions/duplicate readback failed: \(id)")
         }
+        if let local {
+            guard try Integrity.sha256(local) == sha else {throw JoeyError.failed("Local accepted bytes differ from saved Drive receipt: \(name)")}
+        }
         // Filename/size/MD5 are never enough. Prefer provider SHA-256; otherwise
-        // require an authenticated full-content download comparison.
+        // require an authenticated full-content download comparison. Missing
+        // local cache bytes do not invalidate an independently verified remote
+        // object and are never restored or overwritten by this read-only check.
         if let remoteSHA = value["sha256Checksum"] as? String, !remoteSHA.isEmpty {
             guard remoteSHA == sha else {throw JoeyError.failed("Independent Drive SHA-256 mismatch: \(id)")}
         } else {
@@ -534,7 +540,10 @@ public actor DriveDelivery {
         let destination = try DestinationResolver.resolve(source:source,request:job.request,asset:.clip)
         for receipt in job.clips.compactMap(\.drive) + Array(job.companions.values) {
             guard let md5 = receipt.md5,let fingerprint = receipt.permissionFingerprint else {throw JoeyError.failed("Saved filing receipt lacks integrity/access proof: \(receipt.id)")}
-            _ = try await verify(id:receipt.id,local:directory.appendingPathComponent(receipt.name),parent:folder,
+            let localURL = directory.appendingPathComponent(receipt.name)
+            let values = try? localURL.resourceValues(forKeys:[.isRegularFileKey,.isSymbolicLinkKey])
+            let local = values?.isRegularFile == true && values?.isSymbolicLink != true ? localURL : nil
+            _ = try await verify(id:receipt.id,local:local,parent:folder,
                 name:receipt.name,sha:receipt.sha256,md5:md5,bytes:receipt.bytes,destination:destination,expectedPermissions:fingerprint)
         }
         let names = try await children(folder).compactMap {$0["name"] as? String}
@@ -609,12 +618,151 @@ public actor DriveDelivery {
         }
         return rows
     }
+
+    private func taxstoneRows(_ endpoint: String) async throws -> [[String]] {
+        let object = try await request(endpoint,sheets:true)
+        guard let raw = object["values"] as? [[Any]], let header = raw.first else {
+            throw JoeyError.dependency("Taxstone register read returned no values")
+        }
+        let rows = raw.map {row in
+            TaxstoneRegisterContract.headers.indices.map { index in
+                guard index < row.count else {return ""}
+                let value = row[index]
+                if value is NSNull {return ""}
+                if let string = value as? String {return string}
+                if let number = value as? NSNumber {return number.stringValue}
+                return String(describing:value)
+            }
+        }
+        let observedHeader = header.enumerated().map { index,value in
+            if value is NSNull {return ""}
+            if let string = value as? String {return string}
+            if let number = value as? NSNumber {return number.stringValue}
+            return String(describing:value)
+        }
+        guard observedHeader == TaxstoneRegisterContract.headers else {
+            throw JoeyError.dependency("Taxstone register schema changed; no mutation attempted")
+        }
+        return rows
+    }
     private func transientAppendFailure(_ error: Error) -> Bool {
         if let http = error as? ProviderHTTPError {return http.transient}
         guard let transport = error as? URLError else {return false}
         return [.timedOut,.networkConnectionLost,.cannotConnectToHost,.cannotFindHost,
                 .dnsLookupFailed,.notConnectedToInternet].contains(transport.code)
     }
+
+    /// Reconcile the separate Taxstone register. Every returned receipt keeps
+    /// the exact normalized row read back from Sheets and binds it to the
+    /// accepted Drive clip hash/size. Historical rows remain untouched unless
+    /// their own job and Drive identity already match this job.
+    public func reconcileTaxstoneRegister(job: JobRecord) async throws -> TaxstoneRegisterEvidence {
+        guard job.request.owner == .taxstone,
+              let source = job.source, let folderID = job.folderID,
+              !job.clips.isEmpty else {
+            throw JoeyError.invalid("Taxstone register reconciliation requires a filed Taxstone job")
+        }
+        let range = "'"+Self.taxstoneRegisterTab.replacingOccurrences(of:"'",with:"''")+"'!A1:AA"
+        let encoded = range.addingPercentEncoding(withAllowedCharacters:.urlPathAllowed)!
+        let endpoint = "spreadsheets/"+Self.taxstoneMasterSheet+"/values/"+encoded
+        let episodeID = source.id.replacingOccurrences(of:"soundcloud:",with:"")
+
+        func rowValue(_ row: [String], _ index: Int) -> String {index < row.count ? row[index] : ""}
+        func rowNumber(_ offset: Int) -> Int {offset + 1}
+        func appendRow(_ values: [String]) async throws {
+            _ = try await request(endpoint+":append",method:"POST",
+                query:["valueInputOption":"RAW","insertDataOption":"INSERT_ROWS"],
+                body:["values":[values]],sheets:true)
+        }
+        func updateRow(_ row: Int, existing: [String], values: [String]) async throws {
+            for index in TaxstoneRegisterContract.headers.indices where rowValue(existing,index) != values[index] {
+                let cell = "'"+Self.taxstoneRegisterTab.replacingOccurrences(of:"'",with:"''")+"'!"+Records.columnName(index)+String(row)
+                let path = "spreadsheets/"+Self.taxstoneMasterSheet+"/values/"+cell.addingPercentEncoding(withAllowedCharacters:.urlPathAllowed)!
+                _ = try await request(path,method:"PUT",query:["valueInputOption":"RAW"],body:["values":[[values[index]]]],sheets:true)
+            }
+        }
+
+        var receipts: [TaxstoneRegisterRowReceipt] = []
+        for clip in job.clips {
+            guard let drive = clip.drive else {throw JoeyError.failed("Cannot register unverified Taxstone clip")}
+            let values = try Records.taxstoneRegisterValues(job:job,clip:clip)
+            let digest = TaxstoneRegisterContract.rowDigest(values)
+            var appendAttempts = 0
+            var appendFailure: Error?
+            while true {
+                try Task.checkCancellation()
+                let rows = try await taxstoneRows(endpoint)
+                let driveMatches = rows.enumerated().filter { offset,row in
+                    offset > 0 && rowValue(row,TaxstoneRegisterContract.sourceClipIDColumn) == drive.id
+                }
+                let derivativeMatches = rows.enumerated().filter { offset,row in
+                    offset > 0 && rowValue(row,TaxstoneRegisterContract.derivativeIDColumn) == values[TaxstoneRegisterContract.derivativeIDColumn]
+                }
+                let jobMatches = rows.enumerated().filter { offset,row in
+                    offset > 0 && rowValue(row,TaxstoneRegisterContract.jobIDColumn) == job.id &&
+                        rowValue(row,0) == String(clip.id)
+                }
+                guard driveMatches.count <= 1, derivativeMatches.count <= 1, jobMatches.count <= 1 else {
+                    throw JoeyError.dependency("Duplicate Taxstone register identity for clip \(clip.id); no mutation attempted")
+                }
+                let candidates = Set((driveMatches+derivativeMatches+jobMatches).map {$0.offset})
+                guard candidates.count <= 1 else {
+                    throw JoeyError.dependency("Taxstone register identities disagree for clip \(clip.id); no mutation attempted")
+                }
+                if let offset = candidates.first {
+                    let existing = rows[offset]
+                    let sameSource = rowValue(existing,TaxstoneRegisterContract.episodeIDColumn) == episodeID &&
+                        rowValue(existing,TaxstoneRegisterContract.sourceClipIDColumn) == drive.id
+                    let exact = existing == values
+                    let sameCurrentJob = rowValue(existing,TaxstoneRegisterContract.jobIDColumn) == job.id
+                    guard sameSource, exact || sameCurrentJob else {
+                        throw JoeyError.dependency("Existing Taxstone register row conflicts with source or job identity; prior row preserved")
+                    }
+                    if appendAttempts > 0 && appendFailure != nil {appendFailure = nil}
+                    if !exact {
+                        try await updateRow(rowNumber(offset),existing:existing,values:values)
+                    }
+                    let fresh = try await taxstoneRows(endpoint)
+                    let found = fresh.enumerated().filter { index,row in
+                        index > 0 && rowValue(row,TaxstoneRegisterContract.sourceClipIDColumn) == drive.id
+                    }
+                    guard found.count == 1, found[0].element == values else {
+                        throw JoeyError.failed("Taxstone register row readback failed for clip \(clip.id)")
+                    }
+                    receipts.append(TaxstoneRegisterRowReceipt(clipID:clip.id,rowNumber:rowNumber(found[0].offset),
+                        driveID:drive.id,clipSHA256:clip.sha256 ?? "",clipBytes:clip.bytes ?? 0,values:found[0].element,rowDigest:digest))
+                    break
+                }
+                if appendAttempts > 0 && appendFailure == nil {
+                    throw JoeyError.failed("Taxstone register append missing from readback; no additional append attempted")
+                }
+                if let appendFailure, !transientAppendFailure(appendFailure) {throw appendFailure}
+                guard appendAttempts < 3 else {
+                    throw appendFailure ?? JoeyError.failed("Taxstone register append/readback incomplete; retry will reconcile by Drive file ID")
+                }
+                appendAttempts += 1
+                do {try await appendRow(values);appendFailure = nil}
+                catch is CancellationError {throw CancellationError()}
+                catch let error as URLError where error.code == .cancelled {throw CancellationError()}
+                catch let error as ProviderHTTPError where !error.transient {throw error}
+                catch {appendFailure = error}
+            }
+        }
+        let finalRows = try await taxstoneRows(endpoint)
+        let sourceRowsAfterWrite = finalRows.dropFirst().filter {rowValue($0,TaxstoneRegisterContract.episodeIDColumn) == episodeID}.count
+        guard receipts.count == job.clips.count,
+              Set(receipts.map(\.driveID)).count == job.clips.count,
+              sourceRowsAfterWrite >= receipts.count else {
+            throw JoeyError.failed("Taxstone register readback is incomplete; no completion evidence saved")
+        }
+        let ordered = receipts.sorted {$0.clipID < $1.clipID}
+        return TaxstoneRegisterEvidence(spreadsheetID:Self.taxstoneMasterSheet,tab:Self.taxstoneRegisterTab,
+            sourceID:source.id,sourceSHA256:source.sha256,folderID:folderID,schema:TaxstoneRegisterContract.headers,
+            rows:ordered,rowsReadBack:ordered.count,sourceRowsAfterWrite:sourceRowsAfterWrite,
+            readbackDigest:TaxstoneRegisterContract.readbackDigest(ordered),observedAt:Date(),
+            provenance:.nativeReconciliation)
+    }
+
     public func reconcileRegister(job: JobRecord, tab: String) async throws -> [String] {
         guard DestinationResolver.requiresDUBRegister(job.request) else { return [] }
         let range = "'"+tab.replacingOccurrences(of:"'",with:"''")+"'!A1:AZ"

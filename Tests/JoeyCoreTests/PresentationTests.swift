@@ -239,6 +239,17 @@ final class PresentationTests: XCTestCase {
             var receipt = job.clips[0].drive!;receipt.id = "companion_"+name;receipt.name = name
             job.companions[name] = receipt
         }
+        let rows = try job.clips.map { clip -> TaxstoneRegisterRowReceipt in
+            let values = try Records.taxstoneRegisterValues(job:job,clip:clip)
+            return TaxstoneRegisterRowReceipt(clipID:clip.id,rowNumber:clip.id+1,driveID:clip.drive!.id,
+                clipSHA256:clip.sha256!,clipBytes:clip.bytes!,values:values,
+                rowDigest:TaxstoneRegisterContract.rowDigest(values))
+        }
+        job.taxstoneRegisterEvidence = TaxstoneRegisterEvidence(spreadsheetID:TaxstoneRegisterContract.spreadsheetID,
+            tab:TaxstoneRegisterContract.tab,sourceID:job.source!.id,sourceSHA256:job.source!.sha256,
+            folderID:job.folderID!,schema:TaxstoneRegisterContract.headers,rows:rows,rowsReadBack:rows.count,
+            sourceRowsAfterWrite:rows.count,readbackDigest:TaxstoneRegisterContract.readbackDigest(rows),observedAt:Date(),
+            provenance:.nativeReconciliation)
         return job
     }
 
