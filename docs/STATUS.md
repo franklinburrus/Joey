@@ -1,3 +1,183 @@
+# PRs #23/#24 release preparation — 2026-11-17
+
+**NATIVE RELEASE CHECK PASS. Merge and installation approval pending.** No
+Joey source correction was justified for the earlier launch crash. The final
+Release candidate reached Ready under task isolation with default Metal,
+settings saved and persisted after restart, and the copied original Taxstone job
+reopened with validated records and recap. No production install, merge,
+provider write, media processing, cleanup, publication, scheduling or queue
+change occurred.
+
+- Earlier crash reports at
+  `/Users/frank/Library/Logs/DiagnosticReports/Joey-2026-11-16-120912.ips` and
+  `Joey-2026-11-16-121616.ips` identify bundle
+  `devplaceholder.C88ISLGM.Joey.TaxstonePreview20261116` and a custom
+  `FinalPR24Preview.app` path. Both abort with `EXC_CRASH` / `SIGABRT` inside
+  Apple Metal binary-archive loading, CoreImage context creation and
+  `VKCImageSubjectBaseView`. The bounded crash-window log recorded no sandbox
+  denial. The evidence does not distinguish an Apple framework/cache trigger
+  from an interaction with the older preview runtime; it does not establish a
+  Joey source defect.
+- The earlier Taxstone software-render flags were diagnostic only. They are
+  not an acceptable release configuration and do not prove installed-app
+  behavior. The current Release candidate passed without rendering overrides
+  or software-render flags, using default Metal.
+- Tested application/test source commit for PR #24 is
+  `1f2517ab7c2840ebaa8db5f9a68bc398029af0fd`, stacked on PR #23 head
+  `fd8531a42aa516f447a29b24e48ef2942389c0b4`. Release app:
+  `/Users/frank/Library/Caches/Joey-three-blockers-20261115/pr24-taxstone-native-20261116/release-preparation-20261116/FinalPersistenceFixDerivedData/Build/Products/Release/Joey.app`.
+  Bundle `devplaceholder.C88ISLGM.Joey`, version `1.0` (`1`), executable
+  SHA-256 `bdcf029281fb68979fdabe135bfe0bfe0a52ed4954c5de8bbbe942d563b5417f`;
+  strict signature verification passed.
+- Combined native restart evidence is in
+  `/Users/frank/Library/Caches/Joey-three-blockers-20261115/pr24-taxstone-native-20261116/release-preparation-20261116/native/final-persistence-fix-check-20261116/evidence/final-restart-check-20261117/`.
+  Screenshot `restart-final-ready-recap.png` and accessibility readback show
+  Ready, no warning, The Jack Thriller Episode feat, Completed, QA `26/26`,
+  Drive `26/26`, and Records Verified. They also state that the register was
+  validated from prior external readback and Joey did not perform the original
+  write. The settings readback shows the saved Light appearance after restart.
+  The settings-save check changed `automaticCleanup` from `false` to `true` in
+  the task-owned runtime; this persisted after restart. It did not change
+  production settings. The copied job SHA-256 and clip-manifest SHA-256 stayed
+  unchanged, one copied job remained available, the queue stayed empty, and
+  Joey automation stayed off.
+- PR #23 exact-head workflow `43917186973` passed on
+  `fd8531a42aa516f447a29b24e48ef2942389c0b4`: full Swift suite `505` executed,
+  `8` skipped, `0` failures; `IntegritySecurityRepairTests` `6` passed; Linux
+  helper check passed with `1` skip; Release build passed. Its `8` review
+  threads are resolved. PR #23 remains open on main commit
+  `d270de9a141c48d9190869c0a6fdddea633bfb9f`.
+- PR #24 automatic checks are absent because `.github/workflows/macos-verify.yml`
+  runs pull-request checks only for base `main`; PR #24 still targets PR #23's
+  branch. Manual workflow `44024976008`, attempt `2`, passed on exact PR #24
+  application/test source commit `1f2517ab7c2840ebaa8db5f9a68bc398029af0fd`: Swift suite `509`
+  executed, `8` skipped, `0` failures; `IntegritySecurityRepairTests` `6`
+  passed; Linux helper smoke passed with `1` skip; Release build passed.
+  Attempt `1` had one five-second helper timeout in
+  `EmailIntakeTests.testPrivateStdinReachesSupervisedChildWithEOFAndNoCaptureLeak`;
+  its focused local rerun passed `1/1` in `0.296` seconds. The workflow retry
+  is complete and green. PR #24 has `2/2` resolved review threads and a clean
+  merge state, but no PR-attached checks until it targets `main`.
+
+## Ordered merge, install and local migration plan
+
+PR #23 must merge first. PR #22 used a squash merge, the established method.
+After PR #23 merges, rebase only PR #24's commits onto new main, verify that its
+diff contains only its own repair, then retarget PR #24 to main. The workflow
+will run automatically on that base; merge PR #24 only after exact-head checks
+pass and review threads remain resolved. Frank's approval is required before
+either merge or installation.
+
+Release candidate identity and planned rollback:
+
+- Candidate: the signed Release app above, executable SHA-256
+  `bdcf029281fb68979fdabe135bfe0bfe0a52ed4954c5de8bbbe942d563b5417f`.
+- Current installed app: `/Users/frank/Applications/Joey Native.app`, executable
+  SHA-256 `6693a26f5b94a5d27ac7e06c8ddb4bf359ae0c0f44a5c4f67d798819ba2a9994`.
+- Proposed app rollback path:
+  `/Users/frank/Applications/Joey Rollbacks/2026-11-17-before-taxstone-register-release/Joey Native.app`.
+  Before installation, snapshot current settings, app preferences, queues and
+  job identities. Restore the prior app and only changed mutable state on
+  rollback; keep the accepted package and its evidence.
+- Original accepted job source:
+  `/Users/frank/Library/Caches/Joey-taxstone-acceptance-20261115/runtime/jobs/taxstone-eabaa7d6b2f610c35b5f8714`.
+  Intended local destination:
+  `/Users/frank/Library/Application Support/Joey Native/jobs/taxstone-eabaa7d6b2f610c35b5f8714`, currently absent.
+  The source job allocates `8,526,839,808` bytes. Available space was
+  `16,902,131,712` bytes against the `13,973,550,308`-byte reserve. A regular
+  copy would breach reserve by `5,598,258,404` bytes. Source and destination
+  are on the same APFS device; use an APFS clone only, then recheck free space
+  and the complete file manifest. If clone support or reserve fails, stop; no
+  cleanup is authorized.
+- After the approved local clone, use the Release `joey-run`
+  `taxstone-adopt-register-evidence` command with `--apply`, the preserved
+  Taxstone receipt and Sheets readback. The command validates job/source/archive,
+  accepted manifest and clip hashes, unique Drive IDs, schema and actual rows;
+  records `adoptedExternalReadback` provenance; makes a local `job.json` backup;
+  and calls no provider. Reopen the job and verify the native recap. Do not
+  rerender or replace companions.
+
+The native settings test changed only the isolated copy's `automaticCleanup`
+setting; do not copy that test settings file into production. Preserve the
+installed app and production settings during release. Before any approved
+installation, recheck disk reserve and APFS clone support; no cleanup is
+authorized.
+
+Live YouTube discovery remains untested. The prior `joe-automation.json` bytes
+remain unavailable; Episode 979 remains unresolved. Make no global production-
+preservation claim.
+
+# Three-blocker isolation repair — 2026-11-15
+
+**PARTIAL — scoped repair submitted; installed end state remains unverified.** The
+working-storage-root failure and `settings.json` permission failure shared the
+old preview sandbox's global `(deny file-write*)`. Filesystem ownership, mode,
+ACL and flags were normal. The Joe Budden DNS error came from the same preview's
+intentional `(deny network*)`; it is not evidence of failed live discovery.
+
+- Retained profile: `/tmp/joey-three-blockers-profile.sb`, SHA-256
+  `12970f1b81d6f1c4af75e7b932ae8a44701d6abc21c2614c9ae241d1767451b2`.
+  Durable renderer: `Tools/render-joey-isolation-profile.sh`, SHA-256
+  `642e84d23451095f87ad58425b802fe45c87b37a691afd3ae76d77b90b15e257`.
+  Renderer takes `--runtime-root`, `--atomic-temp-root`, `--output`; task paths
+  remain parameterized. `JOEY_ISOLATION_HOST_HOME` controls host-path denies.
+  Current Taxstone runtime profile:
+  `/Users/frank/Library/Caches/Joey-three-blockers-20261115/pr24-taxstone-native-20261116/isolation.sb`,
+  SHA-256 `5ae170fa2a38f332a3e4e39c549f5e6db5deaf9f33e48856f1fdaabbeee976a1`.
+- Launch recipe: render the profile with the task runtime and Darwin canonical
+  temporary root, then run the task executable through
+  `python3 Tools/run-local.py /usr/bin/sandbox-exec -f <profile> -- <task-executable>`
+  using `/usr/bin/env` after `Tools/run-local.py` to set task-owned `HOME`, `CFFIXED_USER_HOME`, `TMPDIR`,
+  `JOEY_NETWORK_DENIED_PREVIEW=1`, `CI_DISABLE_METAL=1`,
+  `CA_DISABLE_METAL=1`, and `CG_RENDERING_MODE=1`.
+- Isolated runtime root existed and accepted task writes and atomic settings
+  replacement. Production application-support data, Keychain, rclone config,
+  CloudStorage, outside writes and network remained denied.
+- Native denied-preview evidence: first-launch `Ready`, automatic processing
+  off, `0 episodes queued`, and the concise network-denied message are retained
+  under `/Users/frank/Library/Caches/Joey-three-blockers-20261115/pr24-native/`.
+  Live YouTube discovery remains untested. Final task-owned Taxstone relaunch
+  used bundle `devplaceholder.C88ISLGM.JoeyTaxstoneRegisterPR24Current`, signed
+  executable SHA-256 `94ece8a4d3fe1ba67497658821e1062eb4ce53ebb2cac112f280b97ff90dc60e`.
+  Window-owner proof bound PID `76041` to the task executable before capture.
+  Restart screenshot SHA-256 `6a8510dca4f0cd3735182147061b8476bc796a815ddbe5919cbcb00050c53bfd`;
+  restart accessibility SHA-256
+  `25caf2f1aa796c72033976dcaf02b877f8bce3f78e04b5d91c581230242d1a46`.
+  It shows `Ready`, Jack Thriller, `Completed`, `Delivery verified`, QA `26/26`,
+  Drive `26/26`, and `Records, Verified`.
+- Hardened-profile probe: task-root write and atomic settings save passed;
+  existing outside-file write returned `EPERM`; production runtime, Keychain,
+  rclone, CloudStorage and network/DNS remained denied. Probe used the required
+  `Tools/run-local.py` environment sanitizer. Current v2 probe receipt:
+  `/Users/frank/Library/Caches/Joey-three-blockers-20261115/profile-probe-v2/profile-probe-v2.json`,
+  SHA-256 `9dc610dc17fc7b84553f48682248e25bb67ed6005b1e75b4629c580c424009d6`.
+- Repair source persists discovery error separately from its provider diagnostic;
+  UI shows one actionable message with collapsed technical details. Regression
+  tests confirm denied-preview and ordinary-failure behavior, queue/catalog
+  preservation, restart persistence and no completion bypass.
+- Focused tests: `7` executed, `0` failures, `0` skips. Full Swift proof:
+  `503` executed, `4` intentional skips, `0` failures. Release build: exit 0,
+  `BUILD SUCCEEDED`; executable SHA-256
+  `4917f7901a1292a06c171babc4714972e3b324237b1ae4f88fe7fa2ae67f18e0`;
+  strict deep signature passed. The signed task preview executable SHA-256 is
+  `7fb497c202a4370a2ba87489c9a7dbf303655b16233b97773426784bf6779c7e0`.
+- Foundation atomic settings replacement required Darwin's canonical temporary
+  root `/private/var/folders/q3/cn_93__94dv6jtjc365nvs4c0000gn/T`; task `TMPDIR`
+  alone is insufficient. Probe receipt:
+  `/Users/frank/Library/Caches/Joey-three-blockers-20261115/pr24-taxstone-native-20261116/probe/isolation-probe.json`.
+- Taxstone tests cover valid, missing, stale and malformed receipts, creator
+  separation and safe reopening. The copied job used in this preview contains
+  `taxstoneRegisterEvidence.rows=26`; its 113-file manifest remained unchanged
+  during this restart check. The original acceptance checkpoint has no native
+  receipt, and the job is absent from the installed runtime. The preview does
+  not prove the installed app can open or verify the original acceptance job.
+  Register recovery currently replaces Drive companions, which is outside the
+  current no-provider-write instruction. A PR #23 review also identifies a
+  missing-local-clip recovery failure. These remain open release blockers.
+- No provider write, rerender, installation, publication or scheduling occurred
+  during this verification. Earlier production-mutation uncertainty and
+  unresolved Episode 979 remain in force. Live YouTube discovery was not tested.
+
 # Taxstone register repair — manifest retry guard — 2026-11-16
 
 **REPAIR SUBMITTED — validation-gap follow-up PASS.** A failed saved-manifest

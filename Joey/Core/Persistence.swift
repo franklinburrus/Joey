@@ -38,11 +38,46 @@ public enum Persistence {
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
-        try encoder.encode(value).write(to: url, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        let fd = open(url.path, O_RDONLY); if fd >= 0 { _ = fsync(fd); close(fd) }
+        let data = try encoder.encode(value)
+        // Foundation's .atomic may stage under NSTemporaryDirectory(), outside a task sandbox.
+        let temporary = atomicReplacementURL(for: url, identifier: UUID().uuidString)
+        let fd = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        guard fd >= 0 else { throw posixError() }
+        var openDescriptor = true
+        var temporaryExists = true
+        defer {
+            if openDescriptor { _ = close(fd) }
+            if temporaryExists { _ = unlink(temporary.path) }
+        }
+        try data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) throws in
+            guard let baseAddress = buffer.baseAddress else { return }
+            var offset = 0
+            while offset < buffer.count {
+                let written = Darwin.write(fd, baseAddress.advanced(by: offset), buffer.count - offset)
+                if written < 0 {
+                    if errno == EINTR { continue }
+                    throw posixError()
+                }
+                guard written > 0 else { throw POSIXError(.EIO) }
+                offset += written
+            }
+        }
+        guard fsync(fd) == 0 else { throw posixError() }
+        guard close(fd) == 0 else {
+            openDescriptor = false
+            throw posixError()
+        }
+        openDescriptor = false
+        guard rename(temporary.path, url.path) == 0 else { throw posixError() }
+        temporaryExists = false
         // Durability of the atomic rename also requires the parent directory.
         let dirFd = open(directory.path, O_RDONLY); if dirFd >= 0 { _ = fsync(dirFd); close(dirFd) }
+    }
+    static func atomicReplacementURL(for url: URL, identifier: String) -> URL {
+        url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).\(identifier).tmp")
+    }
+    private static func posixError() -> POSIXError {
+        POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
     }
     public static func load<T: Decodable>(_ url: URL) throws -> T { try decoder.decode(T.self, from: Data(contentsOf: url)) }
     public static func safeName(_ text: String) -> String {
@@ -52,7 +87,19 @@ public enum Persistence {
         return String((parts.isEmpty ? "Untitled" : parts).prefix(90))
     }
     public static var defaultRoot: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Joey Native",isDirectory:true)
+        let environment = ProcessInfo.processInfo.environment
+        return defaultRoot(environment:environment,homeDirectory:FileManager.default.homeDirectoryForCurrentUser)
+    }
+    static func defaultRoot(environment: [String:String], homeDirectory: URL) -> URL {
+        let normalRoot = homeDirectory.appendingPathComponent("Library/Application Support/Joey Native",isDirectory:true)
+        guard let override = environment["JOEY_APP_SUPPORT_ROOT"] else {return normalRoot}
+        let components = override.split(separator:"/",omittingEmptySubsequences:false)
+        guard override.hasPrefix("/"), !components.contains(".."), !override.contains("\n") else {
+            // Invalid preview configuration must fail closed; never fall back to
+            // the account's production Application Support directory.
+            return URL(fileURLWithPath:"/dev/null/joey-invalid-app-support-root",isDirectory:true)
+        }
+        return URL(fileURLWithPath:override,isDirectory:true).standardizedFileURL
     }
     public static func checkDisk(at url: URL, requiredBytes: Int64) throws {
         try StorageManager.checkCapacity(at:url,requiredBytes:requiredBytes)
