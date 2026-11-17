@@ -90,6 +90,12 @@ struct ShowsView: View {
                 Button("Use This Episode") {useEpisode(episode.url)}
             }
             if let error = model.joeAutomation.lastError {errorMessage(error)}
+            if let diagnostic = model.joeAutomation.lastCheckDiagnostic {
+                DisclosureGroup("Technical details") {
+                    Text(diagnostic).textSelection(.enabled)
+                        .font(JoeyTheme.font(12)).foregroundStyle(.secondary)
+                }
+            }
             ViewThatFits(in:.horizontal) {
                 HStack(spacing:16) {joeControls;Spacer(minLength:0)}
                     .fixedSize(horizontal:true,vertical:false)

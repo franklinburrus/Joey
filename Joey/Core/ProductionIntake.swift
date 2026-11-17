@@ -87,6 +87,11 @@ public struct JoeAutomationState: Codable, Sendable {
     /// A bounded library turn resumes here even after a failed episode or feed sort.
     public var nextInterleavedEpisodeID: String?
     public var lastError: String?
+    /// Discovery failures use a concise action message while retaining the
+    /// provider detail for diagnostics. Queue and processing errors stay in
+    /// `lastError`.
+    public var lastCheckError: String?
+    public var lastCheckDiagnostic: String?
     public init() {}
 
     public mutating func enable(after latest: DiscoveredSource?) throws {

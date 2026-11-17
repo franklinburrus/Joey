@@ -2,6 +2,22 @@ import XCTest
 @testable import JoeyCore
 
 final class RuntimeTests: XCTestCase {
+    func testDefaultRootUsesExplicitAppSupportRootWithoutChangingNormalRoot() {
+        let environment = ProcessInfo.processInfo.environment
+        let expected = environment["JOEY_APP_SUPPORT_ROOT"].map {URL(fileURLWithPath:$0,isDirectory:true)}
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+                "Library/Application Support/Joey Native",isDirectory:true)
+        XCTAssertEqual(Persistence.defaultRoot.standardizedFileURL.path,expected.standardizedFileURL.path)
+
+        let fixtureHome = URL(fileURLWithPath:"/task-home",isDirectory:true)
+        XCTAssertEqual(Persistence.defaultRoot(environment:[:],homeDirectory:fixtureHome).path,
+            "/task-home/Library/Application Support/Joey Native")
+        for invalid in ["relative/runtime","/task/../production/runtime"] {
+            XCTAssertEqual(Persistence.defaultRoot(environment:["JOEY_APP_SUPPORT_ROOT":invalid],
+                homeDirectory:fixtureHome).path,"/dev/null/joey-invalid-app-support-root")
+        }
+    }
+
     func testTestProcessHasNoAIServiceCredentialEnvironment() {
         let names = Set(ProcessInfo.processInfo.environment.keys)
         for name in ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",

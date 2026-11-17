@@ -12,19 +12,51 @@ register-only recovery. DUB records remain separate; legacy checkpoints remain
 readable; REQUIREMENTS.md stays unchanged.
 
 Verified acceptance scope: external Taxstone processing, QA, Drive filing,
-separate register reconciliation and recap. Code/test commit
-`dfbe5319e9d79274bc72e3a373cf4121a3f8a006` adds route persistence before
-external reconciliation, final package verification, safe companion handling on
-register-only failure and native Resume classification. Focused proof: 59
-tests pass. Full proof: 498 tests pass, 4 existing optional/live skips. Release
-SwiftPM/Xcode builds and strict signatures pass. Isolated current-source preview
-reaches native `Ready` with an empty queue after isolation proof; unsigned
-executable and Resources match the Release build. No accepted job, provider
-object, historical row, production queue or source byte is changed.
+separate register reconciliation and recap. PR #23 head is
+`fd8531a42aa516f447a29b24e48ef2942389c0b4`; PR #24's tested application/test
+head is `1f2517ab7c2840ebaa8db5f9a68bc398029af0fd`, stacked on PR #23. The
+Release candidate reaches native Ready under task isolation with default
+Metal, saves settings across restart, and reopens the copied original Taxstone
+job with validated records and recap. The isolated settings check changed
+`automaticCleanup` from `false` to `true`; the copied job and manifest hashes
+stayed unchanged, the queue remained empty and automation stayed off. Do not
+copy test settings into production. Build identity and capture receipts are in
+VERIFICATION.md. No Joey source correction was justified for the earlier
+framework crash.
 
-Next lane after PR #23 checks: continue only the remaining Taxstone/native
-Resume and sleep/wake acceptance gaps. Preserve the earlier joe-automation.json
-mutation caveat and Episode 979 caveat. Do not infer platform ingestion or
+The two older crashes identify the custom preview bundle and abort inside
+Apple's Metal binary-archive, CoreImage and VisionKit path. No sandbox denial
+appeared in the bounded crash-window log. The logs do not establish whether an
+Apple framework/cache trigger or the older preview runtime caused the abort.
+The prior software-render flags remain diagnostic-only; the current Release
+candidate passed with no rendering override. Do not treat the old workaround as
+the release configuration.
+
+PR #23 exact-head workflow `43917186973` passed: Swift `505` executed, `8`
+skips, `0` failures; six integrity/security tests passed; Linux helper check
+passed with one skip; Release build passed. All eight PR #23 review threads are
+resolved. PR #24 is still based on PR #23, so automatic PR checks are absent:
+`.github/workflows/macos-verify.yml` filters pull-request events to base
+`main`. Manual workflow `44024976008` attempt 2 passed on the exact PR #24
+source head: `509` Swift tests, `8` skips, `0` failures; six integrity/security
+tests passed; Linux helper smoke passed with one skip; Release build passed.
+Attempt 1 had one unchanged five-second helper timeout; its focused local rerun
+passed `1/1` in `0.296` seconds. The GitHub retry is complete and green.
+
+Keep the merge order PR #23, then PR #24. After PR #23 merges, rebase only PR
+#24's commits onto the new main, confirm its diff contains only its own repair,
+retarget to main, then require exact-head green checks before merging PR #24.
+No merge or installation is authorized yet. Before installation, preserve the
+current app and mutable runtime state, APFS-clone the accepted Taxstone job
+without breaching the documented disk reserve, and adopt its preserved external
+receipt and readback through the native local migration command. No provider
+write, rerender or companion replacement is needed.
+
+Next action: present one ordered merge/install approval request. After approval,
+merge PR #23, rebase and retarget PR #24, read back its automatic checks, then
+merge PR #24 and install the tested candidate with backup and rollback ready.
+Live YouTube discovery stays untested; preserve the `joe-automation.json`
+prior-bytes caveat and Episode 979 caveat. Do not infer platform ingestion or
 global production preservation.
 
 ## Final engineering integration and candidate — 2026-11-06

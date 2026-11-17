@@ -44,6 +44,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
     private var coordinator: Coordinator?
     private(set) var startupTask: Task<Void,Never>?
     private let recentJoeEpisodes: () async throws -> [DiscoveredSource]
+    private let networkDeniedPreview: Bool
     /// Monotonic owner token so a finished run's late progress cannot revive
     /// busy state, overwrite a newer checkpoint, or start a duplicate worker.
     private var processingGeneration = 0
@@ -51,8 +52,10 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
     let root: URL
     let email: EmailIntakeModel
     init(root: URL = Persistence.defaultRoot, startsAutomatically: Bool = true,
+         networkDeniedPreview: Bool = ProcessInfo.processInfo.environment["JOEY_NETWORK_DENIED_PREVIEW"] == "1",
          recentJoeEpisodes: @escaping () async throws -> [DiscoveredSource] = {try await SourceDiscovery.recentJoeEpisodes()}) {
         self.root = root
+        self.networkDeniedPreview = networkDeniedPreview
         self.recentJoeEpisodes = recentJoeEpisodes
         self.email = EmailIntakeModel(root:root)
         do {coordinator = try Coordinator(root:root); configuration = try Configuration.load(root:root)}
@@ -65,7 +68,7 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
             // cancelled jobs remain cancelled until the user resumes them.
             let stateURL = root.appendingPathComponent("joe-automation.json")
             if FileManager.default.fileExists(atPath:stateURL.path) {
-                do {joeAutomation = try Persistence.load(stateURL)}
+                do {joeAutomation = try Persistence.load(stateURL); joeStatus = joeAutomation.lastCheckError ?? joeStatus}
                 catch {automationStateReadable = false;joeAutomation.lastError = "Saved automation state could not be read; preserve joe-automation.json and repair it before enabling automatic processing."}
             }
             do {library = try TaxstoneLibrary(root:root); taxstoneLibrary = await library!.snapshot()}
@@ -138,11 +141,20 @@ enum JobAcceptance: Equatable {case accepted, deferred, unavailable}
                 let completed = Set(jobs.filter {$0.state == .completed && $0.hasRequiredCompletionEvidence && $0.request.productionWorkflow == .joeBudden}.map {$0.request.sourceID})
                 joeAutomation.reconcile(episodes,completed:completed)
                 joeStatus = episodes.isEmpty ? "No completed numbered episode found among the 30 recent uploads." : "Latest numbered episode from Joe Budden TV. Recent-upload check completed."
+                joeAutomation.lastCheckError = nil
+                joeAutomation.lastCheckDiagnostic = nil
                 if automationStateReadable {try saveJoe()}
                 resumeJoeQueue()
             } catch {
-                joeStatus = "Episode check failed: "+error.localizedDescription
-                joeAutomation.lastError = error.localizedDescription
+                let diagnostic = error.localizedDescription
+                let message = networkDeniedPreview
+                    ? "Episode check unavailable in this isolated preview; network access is intentionally denied."
+                    : "Episode check unavailable. Check network connection and retry."
+                joeStatus = message
+                joeAutomation.lastCheckError = message
+                joeAutomation.lastCheckDiagnostic = diagnostic
+                do {if automationStateReadable {try saveJoe()}}
+                catch {self.error = "Episode check result could not be saved; queued episodes remain unchanged. "+error.localizedDescription}
                 // A feed outage must not discard already queued work.
                 resumeJoeQueue()
             }

@@ -39,6 +39,28 @@ final class StorageTests: XCTestCase {
         try Data("{\"diagnostic\":true}".utf8).write(to:work.appendingPathComponent("render.json"))
         return Fixture(root:root,lock:lock,manager:manager,work:work,job:job)
     }
+    func testPersistenceAtomicallyReplacesSettingsBesideDestination() throws {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:root)}
+
+        let settings = root.appendingPathComponent("settings.json")
+        let staging = Persistence.atomicReplacementURL(for:settings,identifier:"fixture")
+        XCTAssertEqual(staging.deletingLastPathComponent().standardizedFileURL,root.standardizedFileURL)
+        XCTAssertEqual(staging.lastPathComponent,".settings.json.fixture.tmp")
+
+        var config = Configuration()
+        config.automaticCleanup = false
+        try Persistence.save(config,to:settings)
+        config.automaticCleanup = true
+        try Persistence.save(config,to:settings)
+
+        let saved: Configuration = try Persistence.load(settings)
+        XCTAssertEqual(saved.automaticCleanup,true)
+        let attributes = try FileManager.default.attributesOfItem(atPath:settings.path)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue,0o600)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath:root.path),["settings.json"])
+    }
     func testClosedScratchCleanupMeasuresDeletionAndProtectsFiledAcceptedOutput() throws {
         let f = try fixture()
         let jobDir = f.root.appendingPathComponent("jobs/"+f.job.id)
