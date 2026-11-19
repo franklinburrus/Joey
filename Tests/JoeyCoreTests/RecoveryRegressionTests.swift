@@ -601,32 +601,40 @@ final class RecoveryRegressionTests: XCTestCase {
         XCTAssertEqual(reopenedCalls,calls,"Completed reopen must not repeat provider work")
     }
 
-    func testSameSourceReuseCopiesLocalMediaOrRestoresVerifiedEvictedArchive() async throws {
-        for evicted in [false,true] {
-            let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
-            let request = try Fixtures.request(dir:root,path:"unused")
-            let (saved,_) = try completed(request,root:root)
-            let prior = try XCTUnwrap(saved.source)
-            let sourceBytes = try Data(contentsOf:URL(fileURLWithPath:prior.path))
-            if evicted {try FileManager.default.removeItem(atPath:prior.path)}
-            let nextDirectory = root.appendingPathComponent("jobs/next-source-job",isDirectory:true)
-            try FileManager.default.createDirectory(at:nextDirectory,withIntermediateDirectories:true)
-            let downloads = ReusableSourceDownloadCounter()
-            let restored = try await Coordinator.materializeReusableSource(prior,directory:nextDirectory,
-                expectedSHA256:prior.sha256,archiveFallback:nil) {reference,directory in
-                    await downloads.increment()
-                    XCTAssertEqual(reference,prior.archiveReference)
-                    let local = directory.appendingPathComponent("original.mp4")
-                    try sourceBytes.write(to:local)
-                    return local
+    func testSameSourceReuseCopiesSelectedInputOrRestoresEvictedOwnedCopy() async throws {
+        for copyExisting in [false,true] {
+            for evicted in [false,true] {
+                let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+                var request = try Fixtures.request(dir:root,path:"unused")
+                if !copyExisting {
+                    request.localPath = nil
+                    request.sourceID = "x:broadcast:synthetic"
+                    request.originalURL = "https://x.com/i/broadcasts/synthetic"
                 }
-            let downloadCount = await downloads.count
-            XCTAssertEqual(try Integrity.sha256(restored),prior.sha256)
-            XCTAssertEqual(restored.deletingLastPathComponent(),nextDirectory)
-            XCTAssertNotEqual(restored.path,prior.path)
-            XCTAssertEqual(downloadCount,evicted ? 1:0)
-            XCTAssertEqual(FileManager.default.fileExists(atPath:prior.path),!evicted,
-                           "Materialization must not alter the prior job's or selected original's bytes")
+                let (saved,_) = try completed(request,root:root)
+                let prior = try XCTUnwrap(saved.source)
+                let sourceBytes = try Data(contentsOf:URL(fileURLWithPath:prior.path))
+                if evicted {try FileManager.default.removeItem(atPath:prior.path)}
+                let nextDirectory = root.appendingPathComponent("jobs/next-source-job",isDirectory:true)
+                try FileManager.default.createDirectory(at:nextDirectory,withIntermediateDirectories:true)
+                let downloads = ReusableSourceDownloadCounter()
+                let restored = try await Coordinator.materializeReusableSource(prior,directory:nextDirectory,
+                    expectedSHA256:prior.sha256,archiveFallback:nil,copyExisting:copyExisting) {reference,directory in
+                        await downloads.increment()
+                        XCTAssertEqual(reference,prior.archiveReference)
+                        let local = directory.appendingPathComponent("original.mp4")
+                        try sourceBytes.write(to:local)
+                        return local
+                    }
+                let downloadCount = await downloads.count
+                let materializedIntoCurrentJob = copyExisting || evicted
+                XCTAssertEqual(try Integrity.sha256(restored),prior.sha256)
+                XCTAssertEqual(restored.path,materializedIntoCurrentJob
+                    ? nextDirectory.appendingPathComponent("original.mp4").path : prior.path)
+                XCTAssertEqual(downloadCount,evicted ? 1:0)
+                XCTAssertEqual(FileManager.default.fileExists(atPath:prior.path),!evicted,
+                               "Materialization must preserve the prior job's source bytes")
+            }
         }
     }
 

@@ -101,7 +101,7 @@ public actor Coordinator {
     }
     public func directory(for id: String) -> URL {root.appendingPathComponent("jobs").appendingPathComponent(id)}
     static func materializeReusableSource(_ source: SourceRecord, directory: URL, expectedSHA256: String?,
-                                         archiveFallback: String?,
+                                         archiveFallback: String?, copyExisting: Bool = false,
                                          download: (String,URL) async throws -> URL) async throws -> URL {
         guard expectedSHA256 == nil || expectedSHA256 == source.sha256 else {
             throw JoeyError.failed("Existing source identity differs from the requested archive hash")
@@ -127,8 +127,9 @@ public actor Coordinator {
         if lstat(prior.path,&sourceStat) == 0 {
             guard (sourceStat.st_mode & S_IFMT) == S_IFREG,sourceStat.st_size == source.bytes,
                   try Integrity.sha256(prior) == source.sha256 else {
-                throw JoeyError.failed("Reusable local source changed; original preserved")
+                throw JoeyError.failed("Original source changed; preserved job cannot silently switch inputs")
             }
+            guard copyExisting else {return prior}
             try Persistence.checkDisk(at:directory,requiredBytes:source.bytes)
             try FileManager.default.copyItem(at:prior,to:target)
             try validate(target)
@@ -442,7 +443,8 @@ public actor Coordinator {
             if let prior = job.source {sourceURL = URL(fileURLWithPath:prior.path)}
             else if request.localPath == nil, let prior = reusable?.source {
                 sourceURL = try await Self.materializeReusableSource(prior,directory:dir,
-                    expectedSHA256:request.expectedSourceSHA256,archiveFallback:request.archiveReference) {reference,directory in
+                    expectedSHA256:request.expectedSourceSHA256,archiveFallback:request.archiveReference,
+                    copyExisting:reusable?.request.localPath != nil) {reference,directory in
                         try await delivery.downloadOriginal(reference:reference,directory:directory)
                     }
                 var copy = prior; copy.title = request.title; copy.episodeDate = request.episodeDate
