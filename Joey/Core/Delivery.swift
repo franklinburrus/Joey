@@ -538,13 +538,19 @@ public actor DriveDelivery {
             throw JoeyError.failed("Required QA, destination, companion or register evidence is incomplete")
         }
         let destination = try DestinationResolver.resolve(source:source,request:job.request,asset:.clip)
-        guard Records.archiveReceiptMatchesSource(source),let archive = source.archiveReceipt,
-              let archiveMD5 = archive.md5,let archivePermissions = archive.permissionFingerprint else {
-            throw JoeyError.failed("Verified full-source Drive archive receipt is missing or mismatched")
+        // New completion cleanup requires the archive receipt captured by the
+        // current archive stage. Older completed checkpoints may predate that
+        // field; keep their clip/package readback compatible, but never use
+        // them as authority to remove local media.
+        if source.archiveReceipt != nil || job.postDeliveryMediaCleanup != nil {
+            guard Records.archiveReceiptMatchesSource(source),let archive = source.archiveReceipt,
+                  let archiveMD5 = archive.md5,let archivePermissions = archive.permissionFingerprint else {
+                throw JoeyError.failed("Verified full-source Drive archive receipt is missing or mismatched")
+            }
+            _ = try await verify(id:archive.id,local:URL(fileURLWithPath:source.path),parent:archive.parent,
+                name:archive.name,sha:archive.sha256,md5:archiveMD5,bytes:archive.bytes,
+                destination:nil,expectedPermissions:archivePermissions)
         }
-        _ = try await verify(id:archive.id,local:URL(fileURLWithPath:source.path),parent:archive.parent,
-            name:archive.name,sha:archive.sha256,md5:archiveMD5,bytes:archive.bytes,
-            destination:nil,expectedPermissions:archivePermissions)
         for receipt in job.clips.compactMap(\.drive) + Array(job.companions.values) {
             guard let md5 = receipt.md5,let fingerprint = receipt.permissionFingerprint else {throw JoeyError.failed("Saved filing receipt lacks integrity/access proof: \(receipt.id)")}
             let localURL = directory.appendingPathComponent(receipt.name)
