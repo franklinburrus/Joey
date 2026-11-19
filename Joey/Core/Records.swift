@@ -1,5 +1,25 @@
 import Foundation
 
+private struct ClipDeliveryEvidenceFingerprint: Codable {
+    var clipID: Int
+    var filename: String
+    var bytes: Int64?
+    var sha256: String?
+    var receipt: DriveReceipt?
+}
+
+private struct DeliveryEvidenceFingerprint: Codable {
+    var jobID: String
+    var sourceID: String
+    var sourceBytes: Int64
+    var sourceSHA256: String
+    var archive: DriveReceipt?
+    var clips: [ClipDeliveryEvidenceFingerprint]
+    var companions: [String:DriveReceipt]
+    var dubRegisterRows: [String]?
+    var taxstoneRegisterEvidence: TaxstoneRegisterEvidence?
+}
+
 public enum Records {
     /// Cached companion absence is not evidence that a verified remote object
     /// disappeared. When the manifest is present, its receipt and acceptance
@@ -326,6 +346,34 @@ public enum Records {
             return components[index + 1]
         }
         return components.last
+    }
+    /// Archive evidence is exact-file readback from Drive. A URL by itself does
+    /// not establish parent, bytes, permissions, or content identity.
+    public static func archiveReceiptMatchesSource(_ source: SourceRecord) -> Bool {
+        guard let receipt = source.archiveReceipt,
+              let id = archiveID(source.archiveReference),
+              receipt.id == id, !receipt.name.isEmpty, !receipt.parent.isEmpty,
+              receipt.bytes == source.bytes, receipt.sha256 == source.sha256,
+              receipt.sha256.count == 64, receipt.md5?.count == 32,
+              !receipt.permissions.isEmpty, receipt.permissionFingerprint?.count == 64 else {return false}
+        return receipt.sha256.allSatisfy {"0123456789abcdef".contains($0)} &&
+            receipt.md5!.allSatisfy {"0123456789abcdef".contains($0.lowercased())} &&
+            receipt.permissionFingerprint!.allSatisfy {"0123456789abcdef".contains($0)}
+    }
+    /// Stable binding used by restart-safe local-media cleanup. Includes every
+    /// clip, all four companions, source archive, and creator-specific records.
+    public static func deliveryEvidenceSHA256(job: JobRecord) throws -> String {
+        guard job.hasRequiredCompletionEvidence, let source = job.source else {
+            throw JoeyError.failed("Cannot bind cleanup to incomplete delivery or creator records")
+        }
+        let proof = DeliveryEvidenceFingerprint(jobID:job.id,sourceID:source.id,
+            sourceBytes:source.bytes,sourceSHA256:source.sha256,archive:source.archiveReceipt,
+            clips:job.clips.map {ClipDeliveryEvidenceFingerprint(clipID:$0.id,filename:$0.filename,
+                bytes:$0.bytes,sha256:$0.sha256,receipt:$0.drive)},
+            companions:job.companions,
+            dubRegisterRows:job.request.owner == .dub ? job.registerRows : nil,
+            taxstoneRegisterEvidence:job.request.owner == .taxstone ? job.taxstoneRegisterEvidence : nil)
+        return Integrity.sha256(try Persistence.encoder.encode(proof))
     }
     public static func csv(_ rows: [[String]]) -> String {
         rows.map {row in row.map {value in

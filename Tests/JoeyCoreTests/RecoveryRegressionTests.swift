@@ -290,7 +290,7 @@ final class RecoveryRegressionTests: XCTestCase {
                 XCTAssertEqual(recovered.state,.completed,recovered.error ?? "")
                 XCTAssertEqual(recovered.id,saved.id)
                 XCTAssertEqual(recovered.clips[0].qa,before.clips[0].qa)
-                XCTAssertEqual(try Integrity.sha256(output),hash)
+                XCTAssertFalse(FileManager.default.fileExists(atPath:output.path),"Newly completed delivery evicts its redundant Joey-owned clip")
                 XCTAssertTrue(recovered.hasRequiredCompletionEvidence)
             }
         }
@@ -431,6 +431,8 @@ final class RecoveryRegressionTests: XCTestCase {
         try Data("Synthetic original identity".utf8).write(to:original)
         job.source!.path = original.path;job.source!.sha256 = try Integrity.sha256(original)
         job.source!.bytes = Int64(try Data(contentsOf:original).count)
+        let archive = try syntheticArchiveReceipt(source:job.source!,request:request)
+        job.source!.archiveReference = archive.url;job.source!.archiveReceipt = archive
         job.transcript = Transcript(sourceID:request.sourceID,sourceSHA256:job.source!.sha256,duration:100,engine:"Synthetic fixture",
             segments:[TranscriptSegment(start:0,end:100,text:"Synthetic complete source.")])
         job.planningBasis = .transcriptAssisted
@@ -486,7 +488,7 @@ final class RecoveryRegressionTests: XCTestCase {
         let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
         let request = try joeRequest(root:root)
         var (saved,directory) = try completed(request,root:root)
-        saved.state = .processing;saved.source!.archiveReference = nil
+        saved.state = .processing;saved.source!.archiveReference = nil;saved.source!.archiveReceipt = nil
         try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
         let provider = RecoveryDelivery()
         let persisted: JobRecord = try Persistence.load(directory.appendingPathComponent("job.json"))
@@ -550,10 +552,159 @@ final class RecoveryRegressionTests: XCTestCase {
             XCTAssertEqual(final.hasRequiredCompletionEvidence,fault == "none" || fault == "final-readback")
             XCTAssertEqual(JobPresentation(job:final).completed,fault == "none")
             XCTAssertEqual(final.clips[0].qa,persisted.clips[0].qa,"Filing failure must not rerender or replace accepted QA")
-            XCTAssertEqual(try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename)),saved.clips[0].sha256)
+            if fault == "none" {
+                XCTAssertFalse(FileManager.default.fileExists(atPath:directory.appendingPathComponent(saved.clips[0].filename).path))
+            } else {
+                XCTAssertEqual(try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename)),saved.clips[0].sha256)
+            }
             let creations = await provider.clipCreations
             XCTAssertEqual(creations,1,"Interrupted filing must not create a second media file")
         }
+    }
+
+    func testVerifiedDeliveryEvictsLocalClipAndReopensWithoutProviderWork() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.fileToDrive = true
+        var (saved,directory) = try completed(request,root:root)
+        saved.state = .qaPassed;saved.clips[0].drive = nil;saved.companions = [:];saved.registerRows = []
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let clip = directory.appendingPathComponent(saved.clips[0].filename)
+        let source = URL(fileURLWithPath:saved.source!.path)
+        let provider = RecoveryDelivery(successfulMediaUploads:true)
+        let coordinator = try Coordinator(root:root)
+
+        let completed = try await Coordinator.$deliveryOverride.withValue(provider) {
+            try await coordinator.run(request)
+        }
+        XCTAssertEqual(completed.state,.completed,completed.error ?? "")
+        XCTAssertTrue(completed.hasRequiredCompletionEvidence)
+        XCTAssertFalse(FileManager.default.fileExists(atPath:clip.path),"Verified local clip is redundant after complete Drive/readback/record delivery")
+        XCTAssertTrue(FileManager.default.fileExists(atPath:source.path),"User-selected original input must remain")
+        XCTAssertTrue(FileManager.default.fileExists(atPath:directory.appendingPathComponent("transcript.json").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath:directory.appendingPathComponent("clip_manifest.json").path))
+        XCTAssertTrue(Records.archiveReceiptMatchesSource(try XCTUnwrap(completed.source)))
+        let cleanup = try XCTUnwrap(completed.postDeliveryMediaCleanup)
+        XCTAssertEqual(cleanup.removedBytes,saved.clips[0].bytes)
+        let freeChange = try XCTUnwrap(cleanup.freeBytesAfter)-XCTUnwrap(cleanup.freeBytesBefore)
+        print("POST_DELIVERY_FIXTURE logicalBytesRemoved=\(cleanup.removedBytes) measuredFreeSpaceChange=\(freeChange)")
+        let calls = await provider.calls
+
+        let reopened = try await Coordinator.$deliveryOverride.withValue(provider) {
+            try await coordinator.run(request)
+        }
+        XCTAssertEqual(reopened.state,.completed)
+        XCTAssertEqual(reopened.clips[0].drive?.url,completed.clips[0].drive?.url)
+        XCTAssertEqual(JobPresentation(job:reopened,runtimeRoot:root).localPlaybackMessage,
+                       "Local playback unavailable for 1 of 1 clips; verified Drive copies remain available.")
+        let reopenedCalls = await provider.calls
+        XCTAssertEqual(reopenedCalls,calls,"Completed reopen must not repeat provider work")
+    }
+
+    func testIncompleteDrivePackagePreservesLocalMedia() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.fileToDrive = true
+        var (saved,directory) = try completed(request,root:root)
+        saved.state = .qaPassed;saved.clips[0].drive = nil;saved.companions = [:];saved.registerRows = []
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let clip = directory.appendingPathComponent(saved.clips[0].filename)
+        let source = URL(fileURLWithPath:saved.source!.path)
+        let provider = RecoveryDelivery(filingFault:"package-verify",successfulMediaUploads:true)
+
+        let result = try await Coordinator.$deliveryOverride.withValue(provider) {
+            try await Coordinator(root:root).run(request)
+        }
+        XCTAssertNotEqual(result.state,.completed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath:clip.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath:source.path))
+    }
+
+    func testInterruptedPostDeliveryCleanupResumesOnlyRemainingFiles() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.localPath = nil
+        request.sourceID = "x:broadcast:synthetic"
+        request.originalURL = "https://x.com/i/broadcasts/synthetic"
+        request.fileToDrive = true
+        var (saved,directory) = try completed(request,root:root)
+        saved.state = .qaPassed;saved.clips[0].drive = nil;saved.companions = [:];saved.registerRows = []
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let clip = directory.appendingPathComponent(saved.clips[0].filename)
+        let source = URL(fileURLWithPath:saved.source!.path)
+        let provider = RecoveryDelivery(successfulMediaUploads:true)
+        let coordinator = try Coordinator(root:root)
+
+        let interrupted = try await StorageManager.$testMediaEvictionStopAfterUnlink.withValue(1) {
+            try await Coordinator.$deliveryOverride.withValue(provider) {
+                try await coordinator.run(request)
+            }
+        }
+        XCTAssertEqual(interrupted.state,.completed,interrupted.error ?? "")
+        XCTAssertFalse(FileManager.default.fileExists(atPath:source.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath:clip.path),"Second eligible file must remain after simulated interruption")
+        let calls = await provider.calls
+
+        let reopened = try await Coordinator.$deliveryOverride.withValue(provider) {
+            try await coordinator.run(request)
+        }
+        XCTAssertEqual(reopened.state,.completed)
+        XCTAssertFalse(FileManager.default.fileExists(atPath:clip.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath:source.path))
+        XCTAssertTrue(reopened.postDeliveryMediaCleanup?.files.contains(where:{$0.outcome == .absent}) == true,
+                      "An unlink before its receipt update must reconcile as already absent")
+        let reopenedCalls = await provider.calls
+        XCTAssertEqual(reopenedCalls,calls,"Cleanup resume and completed reopen must not contact providers")
+        XCTAssertTrue(FileManager.default.fileExists(atPath:directory.appendingPathComponent("transcript.json").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath:directory.appendingPathComponent("clip_manifest.json").path))
+    }
+
+    func testChangedLocalIdentityAndOtherJobDependencyRetainMedia() throws {
+        for dependency in [false,true] {
+            let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+            let request = try Fixtures.request(dir:root,path:"unused")
+            var (saved,directory) = try completed(request,root:root)
+            let archive = try syntheticArchiveReceipt(source:saved.source!,request:request)
+            saved.source!.archiveReference = archive.url;saved.source!.archiveReceipt = archive
+            let clip = directory.appendingPathComponent(saved.clips[0].filename)
+            if dependency {
+                var dependentRequest = try Fixtures.request(dir:root,path:clip.path)
+                dependentRequest.sourceID = "dependent-source"
+                var other = JobRecord(id:"dependent-job",request:dependentRequest)
+                other.state = .processing
+                try Persistence.save(other,to:root.appendingPathComponent("jobs/dependent-job/job.json"))
+            }
+            let lock = try ProcessingLock(directory:root)
+            let storage = try StorageManager(root:root,lock:lock)
+            saved.postDeliveryMediaCleanup = try storage.preparePostDeliveryMediaCleanup(job:saved,directory:directory)
+            let checkpoint = directory.appendingPathComponent("job.json")
+            try Persistence.save(saved,to:checkpoint)
+            if !dependency {try Data("Replaced local bytes".utf8).write(to:clip)}
+            try storage.resumePostDeliveryMediaCleanup(job:&saved,checkpoint:checkpoint)
+            XCTAssertTrue(FileManager.default.fileExists(atPath:clip.path))
+            let item = try XCTUnwrap(saved.postDeliveryMediaCleanup?.files.first(where:{$0.role == .acceptedClip}))
+            XCTAssertEqual(item.outcome,.retained)
+            XCTAssertTrue(item.reason.contains(dependency ? "Referenced by another saved job" : "Local file inode"))
+        }
+    }
+
+    func testHistoricalCompletedJobWithoutCleanupIntentIsNotSwept() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        let request = try Fixtures.request(dir:root,path:"unused")
+        let (saved,directory) = try completed(request,root:root)
+        let checkpoint = directory.appendingPathComponent("job.json")
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with:Data(contentsOf:checkpoint)) as? [String:Any])
+        object.removeValue(forKey:"postDeliveryMediaCleanup")
+        if var source = object["source"] as? [String:Any] {
+            source.removeValue(forKey:"archiveReceipt");object["source"] = source
+        }
+        try JSONSerialization.data(withJSONObject:object,options:[.sortedKeys]).write(to:checkpoint)
+        let clip = directory.appendingPathComponent(saved.clips[0].filename)
+
+        let reopened = try await Coordinator(root:root).run(request)
+        XCTAssertEqual(reopened.state,.completed)
+        XCTAssertNil(reopened.postDeliveryMediaCleanup)
+        XCTAssertTrue(FileManager.default.fileExists(atPath:clip.path),"Historical completed jobs are never swept merely because the app reopened")
     }
 
     func testMissingTaxstoneRegisterRecoveryDoesNotRerenderOrRetranscribe() async throws {
@@ -561,6 +712,7 @@ final class RecoveryRegressionTests: XCTestCase {
         var request = try Fixtures.request(dir:root,path:"unused")
         request.owner = .taxstone;request.fileToDrive = true
         var (saved,directory) = try completed(request,root:root)
+        saved.source!.archiveReceipt = nil // Legacy job predates the receipt-bound cleanup contract.
         saved.taxstoneRegisterEvidence = nil
         let acceptedHash = try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename))
         try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
@@ -574,6 +726,7 @@ final class RecoveryRegressionTests: XCTestCase {
         XCTAssertEqual(result.state,.completed,result.error ?? "")
         XCTAssertTrue(result.hasRequiredCompletionEvidence)
         XCTAssertEqual(try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename)),acceptedHash)
+        XCTAssertNil(result.postDeliveryMediaCleanup,"Register-only recovery must not sweep a historical completed package")
         let downloads = await provider.downloads
         let artworkCalls = await provider.artworkCalls
         let clipCreations = await provider.clipCreations
@@ -583,6 +736,28 @@ final class RecoveryRegressionTests: XCTestCase {
         XCTAssertEqual(clipCreations,0)
         XCTAssertEqual(clipAttempts,0)
         XCTAssertNotNil(result.taxstoneRegisterEvidence)
+    }
+
+    func testTaxstoneRegisterRecoveryWithoutArchiveIdentityStopsBeforeRegisterWork() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.owner = .taxstone;request.fileToDrive = true
+        var (saved,directory) = try completed(request,root:root)
+        saved.source!.archiveReference = nil;saved.source!.archiveReceipt = nil
+        saved.taxstoneRegisterEvidence = nil
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+        let provider = RecoveryDelivery()
+
+        let result = try await Coordinator.$deliveryOverride.withValue(provider) {
+            try await Coordinator(root:root).run(request)
+        }
+
+        XCTAssertNotEqual(result.state,.completed)
+        XCTAssertTrue(result.error?.contains("Existing Taxstone archive identity is missing") == true,result.error ?? "")
+        XCTAssertTrue(result.completionReconciliationRequired == true)
+        XCTAssertTrue(FileManager.default.fileExists(atPath:directory.appendingPathComponent(saved.clips[0].filename).path))
+        let calls = await provider.calls
+        XCTAssertEqual(calls,0,"No register work may run without a stable source archive identity")
     }
 
     func testTaxstoneRegisterRecoveryRequiresFinalPackageVerificationAndPersistsRoute() async throws {
@@ -714,7 +889,6 @@ final class RecoveryRegressionTests: XCTestCase {
                 let acceptedReceipt = try XCTUnwrap(persisted.clips[0].drive)
                 let output = directory.appendingPathComponent(saved.clips[0].filename)
                 let original = URL(fileURLWithPath:saved.source!.path)
-                let identity = try FileManager.default.attributesOfItem(atPath:output.path)
                 let names = Records.companionNames(source:saved.source!)
                 let failedName = names[companionIndex]
                 let provider = RecoveryDelivery(companionFailureName:failedName,companionFailureAfterCommit:afterCommit)
@@ -770,11 +944,10 @@ final class RecoveryRegressionTests: XCTestCase {
                     for (name,bytes) in recordBytes {XCTAssertEqual(try Data(contentsOf:directory.appendingPathComponent(name)),bytes)}
                 }
                 let finalCalls = await provider.calls;XCTAssertEqual(finalCalls,calls,"Completed reopen cannot repeat provider work")
-                XCTAssertEqual(try Integrity.sha256(output),persisted.clips[0].sha256)
+                XCTAssertFalse(FileManager.default.fileExists(atPath:output.path),"Newly completed delivery evicts its Joey-owned accepted clip")
                 XCTAssertEqual(try Integrity.sha256(original),persisted.source?.sha256)
-                let after = try FileManager.default.attributesOfItem(atPath:output.path)
-                XCTAssertEqual(after[.modificationDate] as? Date,identity[.modificationDate] as? Date)
-                XCTAssertEqual(after[.systemFileNumber] as? NSNumber,identity[.systemFileNumber] as? NSNumber)
+                XCTAssertEqual(recovered.clips[0].sha256,persisted.clips[0].sha256)
+                XCTAssertEqual(recovered.clips[0].drive?.sha256,persisted.clips[0].sha256)
             }
         }
     }
@@ -1149,7 +1322,6 @@ final class RecoveryRegressionTests: XCTestCase {
         try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
         let persisted: JobRecord = try Persistence.load(directory.appendingPathComponent("job.json"))
         let output = directory.appendingPathComponent(saved.clips[0].filename)
-        let identity = try FileManager.default.attributesOfItem(atPath:output.path)
         let provider = RecoveryDelivery()
         let first = try await Coordinator.$deliveryOverride.withValue(provider) {
             try await Coordinator(root:root).run(request) {job in
@@ -1172,10 +1344,8 @@ final class RecoveryRegressionTests: XCTestCase {
         XCTAssertEqual(recovered.clips[0].resolvedFailures?.map(\.error),["Synthetic uncertain upload response"])
         XCTAssertEqual(recovered.clips[0].resolvedFailures?.map(\.stage),["Drive clip 1"])
         XCTAssertEqual(recovered.clips[0].qa,persisted.clips[0].qa)
-        XCTAssertEqual(try Integrity.sha256(output),saved.clips[0].sha256)
-        let after = try FileManager.default.attributesOfItem(atPath:output.path)
-        XCTAssertEqual(after[.modificationDate] as? Date,identity[.modificationDate] as? Date)
-        XCTAssertEqual(after[.systemFileNumber] as? NSNumber,identity[.systemFileNumber] as? NSNumber)
+        XCTAssertFalse(FileManager.default.fileExists(atPath:output.path),"The newly completed clip is retained in Drive and removed locally")
+        XCTAssertEqual(recovered.clips[0].sha256,saved.clips[0].sha256)
         XCTAssertNoThrow(try BufferPreflight.validateJob(recovered,clip:recovered.clips[0]))
         let creations = await provider.clipCreations, attempts = await provider.clipAttempts
         XCTAssertEqual(creations,1);XCTAssertEqual(attempts,2)
@@ -1220,7 +1390,8 @@ final class RecoveryRegressionTests: XCTestCase {
         XCTAssertEqual(result.id,saved.id)
         let creations = await provider.clipCreations, attempts = await provider.clipAttempts
         XCTAssertEqual(creations,1);XCTAssertEqual(attempts,2)
-        XCTAssertEqual(try Integrity.sha256(directory.appendingPathComponent(saved.clips[0].filename)),saved.clips[0].sha256)
+        XCTAssertFalse(FileManager.default.fileExists(atPath:directory.appendingPathComponent(saved.clips[0].filename).path),
+                       "Completed Drive recovery removes only the Joey-owned local clip")
     }
 }
 
@@ -1230,6 +1401,7 @@ private actor RecoveryDelivery: CoordinatorDelivery {
     var artworkCalls = 0
     var clipCreations = 0
     var clipAttempts = 0
+    var packageVerifications = 0
     var committed: [String:DriveReceipt] = [:]
     var companionCreations: [String:Int] = [:]
     private var companionFailureTriggered = false
@@ -1238,10 +1410,13 @@ private actor RecoveryDelivery: CoordinatorDelivery {
     let filingFault: String
     let companionFailureName: String?
     let companionFailureAfterCommit: Bool
+    let successfulMediaUploads: Bool
     init(suspendAfterCommit: Bool = false, original: URL? = nil, filingFault: String = "none",
-         companionFailureName: String? = nil, companionFailureAfterCommit: Bool = true) {
+         companionFailureName: String? = nil, companionFailureAfterCommit: Bool = true,
+         successfulMediaUploads: Bool = false) {
         self.suspendAfterCommit = suspendAfterCommit;self.original = original;self.filingFault = filingFault
         self.companionFailureName = companionFailureName;self.companionFailureAfterCommit = companionFailureAfterCommit
+        self.successfulMediaUploads = successfulMediaUploads
     }
     func seed(_ receipt: DriveReceipt) {committed[receipt.name] = receipt}
     func metadata(_ id: String) async throws -> [String:Any] {throw JoeyError.failed("Unexpected metadata lookup in synthetic recovery")}
@@ -1250,8 +1425,8 @@ private actor RecoveryDelivery: CoordinatorDelivery {
         guard let original else {throw JoeyError.failed("Saved original must be reused")}
         return original
     }
-    func archive(source: SourceRecord, request: JobRequest) async throws -> String {
-        calls += 1;return "https://drive.google.com/file/d/synthetic_archive_123456789/view"
+    func archive(source: SourceRecord, request: JobRequest) async throws -> DriveReceipt {
+        calls += 1;return try syntheticArchiveReceipt(source:source,request:request)
     }
     func episodeFolder(source: SourceRecord, request: JobRequest, jobID: String, existingFolderID: String?, intentURL: URL) async throws -> String {
         calls += 1;return "synthetic_folder_123456789"
@@ -1261,21 +1436,25 @@ private actor RecoveryDelivery: CoordinatorDelivery {
         throw JoeyError.failed("Native synthetic checkpoint must not resolve artwork")
     }
     func verifyPackage(job: JobRecord, directory: URL) async throws {
+        calls += 1;packageVerifications += 1
         guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Synthetic package incomplete")}
         if filingFault == "final-readback" {throw JoeyError.failed("Synthetic final parent readback failure")}
         if filingFault == "package-verify" {throw JoeyError.failed("Synthetic package verification failure")}
-        if companionFailureName != nil {
-            for receipt in job.clips.compactMap(\.drive) + Array(job.companions.values) {
-                let stored = committed[receipt.name]
-                let localHash = try Integrity.sha256(directory.appendingPathComponent(receipt.name))
-                let identityMatches = stored?.id == receipt.id && stored?.name == receipt.name &&
-                    stored?.parent == receipt.parent && stored?.bytes == receipt.bytes &&
-                    stored?.sha256 == receipt.sha256 && stored?.destination == receipt.destination &&
-                    stored?.permissions == receipt.permissions &&
-                    stored?.permissionFingerprint == receipt.permissionFingerprint
-                guard identityMatches, localHash == receipt.sha256 else {
-                    throw JoeyError.failed("Synthetic provider bytes differ from current package")
-                }
+        guard let source = job.source,Records.archiveReceiptMatchesSource(source),
+              try Integrity.sha256(URL(fileURLWithPath:source.path)) == source.sha256 else {
+            throw JoeyError.failed("Synthetic source archive readback differs")
+        }
+        for receipt in job.clips.compactMap(\.drive) + Array(job.companions.values) {
+            let stored = committed[receipt.name]
+            guard stored != nil else {continue} // Historical synthetic receipt has no live-provider fixture.
+            let localHash = try Integrity.sha256(directory.appendingPathComponent(receipt.name))
+            let identityMatches = stored?.id == receipt.id && stored?.name == receipt.name &&
+                stored?.parent == receipt.parent && stored?.bytes == receipt.bytes &&
+                stored?.sha256 == receipt.sha256 && stored?.destination == receipt.destination &&
+                stored?.permissions == receipt.permissions &&
+                stored?.permissionFingerprint == receipt.permissionFingerprint
+            guard identityMatches, localHash == receipt.sha256 else {
+                throw JoeyError.failed("Synthetic provider bytes differ from current package")
             }
         }
     }
@@ -1325,7 +1504,17 @@ private actor RecoveryDelivery: CoordinatorDelivery {
         committed[filename] = receipt
         if interruptCompanion {throw JoeyError.failed("Synthetic interrupted companion: "+filename)}
         if local.pathExtension == "mp4",suspendAfterCommit {try await Task.sleep(nanoseconds:60_000_000_000)}
-        if local.pathExtension == "mp4" {throw JoeyError.failed("Synthetic uncertain upload response")}
+        if local.pathExtension == "mp4", !successfulMediaUploads {throw JoeyError.failed("Synthetic uncertain upload response")}
         return receipt
     }
+}
+
+func syntheticArchiveReceipt(source: SourceRecord, request: JobRequest) throws -> DriveReceipt {
+    let id = Records.archiveID(source.archiveReference) ?? "synthetic_archive_123456789"
+    let destination = try DestinationResolver.resolve(source:source,request:request,asset:.fullEpisode)
+    let local = URL(fileURLWithPath:source.path)
+    return DriveReceipt(id:id,name:local.lastPathComponent,parent:destination.rootID,
+        bytes:source.bytes,md5:try Integrity.md5(local),sha256:source.sha256,
+        url:"https://drive.google.com/file/d/\(id)/view",permissions:["user:owner"],
+        verifiedAt:Date(),destination:destination,permissionFingerprint:String(repeating:"a",count:64))
 }

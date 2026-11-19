@@ -3,7 +3,7 @@ import Foundation
 /// The coordinator owns recovery and sequencing; provider adapters own current
 /// readback. Tests can replace this boundary without reaching live accounts.
 protocol CoordinatorDelivery: TaxstoneReuseProvider, Sendable {
-    func archive(source: SourceRecord, request: JobRequest) async throws -> String
+    func archive(source: SourceRecord, request: JobRequest) async throws -> DriveReceipt
     func episodeFolder(source: SourceRecord, request: JobRequest, jobID: String, existingFolderID: String?, intentURL: URL) async throws -> String
     func upload(_ local: URL, name: String?, parent: String, destination: FilingDestination, replaceCompanion: Bool) async throws -> DriveReceipt
     func resolveArtwork(source: SourceRecord, configuration: Configuration, root: URL) async throws -> Artwork
@@ -291,6 +291,19 @@ public actor Coordinator {
                 // register-only reconciliation, not normal processing.
                 job.completionReconciliationRequired = true
                 job.state = .filed; job.stage = "register reconciliation"; job.error = nil; try await save()
+                if let source = job.source, !Records.archiveReceiptMatchesSource(source) {
+                    guard Records.archiveID(source.archiveReference) != nil else {
+                        throw JoeyError.failed("Existing Taxstone archive identity is missing; source readback cannot be verified")
+                    }
+                    try authorizeNewOperation()
+                    let archive = try await delivery.archive(source:source,request:request)
+                    guard archive.id == Records.archiveID(source.archiveReference) else {
+                        throw JoeyError.failed("Existing Taxstone archive readback resolved to a different Drive file")
+                    }
+                    job.source?.archiveReceipt = archive
+                    job.source?.archiveReference = archive.url
+                    try await save()
+                }
                 try authorizeNewOperation()
                 if job.verifiedTaxstoneRegisterRowCount != job.clips.count {
                     job.taxstoneRegisterEvidence = try await delivery.reconcileTaxstoneRegister(job:job)
@@ -331,6 +344,14 @@ public actor Coordinator {
                 job.completionReconciliationRequired = nil
                 job.state = .completed;job.stage = "complete";job.error = nil
                 if job.request != previous || reconciled {try await save()}
+                if job.postDeliveryMediaCleanup != nil {
+                    do {
+                        try storage.resumePostDeliveryMediaCleanup(job:&job,checkpoint:checkpoint)
+                    } catch {
+                        job.storageWarnings = (job.storageWarnings ?? []) + ["Post-delivery media cleanup remains resumable: "+error.localizedDescription]
+                        try? Persistence.save(job,to:checkpoint)
+                    }
+                }
                 try await progress(job); return job
             }
             job.stage = "capability verification"
@@ -435,7 +456,8 @@ public actor Coordinator {
             if request.productionWorkflow != nil {
                 job.stage = "original archive verification";try await save()
                 try authorizeNewOperation()
-                source.archiveReference = try await delivery.archive(source:source,request:request)
+                let archive = try await delivery.archive(source:source,request:request)
+                source.archiveReference = archive.url;source.archiveReceipt = archive
                 job.source = source;try await save()
             }
             if request.productionWorkflow == .taxstoneLibrary,
@@ -590,7 +612,9 @@ public actor Coordinator {
             if request.productionWorkflow == nil {
                 job.stage = "original archive verification"; try await save()
                 try authorizeNewOperation()
-                job.source?.archiveReference = try await delivery.archive(source:source,request:request); try await save()
+                let archive = try await delivery.archive(source:source,request:request)
+                source.archiveReference = archive.url;source.archiveReceipt = archive
+                job.source = source;try await save()
             }
             job.stage = "Drive folder"; try await save()
             try authorizeNewOperation()
@@ -639,8 +663,18 @@ public actor Coordinator {
             job.stage = "final Drive package verification"; try await save()
             guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Required completion evidence is missing or incorrectly routed")}
             try await delivery.verifyPackage(job:job,directory:dir)
-            job.state = .completed; job.stage = "complete"; job.error = nil; try await save()
+            job.state = .completed; job.stage = "complete"; job.error = nil
+            job.postDeliveryMediaCleanup = try storage.preparePostDeliveryMediaCleanup(job:job,directory:dir)
+            job.updatedAt = Date();try Persistence.save(job,to:checkpoint)
             completedReadbackPassed = true
+            try await progress(job)
+            do {
+                try storage.resumePostDeliveryMediaCleanup(job:&job,checkpoint:checkpoint)
+                try await progress(job)
+            } catch {
+                job.storageWarnings = (job.storageWarnings ?? []) + ["Post-delivery media cleanup remains resumable: "+error.localizedDescription]
+                try await save()
+            }
             return job
         } catch {
             // A rejected renewal must not downgrade a verified completed job or

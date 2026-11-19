@@ -241,7 +241,7 @@ public actor DriveDelivery {
         }
         return id
     }
-    public func archive(source: SourceRecord, request: JobRequest) async throws -> String {
+    public func archive(source: SourceRecord, request: JobRequest) async throws -> DriveReceipt {
         let route = try DestinationResolver.resolve(source:source,request:request,asset:.fullEpisode)
         if let reference = source.archiveReference {
             let id = try Self.archiveID(reference)
@@ -253,7 +253,7 @@ public actor DriveDelivery {
             let receipt = try await verify(id:id,local:URL(fileURLWithPath:source.path),parent:parent,name:name,
                 sha:source.sha256,md5:Integrity.md5(URL(fileURLWithPath:source.path)),bytes:source.bytes,
                 destination:nil,expectedPermissions:Self.permissionFingerprint(info))
-            return receipt.url
+            return receipt
         }
         let local = URL(fileURLWithPath:source.path)
         let name: String
@@ -278,9 +278,9 @@ public actor DriveDelivery {
             let info = try await metadata(id)
             guard let name = info["name"] as? String else {throw JoeyError.failed("Original archive name missing")}
             return try await verify(id:id,local:local,parent:root,name:name,sha:source.sha256,md5:md5,bytes:source.bytes,
-                destination:route,expectedPermissions:Self.permissionFingerprint(info)).url
+                destination:route,expectedPermissions:Self.permissionFingerprint(info))
         }
-        return try await upload(local,name:name,parent:root,destination:route).url
+        return try await upload(local,name:name,parent:root,destination:route)
     }
     public func downloadOriginal(reference: String, directory: URL) async throws -> URL {
         let id = try Self.archiveID(reference)
@@ -538,6 +538,13 @@ public actor DriveDelivery {
             throw JoeyError.failed("Required QA, destination, companion or register evidence is incomplete")
         }
         let destination = try DestinationResolver.resolve(source:source,request:job.request,asset:.clip)
+        guard Records.archiveReceiptMatchesSource(source),let archive = source.archiveReceipt,
+              let archiveMD5 = archive.md5,let archivePermissions = archive.permissionFingerprint else {
+            throw JoeyError.failed("Verified full-source Drive archive receipt is missing or mismatched")
+        }
+        _ = try await verify(id:archive.id,local:URL(fileURLWithPath:source.path),parent:archive.parent,
+            name:archive.name,sha:archive.sha256,md5:archiveMD5,bytes:archive.bytes,
+            destination:nil,expectedPermissions:archivePermissions)
         for receipt in job.clips.compactMap(\.drive) + Array(job.companions.values) {
             guard let md5 = receipt.md5,let fingerprint = receipt.permissionFingerprint else {throw JoeyError.failed("Saved filing receipt lacks integrity/access proof: \(receipt.id)")}
             let localURL = directory.appendingPathComponent(receipt.name)

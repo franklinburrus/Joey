@@ -315,7 +315,9 @@ private actor FolderRecoveryDelivery: CoordinatorDelivery {
     init(delivery: DriveDelivery) {self.delivery = delivery}
     func metadata(_ id: String) async throws -> [String:Any] {throw JoeyError.failed("Unexpected source read")}
     func downloadOriginal(reference: String, directory: URL) async throws -> URL {throw JoeyError.failed("Saved source must be reused")}
-    func archive(source: SourceRecord, request: JobRequest) async throws -> String {"https://example.invalid/synthetic-archive"}
+    func archive(source: SourceRecord, request: JobRequest) async throws -> DriveReceipt {
+        try syntheticArchiveReceipt(source:source,request:request)
+    }
     func episodeFolder(source: SourceRecord, request: JobRequest, jobID: String, existingFolderID: String?, intentURL: URL) async throws -> String {
         try await delivery.episodeFolder(source:source,request:request,jobID:jobID,existingFolderID:existingFolderID,intentURL:intentURL)
     }
