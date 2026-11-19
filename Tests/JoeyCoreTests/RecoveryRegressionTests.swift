@@ -601,6 +601,55 @@ final class RecoveryRegressionTests: XCTestCase {
         XCTAssertEqual(reopenedCalls,calls,"Completed reopen must not repeat provider work")
     }
 
+    func testSameSourceReuseCopiesLocalMediaOrRestoresVerifiedEvictedArchive() async throws {
+        for evicted in [false,true] {
+            let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+            let request = try Fixtures.request(dir:root,path:"unused")
+            let (saved,_) = try completed(request,root:root)
+            let prior = try XCTUnwrap(saved.source)
+            let sourceBytes = try Data(contentsOf:URL(fileURLWithPath:prior.path))
+            if evicted {try FileManager.default.removeItem(atPath:prior.path)}
+            let nextDirectory = root.appendingPathComponent("jobs/next-source-job",isDirectory:true)
+            try FileManager.default.createDirectory(at:nextDirectory,withIntermediateDirectories:true)
+            let downloads = ReusableSourceDownloadCounter()
+            let restored = try await Coordinator.materializeReusableSource(prior,directory:nextDirectory,
+                expectedSHA256:prior.sha256,archiveFallback:nil) {reference,directory in
+                    await downloads.increment()
+                    XCTAssertEqual(reference,prior.archiveReference)
+                    let local = directory.appendingPathComponent("original.mp4")
+                    try sourceBytes.write(to:local)
+                    return local
+                }
+            let downloadCount = await downloads.count
+            XCTAssertEqual(try Integrity.sha256(restored),prior.sha256)
+            XCTAssertEqual(restored.deletingLastPathComponent(),nextDirectory)
+            XCTAssertNotEqual(restored.path,prior.path)
+            XCTAssertEqual(downloadCount,evicted ? 1:0)
+            XCTAssertEqual(FileManager.default.fileExists(atPath:prior.path),!evicted,
+                           "Materialization must not alter the prior job's or selected original's bytes")
+        }
+    }
+
+    func testEvictedSameSourceWithoutVerifiedArchiveFailsClosed() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        let request = try Fixtures.request(dir:root,path:"unused")
+        let (saved,_) = try completed(request,root:root)
+        var prior = try XCTUnwrap(saved.source)
+        try FileManager.default.removeItem(atPath:prior.path)
+        prior.archiveReceipt = nil;prior.archiveReference = nil
+        let nextDirectory = root.appendingPathComponent("jobs/next-source-job",isDirectory:true)
+        try FileManager.default.createDirectory(at:nextDirectory,withIntermediateDirectories:true)
+        do {
+            _ = try await Coordinator.materializeReusableSource(prior,directory:nextDirectory,
+                expectedSHA256:prior.sha256,archiveFallback:nil) {_,_ in
+                    XCTFail("No archive authority means no download")
+                    throw JoeyError.failed("Unexpected source download")
+                }
+            XCTFail("Evicted source without an archive receipt must remain blocked")
+        } catch {XCTAssertTrue(error.localizedDescription.contains("no hash-bound Drive archive"))}
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(at:nextDirectory,includingPropertiesForKeys:nil).isEmpty)
+    }
+
     func testIncompleteDrivePackagePreservesLocalMedia() async throws {
         let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
         var request = try Fixtures.request(dir:root,path:"unused")
@@ -1393,6 +1442,11 @@ final class RecoveryRegressionTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath:directory.appendingPathComponent(saved.clips[0].filename).path),
                        "Completed Drive recovery removes only the Joey-owned local clip")
     }
+}
+
+private actor ReusableSourceDownloadCounter {
+    private(set) var count = 0
+    func increment() {count += 1}
 }
 
 private actor RecoveryDelivery: CoordinatorDelivery {

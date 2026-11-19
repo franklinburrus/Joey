@@ -114,6 +114,29 @@ final class TaxstoneInventoryTests: XCTestCase {
         XCTAssertEqual(try fixture.checkpointBytes()[job.id],try Data(contentsOf:fixture.root.appendingPathComponent("jobs/"+job.id+"/job.json")))
         XCTAssertEqual(fixture.mutations,0)
     }
+
+    func testCompletedPackageRemainsVerifiedAfterJoeyMediaEviction() async throws {
+        let fixture = try TaxstoneInventoryFixture();defer {fixture.remove()}
+        let job = try fixture.addJob(track:"6001",completed:true)
+        let directory = fixture.root.appendingPathComponent("jobs/"+job.id)
+        let sourcePath = try XCTUnwrap(job.source?.path)
+        let clipPath = directory.appendingPathComponent(job.clips[0].filename)
+        XCTAssertTrue(Records.archiveReceiptMatchesSource(try XCTUnwrap(job.source)))
+        XCTAssertTrue(FileManager.default.fileExists(atPath:sourcePath))
+        XCTAssertTrue(FileManager.default.fileExists(atPath:clipPath.path))
+        try FileManager.default.removeItem(atPath:sourcePath)
+        try FileManager.default.removeItem(at:clipPath)
+
+        let state = try await fixture.library().inventory()
+        let episode = try XCTUnwrap(state.episodes.first)
+        XCTAssertEqual(episode.status,"COMPLETED",episode.error ?? "")
+        XCTAssertEqual(episode.acceptedClips,1)
+        XCTAssertEqual(episode.missingSeconds,0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath:sourcePath))
+        XCTAssertFalse(FileManager.default.fileExists(atPath:clipPath.path))
+        XCTAssertEqual(fixture.mutations,0,"Inventory and receipt verification must remain read-only")
+        XCTAssertEqual(fixture.unexpectedHelpers,0,"Provider readback must not render or write")
+    }
 }
 
 private final class TaxstoneInventoryFixture: @unchecked Sendable {
@@ -156,7 +179,9 @@ private final class TaxstoneInventoryFixture: @unchecked Sendable {
             width:0,height:0,fps:0,hasAudio:true,kind:.audio,streams:[],authorizationBasis:"Synthetic inventory fixture",classificationEvidence:"Synthetic only")
         let driveID = "original_drive_identity_"+track
         metadata[driveID] = ["id":driveID,"name":local.lastPathComponent,"mimeType":"audio/mpeg",
-            "parents":[TaxstoneLibrary.archiveRoot],"sha256Checksum":source.sha256,"trashed":false]
+            "parents":[TaxstoneLibrary.archiveRoot],"size":String(source.bytes),"md5Checksum":try Integrity.md5(local),
+            "sha256Checksum":source.sha256,"trashed":false,"permissions":Self.permissions,
+            "webViewLink":"https://drive.google.com/file/d/"+driveID+"/view"]
         evidence.append(TaxstoneEvidenceEntry(driveID:driveID,trackID:track,title:source.title,duration:source.duration,
             sourceSHA256:source.sha256,legacyClips:[],notes:[]))
         return source
@@ -183,7 +208,13 @@ private final class TaxstoneInventoryFixture: @unchecked Sendable {
             "parents":[route.rootID],"trashed":false,"permissions":Self.permissions,
             "appProperties":["joeySourceID":source.id,"joeySourceSHA256":source.sha256,"joeyOwner":"taxstone"]]
         var job = JobRecord(id:id,request:request)
-        job.source = source;job.folderID = folder;job.planningBasis = .transcriptAssisted
+        var archivedSource = source
+        archivedSource.archiveReference = "https://drive.google.com/file/d/"+sourceDriveID(track)+"/view"
+        archivedSource.archiveReceipt = DriveReceipt(id:sourceDriveID(track),name:URL(fileURLWithPath:source.path).lastPathComponent,
+            parent:TaxstoneLibrary.archiveRoot,bytes:source.bytes,md5:try Integrity.md5(URL(fileURLWithPath:source.path)),
+            sha256:source.sha256,url:archivedSource.archiveReference!,permissions:["user:owner"],verifiedAt:Date(),
+            permissionFingerprint:try DriveDelivery.permissionFingerprint(["permissions":Self.permissions]))
+        job.source = archivedSource;job.folderID = folder;job.planningBasis = .transcriptAssisted
         job.transcript = Transcript(sourceID:source.id,sourceSHA256:source.sha256,duration:source.duration,engine:"Synthetic fixture",
             segments:[TranscriptSegment(start:0,end:100,text:"Synthetic complete transcript.")])
         let local = directory.appendingPathComponent("01_Clip_soundcloud-"+track+"_00-00-00_to_00-01-40.mp4")
@@ -215,6 +246,7 @@ private final class TaxstoneInventoryFixture: @unchecked Sendable {
         try Persistence.save(job,to:directory.appendingPathComponent("job.json"))
         return job
     }
+    private func sourceDriveID(_ track: String) -> String {"original_drive_identity_"+track}
     func addHistorical(track: String, unknown: Bool) throws {
         _ = try addOriginal(track:track)
         let id = (unknown ? "unknown_":"legacy_")+track

@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Darwin
 
 public struct MediaURLVerification: Codable, Sendable {
     public var checkedAt: Date
@@ -45,7 +46,22 @@ public enum BufferPreflight {
     public static func check(job: JobRecord, clip: ClipRecord, root: URL, profile: SharedProfile) async throws -> BufferMediaPreflight {
         try validateProfile(profile,owner:job.request.owner,workflow:job.request.productionWorkflow)
         let source = try validateJob(job,clip:clip)
-        let output = try acceptedFile(root:root,jobID:job.id,filename:clip.filename)
+        guard let receipt = clip.drive else {throw JoeyError.failed("Buffer preflight: accepted Drive receipt is missing")}
+        // Read existing settings directly: preflight must not discover helpers,
+        // canonicalize configuration or write settings during a production run.
+        let configuration: Configuration = try Persistence.load(root.appendingPathComponent("settings.json"))
+        let drive = try DriveDelivery(remote:configuration.rcloneRemote)
+        return try await withAcceptedFile(root:root,jobID:job.id,filename:clip.filename,expectedBytes:receipt.bytes,
+            download:{destination in
+                try await drive.downloadAcceptedClip(receipt:receipt,source:source,request:job.request,
+                    folderID:job.folderID!,to:destination)
+            },operation:{output in
+                try await checkAcceptedOutput(job:job,clip:clip,profile:profile,source:source,output:output,drive:drive)
+            })
+    }
+
+    private static func checkAcceptedOutput(job: JobRecord, clip: ClipRecord, profile: SharedProfile,
+                                            source: SourceRecord, output: URL, drive: DriveDelivery) async throws -> BufferMediaPreflight {
         let bytes = try size(output), sha = try Integrity.sha256(output)
         guard bytes == clip.bytes, sha == clip.sha256, sha == clip.qa?.outputSHA256,
               bytes == clip.drive?.bytes, sha == clip.drive?.sha256 else {
@@ -54,15 +70,11 @@ public enum BufferPreflight {
         let outputProfile = try profile.outputProfile(for:source.kind)
         let (probe,mediaChecks) = try await inspectMedia(output,expectedDuration:clip.expectedDuration,hasAudio:source.hasAudio,profile:outputProfile)
         var checks = mediaChecks
-        checks["production_qa"] = "Accepted QA output SHA-256 matches current complete local file"
+        checks["production_qa"] = "Accepted QA output SHA-256 matches the current complete local or verified temporary file"
         checks["audio_video_synchronization"] = source.hasAudio
             ? "Current stream timing passed; original source-fidelity/synchronization QA reused, bound to unchanged output SHA-256: \(clip.qa!.checks["audio_fidelity_sync"]!)"
             : "Source and output have no audio stream"
         checks["authorization"] = source.authorizationBasis
-        // Read existing settings directly: preflight must not discover helpers,
-        // canonicalize configuration or write settings during a production run.
-        let configuration: Configuration = try Persistence.load(root.appendingPathComponent("settings.json"))
-        let drive = try DriveDelivery(remote:configuration.rcloneRemote)
         let receipt = clip.drive!
         async let file = drive.metadata(receipt.id)
         async let folder = drive.metadata(job.folderID!)
@@ -94,6 +106,51 @@ public enum BufferPreflight {
                 "No scheduled-publication URL lifetime is established. Block scheduling unless retrieval suitability until publication is separately verified.",
                 "Technical readiness does not establish Buffer ingestion or platform publication."
             ])
+    }
+
+    /// Use the durable accepted file when present. If delivery cleanup already
+    /// evicted it, restore one verified temporary copy for this read-only check
+    /// and remove that copy when the caller returns or fails.
+    static func withAcceptedFile<T>(root: URL, jobID: String, filename: String, expectedBytes: Int64,
+                                    download: (URL) async throws -> URL,
+                                    operation: (URL) async throws -> T) async throws -> T {
+        guard expectedBytes > 0 else {throw JoeyError.invalid("Buffer preflight: accepted output size is missing")}
+        if let local = try existingAcceptedFile(root:root,jobID:jobID,filename:filename) {
+            guard try size(local) == expectedBytes else {throw JoeyError.failed("Buffer preflight: local accepted output size differs from its Drive receipt")}
+            return try await operation(local)
+        }
+        let temporaryRoot = try StorageManager.canonicalRoot(FileManager.default.temporaryDirectory)
+        let temporaryDirectory = temporaryRoot.appendingPathComponent("joey-buffer-preflight-"+UUID().uuidString,isDirectory:true)
+        try FileManager.default.createDirectory(at:temporaryDirectory,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
+        defer {try? FileManager.default.removeItem(at:temporaryDirectory)}
+        try StorageManager.noLinks(temporaryDirectory)
+        try Persistence.checkDisk(at:temporaryDirectory,requiredBytes:expectedBytes)
+        let target = temporaryDirectory.appendingPathComponent(filename)
+        let downloaded = try await download(target)
+        guard downloaded.standardizedFileURL == target.standardizedFileURL else {
+            throw JoeyError.failed("Buffer preflight download returned a different temporary path")
+        }
+        try StorageManager.noLinks(downloaded)
+        guard try size(downloaded) == expectedBytes else {throw JoeyError.failed("Buffer preflight restored output has an unexpected size")}
+        return try await operation(downloaded)
+    }
+
+    private static func existingAcceptedFile(root: URL, jobID: String, filename: String) throws -> URL? {
+        guard [jobID,filename].allSatisfy({!$0.isEmpty && $0 != "." && $0 != ".." && !$0.contains("/") && !$0.contains("\\") && !$0.contains("\0")}),
+              filename.lowercased().hasSuffix(".mp4") else {throw JoeyError.invalid("Buffer preflight: unsafe job or output path")}
+        let base = try StorageManager.canonicalRoot(root)
+        let jobDirectory = base.appendingPathComponent("jobs/"+jobID,isDirectory:true)
+        try StorageManager.noLinks(jobDirectory)
+        let file = jobDirectory.appendingPathComponent(filename)
+        var st = stat()
+        guard lstat(file.path,&st) == 0 else {
+            if errno == ENOENT {return nil}
+            throw NSError(domain:NSPOSIXErrorDomain,code:Int(errno))
+        }
+        guard (st.st_mode & S_IFMT) == S_IFREG,st.st_nlink == 1 else {
+            throw JoeyError.invalid("Buffer preflight: accepted output is not an owned regular file")
+        }
+        return try acceptedFile(root:base,jobID:jobID,filename:filename)
     }
 
     static func validateProfile(_ profile: SharedProfile, owner: Owner, workflow: ProductionWorkflow?, now: Date = Date()) throws {
@@ -307,7 +364,7 @@ public enum BufferPreflight {
         }
         let now = Date()
         return MediaURLVerification(checkedAt:now,validUntil:now.addingTimeInterval(15*60),
-            method:"Anonymous HTTPS GET with bounded byte ranges, no cookies/credentials/proxy; exact range-byte comparison to accepted local media",
+            method:"Anonymous HTTPS GET with bounded byte ranges, no cookies/credentials/proxy; exact range-byte comparison to the SHA-256-verified accepted media copy",
             contentType:contentType,bytesVerified:verified,fullFileSHA256:nil,totalBytes:totalBytes,ranges:ranges,rangeSHA256:hashes,finalURLs:finals)
     }
 }

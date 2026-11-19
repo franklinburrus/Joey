@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// The coordinator owns recovery and sequencing; provider adapters own current
 /// readback. Tests can replace this boundary without reaching live accounts.
@@ -99,6 +100,61 @@ public actor Coordinator {
         return JobInventory(jobs:readable,failures:failures)
     }
     public func directory(for id: String) -> URL {root.appendingPathComponent("jobs").appendingPathComponent(id)}
+    static func materializeReusableSource(_ source: SourceRecord, directory: URL, expectedSHA256: String?,
+                                         archiveFallback: String?,
+                                         download: (String,URL) async throws -> URL) async throws -> URL {
+        guard expectedSHA256 == nil || expectedSHA256 == source.sha256 else {
+            throw JoeyError.failed("Existing source identity differs from the requested archive hash")
+        }
+        try StorageManager.noLinks(directory)
+        let archiveName = source.archiveReceipt?.name ?? ""
+        let sourceExtension = URL(fileURLWithPath:source.path).pathExtension
+        let suffix = sourceExtension.isEmpty ? (archiveName as NSString).pathExtension : sourceExtension
+        let target = directory.appendingPathComponent(suffix.isEmpty ? "original" : "original."+suffix)
+        func validate(_ file: URL) throws {
+            var st = stat()
+            guard lstat(file.path,&st) == 0,(st.st_mode & S_IFMT) == S_IFREG,st.st_nlink == 1,
+                  st.st_size == source.bytes,try Integrity.sha256(file) == source.sha256 else {
+                throw JoeyError.failed("Reusable source bytes differ from the saved source identity")
+            }
+        }
+        var targetStat = stat()
+        if lstat(target.path,&targetStat) == 0 {try validate(target);return target}
+        if errno != ENOENT {throw NSError(domain:NSPOSIXErrorDomain,code:Int(errno))}
+
+        let prior = URL(fileURLWithPath:source.path)
+        var sourceStat = stat()
+        if lstat(prior.path,&sourceStat) == 0 {
+            guard (sourceStat.st_mode & S_IFMT) == S_IFREG,sourceStat.st_size == source.bytes,
+                  try Integrity.sha256(prior) == source.sha256 else {
+                throw JoeyError.failed("Reusable local source changed; original preserved")
+            }
+            try Persistence.checkDisk(at:directory,requiredBytes:source.bytes)
+            try FileManager.default.copyItem(at:prior,to:target)
+            try validate(target)
+            return target
+        }
+        guard errno == ENOENT else {throw NSError(domain:NSPOSIXErrorDomain,code:Int(errno))}
+
+        let reference: String
+        if Records.archiveReceiptMatchesSource(source),let saved = source.archiveReference,
+           let receipt = source.archiveReceipt,Records.archiveID(saved) == receipt.id {
+            reference = saved
+        } else if let archiveFallback,expectedSHA256 == source.sha256,
+                  let url = URL(string:archiveFallback),url.scheme == "https",url.host == "drive.google.com",
+                  Records.archiveID(archiveFallback) != nil {
+            reference = archiveFallback
+        } else {
+            throw JoeyError.dependency("Reusable source copy was evicted and no hash-bound Drive archive is available")
+        }
+        let restored = try await download(reference,directory)
+        guard restored.standardizedFileURL.deletingLastPathComponent() == directory.standardizedFileURL else {
+            throw JoeyError.invalid("Recovered source was not placed in the current job directory")
+        }
+        try StorageManager.noLinks(restored)
+        try validate(restored)
+        return restored
+    }
     public func run(_ request: JobRequest, estimatedDuration: Double? = nil,
                     progress: @escaping @Sendable (JobRecord) async throws -> Void = {_ in}) async throws -> JobRecord {
         try await run(request,estimatedDuration:estimatedDuration,admitLink:nil,progress:progress)
@@ -385,9 +441,12 @@ public actor Coordinator {
             var reusableTranscript: Transcript?
             if let prior = job.source {sourceURL = URL(fileURLWithPath:prior.path)}
             else if request.localPath == nil, let prior = reusable?.source {
-                sourceURL = URL(fileURLWithPath:prior.path)
+                sourceURL = try await Self.materializeReusableSource(prior,directory:dir,
+                    expectedSHA256:request.expectedSourceSHA256,archiveFallback:request.archiveReference) {reference,directory in
+                        try await delivery.downloadOriginal(reference:reference,directory:directory)
+                    }
                 var copy = prior; copy.title = request.title; copy.episodeDate = request.episodeDate
-                copy.authorizationBasis = request.authorizationBasis; job.source = copy
+                copy.path = sourceURL.path;copy.authorizationBasis = request.authorizationBasis; job.source = copy
                 reusableTranscript = reusable?.transcript
             } else if request.localPath == nil, let archive = request.archiveReference {
                 sourceURL = try await delivery.downloadOriginal(reference:archive,directory:dir)
