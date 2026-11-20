@@ -54,7 +54,9 @@ struct ScratchAttempt: Codable {
 /// the existing exclusive processing lock, so cleanup cannot race coordinator
 /// work or another app instance.
 public final class StorageManager {
+    private enum MediaRemovalResult {case removed(Int64), absent, retained(String)}
     @TaskLocal public static var processingRoot: URL?
+    @TaskLocal static var testMediaEvictionStopAfterUnlink: Int?
     // Internal dependency injection for isolated capacity/recovery tests. The
     // native application never overrides the real filesystem measurement.
     @TaskLocal static var capacityOverride: (@Sendable () -> Int64)?
@@ -288,6 +290,270 @@ public final class StorageManager {
             } catch {continue} // Uncertainty is preservation, never deletion authority.
         }
         return result
+    }
+
+    private func retainedMediaFile(path: String, role: PostDeliveryMediaFile.Role,
+                                   driveID: String?, reason: String) -> PostDeliveryMediaFile {
+        PostDeliveryMediaFile(path:path,role:role,driveID:driveID,bytes:nil,sha256:nil,
+            inode:nil,device:nil,outcome:.retained,reason:reason,updatedAt:Date())
+    }
+    private func canonicalMediaPath(_ path: String) -> String? {
+        let expanded = (path as NSString).expandingTildeInPath
+        guard let resolved = realpath(expanded,nil) else {return URL(fileURLWithPath:expanded).standardizedFileURL.path}
+        defer {free(resolved)}
+        return String(cString:resolved)
+    }
+    private func jobDependencyReason(for path: String, jobID: String) -> String? {
+        let jobsDirectory = root.appendingPathComponent("jobs",isDirectory:true)
+        guard fm.fileExists(atPath:jobsDirectory.path) else {return nil}
+        do {
+            try Self.noLinks(jobsDirectory)
+            let candidate = canonicalMediaPath(path) ?? URL(fileURLWithPath:path).standardizedFileURL.path
+            for entry in try fm.contentsOfDirectory(at:jobsDirectory,includingPropertiesForKeys:nil,options:.skipsHiddenFiles) {
+                try Self.noLinks(entry)
+                var directoryStat = stat()
+                guard lstat(entry.path,&directoryStat) == 0,(directoryStat.st_mode & S_IFMT) == S_IFDIR else {continue}
+                if entry.lastPathComponent == jobID {continue}
+                let checkpoint = entry.appendingPathComponent("job.json")
+                guard fm.fileExists(atPath:checkpoint.path) else {
+                    if !(try fm.contentsOfDirectory(at:entry,includingPropertiesForKeys:nil,options:.skipsHiddenFiles)).isEmpty {
+                        return "Unreconciled job folder may depend on this local media: \(entry.lastPathComponent)"
+                    }
+                    continue
+                }
+                try Self.noLinks(checkpoint)
+                let other: JobRecord = try Persistence.load(checkpoint)
+                let references = [other.source?.path,other.request.localPath,other.request.transcriptPath,
+                    other.request.artwork?.file.path].compactMap {$0}
+                if references.contains(where:{canonicalMediaPath($0) == candidate}) {
+                    return "Referenced by another saved job: \(other.id)"
+                }
+            }
+            return nil
+        } catch {
+            return "Job dependencies could not be reconciled: \(error.localizedDescription)"
+        }
+    }
+    private func captureMediaFile(path: String, role: PostDeliveryMediaFile.Role,
+                                  driveID: String?, expectedBytes: Int64?, expectedSHA256: String?,
+                                  directory: URL) -> PostDeliveryMediaFile {
+        let standardized = URL(fileURLWithPath:path)
+        do {try Self.noLinks(standardized)}
+        catch {return retainedMediaFile(path:standardized.path,role:role,driveID:driveID,
+            reason:"Local media path contains a link or cannot be resolved safely")}
+        let canonical = canonicalMediaPath(standardized.path) ?? standardized.path
+        guard (canonical as NSString).deletingLastPathComponent == directory.path,
+              Self.component((canonical as NSString).lastPathComponent) else {
+            return retainedMediaFile(path:path,role:role,driveID:driveID,reason:"Not a direct Joey job-owned media file")
+        }
+        if let dependency = jobDependencyReason(for:canonical,jobID:directory.lastPathComponent) {
+            return retainedMediaFile(path:canonical,role:role,driveID:driveID,reason:dependency)
+        }
+        do {
+            try Self.noLinks(directory)
+            let parent = try Self.openDirectory(directory)
+            defer {Darwin.close(parent)}
+            let name = (canonical as NSString).lastPathComponent
+            let fd = openat(parent,name,O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+            if fd < 0 {
+                if errno == ENOENT {
+                    return PostDeliveryMediaFile(path:canonical,role:role,driveID:driveID,
+                        bytes:expectedBytes,sha256:expectedSHA256,inode:nil,device:nil,outcome:.absent,
+                        reason:"Local media was already absent; verified Drive delivery remains",updatedAt:Date())
+                }
+                throw NSError(domain:NSPOSIXErrorDomain,code:Int(errno))
+            }
+            defer {Darwin.close(fd)}
+            var st = stat()
+            guard fstat(fd,&st) == 0,(st.st_mode & S_IFMT) == S_IFREG,st.st_nlink == 1,
+                  st.st_size > 0,(expectedBytes == nil || st.st_size == expectedBytes),
+                  Self.mediaHash(fd) == expectedSHA256 else {
+                return retainedMediaFile(path:canonical,role:role,driveID:driveID,
+                    reason:"Local media type, link count, size, or SHA-256 differs from accepted identity")
+            }
+            return PostDeliveryMediaFile(path:canonical,role:role,driveID:driveID,
+                bytes:st.st_size,sha256:expectedSHA256,inode:UInt64(st.st_ino),device:st.st_dev,
+                outcome:.pending,reason:"Joey-owned file; matching Drive receipt and package readback required before unlink",updatedAt:nil)
+        } catch {
+            return retainedMediaFile(path:canonical,role:role,driveID:driveID,
+                reason:"Local file ownership could not be verified: \(error.localizedDescription)")
+        }
+    }
+    private static func mediaHash(_ fd: Int32) -> String? {
+        var digest = SHA256()
+        let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount:1024*1024,alignment:16)
+        defer {buffer.deallocate()}
+        while true {
+            let count = Darwin.read(fd,buffer.baseAddress!,buffer.count)
+            if count < 0 {if errno == EINTR {continue};return nil}
+            if count == 0 {break}
+            digest.update(bufferPointer:UnsafeRawBufferPointer(start:buffer.baseAddress,count:count))
+        }
+        return digest.finalize().map {String(format:"%02x",$0)}.joined()
+    }
+    func preparePostDeliveryMediaCleanup(job: JobRecord, directory: URL) throws -> PostDeliveryMediaCleanup {
+        guard job.state == .completed,job.hasRequiredCompletionEvidence,let source = job.source,
+              directory.standardizedFileURL.path == root.appendingPathComponent("jobs/\(job.id)").standardizedFileURL.path else {
+            throw JoeyError.failed("Post-delivery cleanup requires the completed job's verified package")
+        }
+        try Self.noLinks(directory)
+        var directoryStat = stat()
+        guard lstat(directory.path,&directoryStat) == 0,(directoryStat.st_mode & S_IFMT) == S_IFDIR else {
+            throw JoeyError.failed("Completed job directory identity is unavailable")
+        }
+        let archiveReady = Records.archiveReceiptMatchesSource(source) &&
+            !((job.clips.compactMap {$0.drive?.id} + Array(job.companions.values.map(\.id))).contains(source.archiveReceipt?.id ?? ""))
+        let archiveID = source.archiveReceipt?.id
+        let evidence = try Records.deliveryEvidenceSHA256(job:job)
+        var files: [PostDeliveryMediaFile] = []
+        if job.request.localPath != nil {
+            files.append(retainedMediaFile(path:source.path,role:.sourceWorkingCopy,driveID:archiveID,
+                reason:"User-selected original input is not Joey-owned; preserved"))
+        } else if !archiveReady {
+            files.append(retainedMediaFile(path:source.path,role:.sourceWorkingCopy,driveID:archiveID,
+                reason:"Verified full-source Drive archive identity/readback is missing or mismatched"))
+        } else {
+            files.append(captureMediaFile(path:source.path,role:.sourceWorkingCopy,driveID:archiveID,
+                expectedBytes:source.bytes,expectedSHA256:source.sha256,directory:directory))
+        }
+        for clip in job.clips {
+            let path = directory.appendingPathComponent(clip.filename).path
+            guard archiveReady,let receipt = clip.drive,receipt.name == clip.filename,
+                  receipt.bytes == clip.bytes,receipt.sha256 == clip.sha256,
+                  receipt.parent == job.folderID else {
+                files.append(retainedMediaFile(path:path,role:.acceptedClip,driveID:clip.drive?.id,
+                    reason:"Complete verified source archive and matching accepted-clip Drive receipt are required"))
+                continue
+            }
+            files.append(captureMediaFile(path:path,role:.acceptedClip,driveID:receipt.id,
+                expectedBytes:clip.bytes,expectedSHA256:clip.sha256,directory:directory))
+        }
+        return PostDeliveryMediaCleanup(jobID:job.id,sourceID:source.id,
+            deliveryEvidenceSHA256:evidence,packageVerifiedAt:Date(),
+            directoryInode:UInt64(directoryStat.st_ino),directoryDevice:directoryStat.st_dev,files:files)
+    }
+    func resumePostDeliveryMediaCleanup(job: inout JobRecord, checkpoint: URL) throws {
+        guard var cleanup = job.postDeliveryMediaCleanup else {return}
+        guard cleanup.version == 1,cleanup.jobID == job.id,job.state == .completed,
+              let source = job.source,cleanup.sourceID == source.id else {
+            retainPendingMedia(in:&cleanup,reason:"Cleanup intent identity is invalid; local media preserved")
+            job.postDeliveryMediaCleanup = cleanup;try persistMediaCleanup(&job,to:checkpoint);return
+        }
+        let evidence = try? Records.deliveryEvidenceSHA256(job:job)
+        guard job.hasRequiredCompletionEvidence,evidence == cleanup.deliveryEvidenceSHA256,
+              Records.archiveReceiptMatchesSource(source) else {
+            retainPendingMedia(in:&cleanup,reason:"Verified delivery or archive evidence changed; local media preserved")
+            job.postDeliveryMediaCleanup = cleanup;try persistMediaCleanup(&job,to:checkpoint);return
+        }
+        let jobDirectory = root.appendingPathComponent("jobs/\(job.id)",isDirectory:true)
+        do {
+            try Self.noLinks(jobDirectory)
+            let directoryFD = try Self.openDirectory(jobDirectory)
+            defer {Darwin.close(directoryFD)}
+            var directoryStat = stat()
+            guard fstat(directoryFD,&directoryStat) == 0,(directoryStat.st_mode & S_IFMT) == S_IFDIR,
+                  UInt64(directoryStat.st_ino) == cleanup.directoryInode,directoryStat.st_dev == cleanup.directoryDevice else {
+                retainPendingMedia(in:&cleanup,reason:"Job directory identity changed; local media preserved")
+                job.postDeliveryMediaCleanup = cleanup;try persistMediaCleanup(&job,to:checkpoint);return
+            }
+            let workerLock = try ProcessingLock(directory:root,name:"storage-workers.lock")
+            defer {withExtendedLifetime(workerLock) {}}
+            cleanup.lastAttemptAt = Date()
+            if cleanup.freeBytesBefore == nil {cleanup.freeBytesBefore = try Self.capacity(at:root).free}
+            job.postDeliveryMediaCleanup = cleanup;try persistMediaCleanup(&job,to:checkpoint)
+            var unlinksThisAttempt = 0
+            for index in cleanup.files.indices where cleanup.files[index].outcome == .pending {
+                var item = cleanup.files[index]
+                guard mediaItemStillBound(item,job:job,directory:jobDirectory) else {
+                    item.outcome = .retained;item.reason = "Local file no longer matches its source/clip and Drive identities";item.updatedAt = Date()
+                    cleanup.files[index] = item;job.postDeliveryMediaCleanup = cleanup;try persistMediaCleanup(&job,to:checkpoint);continue
+                }
+                if let dependency = jobDependencyReason(for:item.path,jobID:job.id) {
+                    item.outcome = .retained;item.reason = dependency;item.updatedAt = Date()
+                    cleanup.files[index] = item;job.postDeliveryMediaCleanup = cleanup;try persistMediaCleanup(&job,to:checkpoint);continue
+                }
+                do {
+                    switch try unlinkMediaFile(item,directoryFD:directoryFD) {
+                    case .absent:
+                        item.outcome = .absent;item.reason = "Already absent when cleanup resumed; no second removal";item.updatedAt = Date()
+                    case .retained(let reason):
+                        item.outcome = .retained;item.reason = reason;item.updatedAt = Date()
+                    case .removed(let bytes):
+                        unlinksThisAttempt += 1
+                        if Self.testMediaEvictionStopAfterUnlink == unlinksThisAttempt {
+                            throw JoeyError.failed("Synthetic interruption after local unlink and before cleanup receipt update")
+                        }
+                        item.outcome = .removed;item.reason = "Joey-owned copy removed after Drive object, complete package, and creator records verified";item.updatedAt = Date()
+                        cleanup.removedBytes += bytes
+                    }
+                    cleanup.files[index] = item;job.postDeliveryMediaCleanup = cleanup
+                    try persistMediaCleanup(&job,to:checkpoint)
+                } catch {
+                    if error.localizedDescription.contains("Synthetic interruption after local unlink") {throw error}
+                    item.reason = "Removal failed; preserved for safe retry: \(error.localizedDescription)";item.updatedAt = Date()
+                    cleanup.files[index] = item;job.postDeliveryMediaCleanup = cleanup
+                    try persistMediaCleanup(&job,to:checkpoint)
+                }
+            }
+            cleanup.freeBytesAfter = try Self.capacity(at:root).free
+            if cleanup.files.allSatisfy({$0.outcome != .pending}) {cleanup.completedAt = Date()}
+            job.postDeliveryMediaCleanup = cleanup;try persistMediaCleanup(&job,to:checkpoint)
+        } catch {
+            throw error
+        }
+    }
+    private func mediaItemStillBound(_ item: PostDeliveryMediaFile, job: JobRecord, directory: URL) -> Bool {
+        guard let source = job.source else {return false}
+        switch item.role {
+        case .sourceWorkingCopy:
+            guard job.request.localPath == nil,Records.archiveReceiptMatchesSource(source),
+                  item.path == (canonicalMediaPath(source.path) ?? URL(fileURLWithPath:source.path).standardizedFileURL.path),
+                  let receipt = source.archiveReceipt,item.driveID == receipt.id,
+                  item.bytes == source.bytes,item.sha256 == source.sha256 else {return false}
+            return true
+        case .acceptedClip:
+            guard let clip = job.clips.first(where:{$0.drive?.id == item.driveID}),
+                  let receipt = clip.drive,
+                  item.path == (canonicalMediaPath(directory.appendingPathComponent(clip.filename).path) ?? directory.appendingPathComponent(clip.filename).standardizedFileURL.path),
+                  item.bytes == clip.bytes,item.sha256 == clip.sha256,
+                  receipt.name == clip.filename,receipt.bytes == clip.bytes,receipt.sha256 == clip.sha256,
+                  receipt.parent == job.folderID else {return false}
+            return true
+        }
+    }
+    private func unlinkMediaFile(_ item: PostDeliveryMediaFile, directoryFD: Int32) throws -> MediaRemovalResult {
+        let name = (item.path as NSString).lastPathComponent
+        guard Self.component(name),let bytes = item.bytes,let sha = item.sha256,
+              let inode = item.inode,let device = item.device else {
+            return .retained("Cleanup intent lacks exact file identity; local media preserved")
+        }
+        let fd = openat(directoryFD,name,O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        if fd < 0 {
+            if errno == ENOENT {return .absent}
+            throw NSError(domain:NSPOSIXErrorDomain,code:Int(errno))
+        }
+        defer {Darwin.close(fd)}
+        var st = stat()
+        guard fstat(fd,&st) == 0,(st.st_mode & S_IFMT) == S_IFREG,st.st_nlink == 1,
+              UInt64(st.st_ino) == inode,st.st_dev == device,st.st_size == bytes,
+              Self.mediaHash(fd) == sha else {
+            return .retained("Local file inode, device, link count, size, or SHA-256 changed; preserved")
+        }
+        guard unlinkat(directoryFD,name,0) == 0 else {throw NSError(domain:NSPOSIXErrorDomain,code:Int(errno))}
+        var absent = stat()
+        guard fstatat(directoryFD,name,&absent,AT_SYMLINK_NOFOLLOW) != 0,errno == ENOENT else {
+            throw JoeyError.failed("Local media unlink could not be verified")
+        }
+        return .removed(bytes)
+    }
+    private func retainPendingMedia(in cleanup: inout PostDeliveryMediaCleanup, reason: String) {
+        for index in cleanup.files.indices where cleanup.files[index].outcome == .pending {
+            cleanup.files[index].outcome = .retained;cleanup.files[index].reason = reason;cleanup.files[index].updatedAt = Date()
+        }
+        cleanup.completedAt = Date()
+    }
+    private func persistMediaCleanup(_ job: inout JobRecord, to checkpoint: URL) throws {
+        job.updatedAt = Date();try Persistence.save(job,to:checkpoint)
     }
     public static func inspect(root: URL) throws -> StorageSnapshot {
         let root = try canonicalRoot(root)

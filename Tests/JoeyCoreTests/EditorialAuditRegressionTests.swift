@@ -222,9 +222,9 @@ private actor EditorialPlanningDelivery: CoordinatorDelivery {
         unexpectedCalls += 1
         return .failed("Unexpected provider operation after planning cancellation")
     }
-    func archive(source: SourceRecord, request: JobRequest) async throws -> String {
+    func archive(source: SourceRecord, request: JobRequest) async throws -> DriveReceipt {
         archives += 1
-        return "https://example.invalid/synthetic-archive"
+        return try syntheticArchiveReceipt(source:source,request:request)
     }
     func metadata(_ id: String) async throws -> [String: Any] { throw unexpected() }
     func downloadOriginal(reference: String, directory: URL) async throws -> URL { throw unexpected() }

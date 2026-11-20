@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import JoeyCore
 
 final class BufferPreflightTests: XCTestCase {
@@ -163,6 +164,43 @@ final class BufferPreflightTests: XCTestCase {
         }
         try FileManager.default.createSymbolicLink(at:job.appendingPathComponent("linked.mp4"),withDestinationURL:output)
         XCTAssertThrowsError(try BufferPreflight.acceptedFile(root:root,jobID:"job",filename:"linked.mp4"))
+    }
+
+    func testEvictedAcceptedClipUsesTemporaryVerifiedCopyAndRemovesItAfterPreflight() async throws {
+        let root = try StorageManager.canonicalRoot(temporaryDirectory())
+        let jobDirectory = root.appendingPathComponent("jobs/test-completed-job",isDirectory:true)
+        try FileManager.default.createDirectory(at:jobDirectory,withIntermediateDirectories:true)
+        let bytes = Data("verified Drive clip fixture".utf8)
+        let expectedHash = SHA256.hash(data:bytes).map {String(format:"%02x",$0)}.joined()
+        let result = try await BufferPreflight.withAcceptedFile(root:root,jobID:"test-completed-job",filename:"clip.mp4",
+            expectedBytes:Int64(bytes.count),download:{destination in
+                try bytes.write(to:destination)
+                return destination
+            },operation:{output in
+                XCTAssertTrue(FileManager.default.fileExists(atPath:output.path))
+                XCTAssertFalse(output.deletingLastPathComponent().path.hasPrefix(jobDirectory.path),
+                               "Evicted delivery media must not be restored into the durable job directory")
+                return (try Integrity.sha256(output),output)
+            })
+        XCTAssertEqual(result.0,expectedHash)
+        XCTAssertFalse(FileManager.default.fileExists(atPath:result.1.path),
+                       "Temporary media must be removed after the read-only preflight")
+        XCTAssertFalse(FileManager.default.fileExists(atPath:jobDirectory.appendingPathComponent("clip.mp4").path))
+    }
+
+    func testPresentAcceptedClipDoesNotTriggerRecoveryDownload() async throws {
+        let root = try StorageManager.canonicalRoot(temporaryDirectory())
+        let jobDirectory = root.appendingPathComponent("jobs/test-completed-job",isDirectory:true)
+        try FileManager.default.createDirectory(at:jobDirectory,withIntermediateDirectories:true)
+        let output = jobDirectory.appendingPathComponent("clip.mp4")
+        try Data("already retained".utf8).write(to:output)
+        var downloaded = false
+        let result = try await BufferPreflight.withAcceptedFile(root:root,jobID:"test-completed-job",filename:"clip.mp4",
+            expectedBytes:Int64(try Data(contentsOf:output).count),download:{_ in downloaded = true;throw JoeyError.failed("Unexpected download")},
+            operation:{try Integrity.sha256($0)})
+        XCTAssertFalse(downloaded)
+        XCTAssertEqual(result,try Integrity.sha256(output))
+        XCTAssertTrue(FileManager.default.fileExists(atPath:output.path))
     }
 
     func testGeneratedMP4PassesCurrentProbeAndCompleteDecodeWhileTruncationFails() async throws {

@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import Darwin
 
 public struct TaxstoneLibraryEpisode: Codable, Sendable, Identifiable {
     public var id: String
@@ -125,10 +126,25 @@ public actor TaxstoneLibrary {
         episode.request = job.request; episode.jobID = job.id
         episode.plannedClips = job.clips.count
         let accepted = try job.clips.filter {clip in
-            guard clip.qa?.passed == true, let hash = clip.sha256 else {return false}
-            guard try Integrity.sha256(directory.appendingPathComponent(clip.filename)) == hash else {
+            guard clip.qa?.passed == true,let hash = clip.sha256,clip.qa?.outputSHA256 == hash else {return false}
+            let local = directory.appendingPathComponent(clip.filename)
+            var st = stat()
+            if lstat(local.path,&st) == 0 {
+                guard (st.st_mode & S_IFMT) == S_IFREG,
+                      clip.bytes == nil || st.st_size == clip.bytes,
+                      try Integrity.sha256(local) == hash else {
+                    throw JoeyError.failed("Previously accepted output changed; preserve and reconcile: "+clip.filename)
+                }
+                return true
+            }
+            guard errno == ENOENT,job.state == .completed,job.hasRequiredCompletionEvidence,
+                  let receipt = clip.drive,receipt.name == clip.filename,receipt.sha256 == hash,
+                  receipt.bytes == clip.bytes,receipt.parent == job.folderID else {
                 throw JoeyError.failed("Previously accepted output changed; preserve and reconcile: "+clip.filename)
             }
+            // Local payload eviction is safe only for an already completed
+            // package. verifyDelivery below must independently read back its
+            // exact Drive identity before inventory reports COMPLETED.
             return true
         }
         episode.acceptedClips = accepted.count

@@ -356,7 +356,7 @@ private actor IntegrityDelivery: CoordinatorDelivery {
     private func unexpected() -> JoeyError {calls += 1;return .failed("Unexpected provider operation in source-integrity test")}
     func metadata(_ id: String) async throws -> [String:Any] {throw unexpected()}
     func downloadOriginal(reference: String, directory: URL) async throws -> URL {throw unexpected()}
-    func archive(source: SourceRecord, request: JobRequest) async throws -> String {throw unexpected()}
+    func archive(source: SourceRecord, request: JobRequest) async throws -> DriveReceipt {throw unexpected()}
     func episodeFolder(source: SourceRecord, request: JobRequest, jobID: String, existingFolderID: String?, intentURL: URL) async throws -> String {throw unexpected()}
     func upload(_ local: URL, name: String?, parent: String, destination: FilingDestination, replaceCompanion: Bool) async throws -> DriveReceipt {throw unexpected()}
     func resolveArtwork(source: SourceRecord, configuration: Configuration, root: URL) async throws -> Artwork {throw unexpected()}

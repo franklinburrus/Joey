@@ -140,6 +140,45 @@ final class DriveFilingTests: XCTestCase {
                 "Use provider SHA-256 when available; otherwise verify a full remote download")
         }
     }
+
+    func testAcceptedClipRestoreVerifiesExactDriveObjectAndNeverTouchesJobMedia() async throws {
+        let (dir,source,request,route,provider,delivery) = try setup()
+        let canonical = try StorageManager.canonicalRoot(dir)
+        let local = canonical.appendingPathComponent("01_clip.mp4")
+        let receipt = try await delivery.upload(local,parent:FilingProvider.folder,destination:route)
+        try FileManager.default.removeItem(at:local)
+        let temporary = canonical.appendingPathComponent("buffer-preflight",isDirectory:true)
+        try FileManager.default.createDirectory(at:temporary,withIntermediateDirectories:false)
+        let target = temporary.appendingPathComponent(receipt.name)
+        let result = try await delivery.downloadAcceptedClip(receipt:receipt,source:source,request:request,
+            folderID:FilingProvider.folder,to:target)
+        XCTAssertEqual(result,target)
+        XCTAssertEqual(try Integrity.sha256(result),receipt.sha256)
+        XCTAssertFalse(FileManager.default.fileExists(atPath:local.path),"Remote recovery must not restore into the accepted job path")
+        XCTAssertEqual(provider.downloads,1)
+        XCTAssertEqual(provider.writes,1,"On-demand recovery is read-only")
+        XCTAssertEqual(provider.permissionMutations,0)
+    }
+
+    func testCorruptAcceptedClipRestoreIsRejectedAndTemporaryPartialRemoved() async throws {
+        let (dir,source,request,route,provider,delivery) = try setup()
+        let canonical = try StorageManager.canonicalRoot(dir)
+        let local = canonical.appendingPathComponent("01_clip.mp4")
+        let receipt = try await delivery.upload(local,parent:FilingProvider.folder,destination:route)
+        try FileManager.default.removeItem(at:local)
+        let temporary = canonical.appendingPathComponent("buffer-preflight",isDirectory:true)
+        try FileManager.default.createDirectory(at:temporary,withIntermediateDirectories:false)
+        let target = temporary.appendingPathComponent(receipt.name)
+        provider.corruptDownload = true
+        do {
+            _ = try await delivery.downloadAcceptedClip(receipt:receipt,source:source,request:request,
+                folderID:FilingProvider.folder,to:target)
+            XCTFail("Changed remote bytes must not be restored")
+        } catch {XCTAssertTrue(error.localizedDescription.contains("differs from its saved Drive receipt"))}
+        XCTAssertFalse(FileManager.default.fileExists(atPath:target.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath:temporary.appendingPathComponent("."+receipt.name+".download.partial").path))
+        XCTAssertEqual(provider.writes,1,"Rejected recovery must not mutate Drive")
+    }
     func testEquivalentMediaUnderAnotherNameIsNotDuplicated() async throws {
         let (dir,_,_,route,provider,delivery) = try setup(),file = dir.appendingPathComponent("01_clip.mp4")
         _ = try await delivery.upload(file,parent:FilingProvider.folder,destination:route)
@@ -185,7 +224,9 @@ final class DriveFilingTests: XCTestCase {
             provider.destination = try DestinationResolver.resolve(source:source,request:request,asset:.fullEpisode)
             let first = try await delivery.archive(source:source,request:request)
             let second = try await delivery.archive(source:source,request:request)
-            XCTAssertEqual(first,second);XCTAssertEqual(provider.writes,1)
+            XCTAssertEqual(first.id,second.id);XCTAssertEqual(first.url,second.url)
+            XCTAssertEqual(first.sha256,second.sha256);XCTAssertEqual(first.bytes,second.bytes)
+            XCTAssertEqual(provider.writes,1)
             XCTAssertEqual(Array(provider.names.values),[want])
             XCTAssertEqual(provider.writtenParents,["1KJ0-sjGWNxwIuis_faA5z_FbPUcbjEDD"])
             XCTAssertEqual(try Integrity.sha256(local),initial.sha256)

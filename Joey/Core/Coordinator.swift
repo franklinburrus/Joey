@@ -1,9 +1,10 @@
 import Foundation
+import Darwin
 
 /// The coordinator owns recovery and sequencing; provider adapters own current
 /// readback. Tests can replace this boundary without reaching live accounts.
 protocol CoordinatorDelivery: TaxstoneReuseProvider, Sendable {
-    func archive(source: SourceRecord, request: JobRequest) async throws -> String
+    func archive(source: SourceRecord, request: JobRequest) async throws -> DriveReceipt
     func episodeFolder(source: SourceRecord, request: JobRequest, jobID: String, existingFolderID: String?, intentURL: URL) async throws -> String
     func upload(_ local: URL, name: String?, parent: String, destination: FilingDestination, replaceCompanion: Bool) async throws -> DriveReceipt
     func resolveArtwork(source: SourceRecord, configuration: Configuration, root: URL) async throws -> Artwork
@@ -99,6 +100,62 @@ public actor Coordinator {
         return JobInventory(jobs:readable,failures:failures)
     }
     public func directory(for id: String) -> URL {root.appendingPathComponent("jobs").appendingPathComponent(id)}
+    static func materializeReusableSource(_ source: SourceRecord, directory: URL, expectedSHA256: String?,
+                                         archiveFallback: String?, copyExisting: Bool = false,
+                                         download: (String,URL) async throws -> URL) async throws -> URL {
+        guard expectedSHA256 == nil || expectedSHA256 == source.sha256 else {
+            throw JoeyError.failed("Existing source identity differs from the requested archive hash")
+        }
+        try StorageManager.noLinks(directory)
+        let archiveName = source.archiveReceipt?.name ?? ""
+        let sourceExtension = URL(fileURLWithPath:source.path).pathExtension
+        let suffix = sourceExtension.isEmpty ? (archiveName as NSString).pathExtension : sourceExtension
+        let target = directory.appendingPathComponent(suffix.isEmpty ? "original" : "original."+suffix)
+        func validate(_ file: URL) throws {
+            var st = stat()
+            guard lstat(file.path,&st) == 0,(st.st_mode & S_IFMT) == S_IFREG,st.st_nlink == 1,
+                  st.st_size == source.bytes,try Integrity.sha256(file) == source.sha256 else {
+                throw JoeyError.failed("Reusable source bytes differ from the saved source identity")
+            }
+        }
+        var targetStat = stat()
+        if lstat(target.path,&targetStat) == 0 {try validate(target);return target}
+        if errno != ENOENT {throw NSError(domain:NSPOSIXErrorDomain,code:Int(errno))}
+
+        let prior = URL(fileURLWithPath:source.path)
+        var sourceStat = stat()
+        if lstat(prior.path,&sourceStat) == 0 {
+            guard (sourceStat.st_mode & S_IFMT) == S_IFREG,sourceStat.st_size == source.bytes,
+                  try Integrity.sha256(prior) == source.sha256 else {
+                throw JoeyError.failed("Original source changed; preserved job cannot silently switch inputs")
+            }
+            guard copyExisting else {return prior}
+            try Persistence.checkDisk(at:directory,requiredBytes:source.bytes)
+            try FileManager.default.copyItem(at:prior,to:target)
+            try validate(target)
+            return target
+        }
+        guard errno == ENOENT else {throw NSError(domain:NSPOSIXErrorDomain,code:Int(errno))}
+
+        let reference: String
+        if Records.archiveReceiptMatchesSource(source),let saved = source.archiveReference,
+           let receipt = source.archiveReceipt,Records.archiveID(saved) == receipt.id {
+            reference = saved
+        } else if let archiveFallback,expectedSHA256 == source.sha256,
+                  let url = URL(string:archiveFallback),url.scheme == "https",url.host == "drive.google.com",
+                  Records.archiveID(archiveFallback) != nil {
+            reference = archiveFallback
+        } else {
+            throw JoeyError.dependency("Reusable source copy was evicted and no hash-bound Drive archive is available")
+        }
+        let restored = try await download(reference,directory)
+        guard restored.standardizedFileURL.deletingLastPathComponent() == directory.standardizedFileURL else {
+            throw JoeyError.invalid("Recovered source was not placed in the current job directory")
+        }
+        try StorageManager.noLinks(restored)
+        try validate(restored)
+        return restored
+    }
     public func run(_ request: JobRequest, estimatedDuration: Double? = nil,
                     progress: @escaping @Sendable (JobRecord) async throws -> Void = {_ in}) async throws -> JobRecord {
         try await run(request,estimatedDuration:estimatedDuration,admitLink:nil,progress:progress)
@@ -291,6 +348,19 @@ public actor Coordinator {
                 // register-only reconciliation, not normal processing.
                 job.completionReconciliationRequired = true
                 job.state = .filed; job.stage = "register reconciliation"; job.error = nil; try await save()
+                if let source = job.source, !Records.archiveReceiptMatchesSource(source) {
+                    guard Records.archiveID(source.archiveReference) != nil else {
+                        throw JoeyError.failed("Existing Taxstone archive identity is missing; source readback cannot be verified")
+                    }
+                    try authorizeNewOperation()
+                    let archive = try await delivery.archive(source:source,request:request)
+                    guard archive.id == Records.archiveID(source.archiveReference) else {
+                        throw JoeyError.failed("Existing Taxstone archive readback resolved to a different Drive file")
+                    }
+                    job.source?.archiveReceipt = archive
+                    job.source?.archiveReference = archive.url
+                    try await save()
+                }
                 try authorizeNewOperation()
                 if job.verifiedTaxstoneRegisterRowCount != job.clips.count {
                     job.taxstoneRegisterEvidence = try await delivery.reconcileTaxstoneRegister(job:job)
@@ -331,6 +401,14 @@ public actor Coordinator {
                 job.completionReconciliationRequired = nil
                 job.state = .completed;job.stage = "complete";job.error = nil
                 if job.request != previous || reconciled {try await save()}
+                if job.postDeliveryMediaCleanup != nil {
+                    do {
+                        try storage.resumePostDeliveryMediaCleanup(job:&job,checkpoint:checkpoint)
+                    } catch {
+                        job.storageWarnings = (job.storageWarnings ?? []) + ["Post-delivery media cleanup remains resumable: "+error.localizedDescription]
+                        try? Persistence.save(job,to:checkpoint)
+                    }
+                }
                 try await progress(job); return job
             }
             job.stage = "capability verification"
@@ -364,9 +442,13 @@ public actor Coordinator {
             var reusableTranscript: Transcript?
             if let prior = job.source {sourceURL = URL(fileURLWithPath:prior.path)}
             else if request.localPath == nil, let prior = reusable?.source {
-                sourceURL = URL(fileURLWithPath:prior.path)
+                sourceURL = try await Self.materializeReusableSource(prior,directory:dir,
+                    expectedSHA256:request.expectedSourceSHA256,archiveFallback:request.archiveReference,
+                    copyExisting:reusable?.request.localPath != nil) {reference,directory in
+                        try await delivery.downloadOriginal(reference:reference,directory:directory)
+                    }
                 var copy = prior; copy.title = request.title; copy.episodeDate = request.episodeDate
-                copy.authorizationBasis = request.authorizationBasis; job.source = copy
+                copy.path = sourceURL.path;copy.authorizationBasis = request.authorizationBasis; job.source = copy
                 reusableTranscript = reusable?.transcript
             } else if request.localPath == nil, let archive = request.archiveReference {
                 sourceURL = try await delivery.downloadOriginal(reference:archive,directory:dir)
@@ -435,7 +517,8 @@ public actor Coordinator {
             if request.productionWorkflow != nil {
                 job.stage = "original archive verification";try await save()
                 try authorizeNewOperation()
-                source.archiveReference = try await delivery.archive(source:source,request:request)
+                let archive = try await delivery.archive(source:source,request:request)
+                source.archiveReference = archive.url;source.archiveReceipt = archive
                 job.source = source;try await save()
             }
             if request.productionWorkflow == .taxstoneLibrary,
@@ -590,7 +673,9 @@ public actor Coordinator {
             if request.productionWorkflow == nil {
                 job.stage = "original archive verification"; try await save()
                 try authorizeNewOperation()
-                job.source?.archiveReference = try await delivery.archive(source:source,request:request); try await save()
+                let archive = try await delivery.archive(source:source,request:request)
+                source.archiveReference = archive.url;source.archiveReceipt = archive
+                job.source = source;try await save()
             }
             job.stage = "Drive folder"; try await save()
             try authorizeNewOperation()
@@ -639,8 +724,18 @@ public actor Coordinator {
             job.stage = "final Drive package verification"; try await save()
             guard job.hasRequiredCompletionEvidence else {throw JoeyError.failed("Required completion evidence is missing or incorrectly routed")}
             try await delivery.verifyPackage(job:job,directory:dir)
-            job.state = .completed; job.stage = "complete"; job.error = nil; try await save()
+            job.state = .completed; job.stage = "complete"; job.error = nil
+            job.postDeliveryMediaCleanup = try storage.preparePostDeliveryMediaCleanup(job:job,directory:dir)
+            job.updatedAt = Date();try Persistence.save(job,to:checkpoint)
             completedReadbackPassed = true
+            try await progress(job)
+            do {
+                try storage.resumePostDeliveryMediaCleanup(job:&job,checkpoint:checkpoint)
+                try await progress(job)
+            } catch {
+                job.storageWarnings = (job.storageWarnings ?? []) + ["Post-delivery media cleanup remains resumable: "+error.localizedDescription]
+                try await save()
+            }
             return job
         } catch {
             // A rejected renewal must not downgrade a verified completed job or

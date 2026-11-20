@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 public actor DriveDelivery {
     private struct ProviderHTTPError: LocalizedError {
@@ -241,7 +242,7 @@ public actor DriveDelivery {
         }
         return id
     }
-    public func archive(source: SourceRecord, request: JobRequest) async throws -> String {
+    public func archive(source: SourceRecord, request: JobRequest) async throws -> DriveReceipt {
         let route = try DestinationResolver.resolve(source:source,request:request,asset:.fullEpisode)
         if let reference = source.archiveReference {
             let id = try Self.archiveID(reference)
@@ -253,7 +254,7 @@ public actor DriveDelivery {
             let receipt = try await verify(id:id,local:URL(fileURLWithPath:source.path),parent:parent,name:name,
                 sha:source.sha256,md5:Integrity.md5(URL(fileURLWithPath:source.path)),bytes:source.bytes,
                 destination:nil,expectedPermissions:Self.permissionFingerprint(info))
-            return receipt.url
+            return receipt
         }
         let local = URL(fileURLWithPath:source.path)
         let name: String
@@ -278,9 +279,9 @@ public actor DriveDelivery {
             let info = try await metadata(id)
             guard let name = info["name"] as? String else {throw JoeyError.failed("Original archive name missing")}
             return try await verify(id:id,local:local,parent:root,name:name,sha:source.sha256,md5:md5,bytes:source.bytes,
-                destination:route,expectedPermissions:Self.permissionFingerprint(info)).url
+                destination:route,expectedPermissions:Self.permissionFingerprint(info))
         }
-        return try await upload(local,name:name,parent:root,destination:route).url
+        return try await upload(local,name:name,parent:root,destination:route)
     }
     public func downloadOriginal(reference: String, directory: URL) async throws -> URL {
         let id = try Self.archiveID(reference)
@@ -308,6 +309,52 @@ public actor DriveDelivery {
         if FileManager.default.fileExists(atPath:local.path) {throw JoeyError.failed("Different existing local original preserved; cannot overwrite")}
         try FileManager.default.moveItem(at:partial,to:local)
         return local
+    }
+    /// Restores an accepted package clip into caller-owned temporary storage.
+    /// The Drive object is checked before and after the read; this path never
+    /// writes to or replaces the canonical job clip.
+    func downloadAcceptedClip(receipt: DriveReceipt, source: SourceRecord, request: JobRequest,
+                              folderID: String, to destination: URL) async throws -> URL {
+        guard let md5 = receipt.md5,let permissions = receipt.permissionFingerprint,
+              receipt.bytes > 0,receipt.sha256.count == 64,receipt.parent == folderID,
+              receipt.name.lowercased().hasSuffix(".mp4"),destination.lastPathComponent == receipt.name else {
+            throw JoeyError.invalid("Accepted clip receipt is incomplete or does not match its requested temporary path")
+        }
+        let route = try DestinationResolver.resolve(source:source,request:request,asset:.clip)
+        // Use the POSIX-canonical parent as-is. Foundation standardizes the
+        // macOS /private/var alias back to /var, which breaks identity checks.
+        let parent = destination.deletingLastPathComponent()
+        try StorageManager.noLinks(parent)
+        _ = try await verifiedFileMetadata(id:receipt.id,parent:folderID,name:receipt.name,sha:receipt.sha256,
+            md5:md5,bytes:receipt.bytes,destination:route,expectedPermissions:permissions)
+        try Persistence.checkDisk(at:parent,requiredBytes:receipt.bytes)
+
+        let partial = parent.appendingPathComponent("."+receipt.name+".download.partial")
+        var existing = stat()
+        guard lstat(destination.path,&existing) != 0,errno == ENOENT,
+              lstat(partial.path,&existing) != 0,errno == ENOENT else {
+            throw JoeyError.failed("Accepted clip preflight will not overwrite an existing temporary file")
+        }
+        do {
+            _ = try await runReadHelper("rclone",["copyto",remote+":"+receipt.name,partial.path,
+                "--drive-root-folder-id",folderID,"--transfers","1","--checkers","1"])
+            let attrs = try FileManager.default.attributesOfItem(atPath:partial.path)
+            guard (attrs[.size] as? NSNumber)?.int64Value == receipt.bytes,
+                  try Integrity.md5(partial) == md5,try Integrity.sha256(partial) == receipt.sha256 else {
+                throw JoeyError.failed("Restored accepted clip differs from its saved Drive receipt")
+            }
+            _ = try await verify(id:receipt.id,local:partial,parent:folderID,name:receipt.name,
+                sha:receipt.sha256,md5:md5,bytes:receipt.bytes,destination:route,
+                expectedPermissions:permissions,remoteContentAlreadyReadBack:true)
+            guard lstat(destination.path,&existing) != 0,errno == ENOENT else {
+                throw JoeyError.failed("Accepted clip preflight destination appeared during verification")
+            }
+            try FileManager.default.moveItem(at:partial,to:destination)
+            return destination
+        } catch {
+            try? FileManager.default.removeItem(at:partial)
+            throw error
+        }
     }
     /// Metadata is read by exact IDs, independently of rclone's path-based write.
     func verifyRoot(_ destination: DriveDestination) async throws -> [String:Any] {
@@ -495,8 +542,9 @@ public actor DriveDelivery {
             throw JoeyError.failed("Companion replacement rolled back; previous remote object preserved: \(filename)")
         }
     }
-    func verify(id: String, local: URL?, parent: String, name: String, sha: String, md5: String, bytes: Int64,
-                        destination: FilingDestination?, expectedPermissions: String) async throws -> DriveReceipt {
+    private func verifiedFileMetadata(id: String, parent: String, name: String, sha: String, md5: String,
+                                      bytes: Int64, destination: FilingDestination?,
+                                      expectedPermissions: String) async throws -> [String:Any] {
         if let destination {_ = try await verifyLocation(parent:parent,destination:destination)}
         let value = try await metadata(id)
         let matches = try await children(parent).filter {$0["name"] as? String == name}
@@ -505,8 +553,22 @@ public actor DriveDelivery {
               Int64(value["size"] as? String ?? "") == bytes, value["md5Checksum"] as? String == md5,
               matches.count == 1,matches.first?["id"] as? String == id,
               try Self.permissionFingerprint(value) == expectedPermissions,
-              let link = value["webViewLink"] as? String,let permissions = value["permissions"] as? [[String:Any]] else {
+              value["webViewLink"] is String,value["permissions"] is [[String:Any]] else {
             throw JoeyError.failed("Independent Drive ID/name/parent/size/checksum/permissions/duplicate readback failed: \(id)")
+        }
+        if let remoteSHA = value["sha256Checksum"] as? String, !remoteSHA.isEmpty,remoteSHA != sha {
+            throw JoeyError.failed("Independent Drive SHA-256 mismatch: \(id)")
+        }
+        return value
+    }
+    func verify(id: String, local: URL?, parent: String, name: String, sha: String, md5: String, bytes: Int64,
+                destination: FilingDestination?, expectedPermissions: String,
+                remoteContentAlreadyReadBack: Bool = false) async throws -> DriveReceipt {
+        let value = try await verifiedFileMetadata(id:id,parent:parent,name:name,sha:sha,md5:md5,
+            bytes:bytes,destination:destination,expectedPermissions:expectedPermissions)
+        guard let link = value["webViewLink"] as? String,
+              let permissions = value["permissions"] as? [[String:Any]] else {
+            throw JoeyError.failed("Drive link or permission readback is unavailable: \(id)")
         }
         if let local {
             guard try Integrity.sha256(local) == sha else {throw JoeyError.failed("Local accepted bytes differ from saved Drive receipt: \(name)")}
@@ -517,12 +579,25 @@ public actor DriveDelivery {
         // object and are never restored or overwritten by this read-only check.
         if let remoteSHA = value["sha256Checksum"] as? String, !remoteSHA.isEmpty {
             guard remoteSHA == sha else {throw JoeyError.failed("Independent Drive SHA-256 mismatch: \(id)")}
-        } else {
+        } else if !remoteContentAlreadyReadBack {
             try await readRemoteBytes(name:name,parent:parent,expectedSHA:sha,expectedMD5:md5,expectedBytes:bytes)
+        } else if local == nil {
+            throw JoeyError.failed("Remote content readback cannot be inferred without the downloaded bytes")
         }
         return DriveReceipt(id:id,name:name,parent:parent,bytes:bytes,md5:md5,sha256:sha,url:link,
             permissions:permissions.map {"\($0["type"] as? String ?? "unknown"):\($0["role"] as? String ?? "unknown")"}.sorted(),verifiedAt:Date(),
             destination:destination,permissionFingerprint:expectedPermissions)
+    }
+    private func optionalRegularFile(_ url: URL) throws -> URL? {
+        var st = stat()
+        guard lstat(url.path,&st) == 0 else {
+            if errno == ENOENT {return nil}
+            throw NSError(domain:NSPOSIXErrorDomain,code:Int(errno))
+        }
+        guard (st.st_mode & S_IFMT) == S_IFREG else {
+            throw JoeyError.invalid("Saved media path is not a regular file: \(url.path)")
+        }
+        return url
     }
     private func readRemoteBytes(name: String, parent: String, expectedSHA: String, expectedMD5: String, expectedBytes: Int64) async throws {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("joey-drive-readback-"+UUID().uuidString)
@@ -538,11 +613,24 @@ public actor DriveDelivery {
             throw JoeyError.failed("Required QA, destination, companion or register evidence is incomplete")
         }
         let destination = try DestinationResolver.resolve(source:source,request:job.request,asset:.clip)
+        // New completion cleanup requires the archive receipt captured by the
+        // current archive stage. Older completed checkpoints may predate that
+        // field; keep their clip/package readback compatible, but never use
+        // them as authority to remove local media.
+        if source.archiveReceipt != nil || job.postDeliveryMediaCleanup != nil {
+            guard Records.archiveReceiptMatchesSource(source),let archive = source.archiveReceipt,
+                  let archiveMD5 = archive.md5,let archivePermissions = archive.permissionFingerprint else {
+                throw JoeyError.failed("Verified full-source Drive archive receipt is missing or mismatched")
+            }
+            let local = try optionalRegularFile(URL(fileURLWithPath:source.path))
+            _ = try await verify(id:archive.id,local:local,parent:archive.parent,
+                name:archive.name,sha:archive.sha256,md5:archiveMD5,bytes:archive.bytes,
+                destination:nil,expectedPermissions:archivePermissions)
+        }
         for receipt in job.clips.compactMap(\.drive) + Array(job.companions.values) {
             guard let md5 = receipt.md5,let fingerprint = receipt.permissionFingerprint else {throw JoeyError.failed("Saved filing receipt lacks integrity/access proof: \(receipt.id)")}
             let localURL = directory.appendingPathComponent(receipt.name)
-            let values = try? localURL.resourceValues(forKeys:[.isRegularFileKey,.isSymbolicLinkKey])
-            let local = values?.isRegularFile == true && values?.isSymbolicLink != true ? localURL : nil
+            let local = try optionalRegularFile(localURL)
             _ = try await verify(id:receipt.id,local:local,parent:folder,
                 name:receipt.name,sha:receipt.sha256,md5:md5,bytes:receipt.bytes,destination:destination,expectedPermissions:fingerprint)
         }

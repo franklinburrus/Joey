@@ -384,6 +384,9 @@ public struct SourceRecord: Codable, Equatable, Sendable {
     public var archiveReference: String?
     public var classificationEvidence: String
     public var classificationProof: SourceClassificationProof? = nil
+    /// Exact readback for the permanent Drive archive. Local cleanup must not
+    /// infer archive identity from the URL alone.
+    public var archiveReceipt: DriveReceipt? = nil
 }
 
 public struct ResolvedClipFailure: Codable, Equatable, Sendable {
@@ -436,6 +439,42 @@ public struct DriveReceipt: Codable, Equatable, Sendable {
     public var verifiedAt: Date
     public var destination: FilingDestination?
     public var permissionFingerprint: String?
+}
+
+enum PostDeliveryMediaOutcome: String, Codable, Sendable {
+    case pending, removed, retained, absent
+}
+
+struct PostDeliveryMediaFile: Codable, Equatable, Sendable {
+    enum Role: String, Codable, Sendable {case sourceWorkingCopy, acceptedClip}
+    var path: String
+    var role: Role
+    var driveID: String?
+    var bytes: Int64?
+    var sha256: String?
+    var inode: UInt64?
+    var device: Int32?
+    var outcome: PostDeliveryMediaOutcome
+    var reason: String
+    var updatedAt: Date?
+}
+
+/// Prospective, per-job eviction intent. Missing on historical checkpoints so
+/// installing or reopening a new build never sweeps old media.
+struct PostDeliveryMediaCleanup: Codable, Equatable, Sendable {
+    var version: Int = 1
+    var jobID: String
+    var sourceID: String
+    var deliveryEvidenceSHA256: String
+    var packageVerifiedAt: Date
+    var directoryInode: UInt64
+    var directoryDevice: Int32
+    var files: [PostDeliveryMediaFile]
+    var removedBytes: Int64 = 0
+    var freeBytesBefore: Int64?
+    var freeBytesAfter: Int64?
+    var lastAttemptAt: Date?
+    var completedAt: Date?
 }
 
 /// Taxstone keeps a separate register and schema from the DUB Master Link List.
@@ -563,6 +602,9 @@ public struct JobRecord: Codable, Identifiable, Sendable {
     /// the saved manifest before any reconciliation. The marker remains
     /// backward-compatible with older checkpoints.
     public var completionManifestValidated: Bool?
+    /// Optional migration-safe receipt for the new prospective local-media
+    /// cleanup policy. Historical jobs without it are never swept.
+    var postDeliveryMediaCleanup: PostDeliveryMediaCleanup? = nil
     public var storageRequiredBytes: Int64?
     public var storageWarnings: [String]?
     public var error: String?
