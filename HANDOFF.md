@@ -1,5 +1,7 @@
 # HANDOFF — Joey PR #19 integrity/security repairs
 
+**Current status (post-merge):** [PR #19](https://github.com/franklinburrus/Joey/pull/19) is **merged** on `main`. Do not re-merge. Next milestone is native Mac acceptance — see [`docs/MAC_ACCEPTANCE_HANDOFF.md`](docs/MAC_ACCEPTANCE_HANDOFF.md) and run `./Tools/verify-macos-acceptance.sh` on macOS. Target wording when green: `MAC ACCEPTANCE PASSED — AWAITING DEPLOYMENT APPROVAL`. Do not deploy from the agent. Sections below keep historical repair evidence from before merge.
+
 Updated: 2026-11-08 20:25 America/New_York (final evidence consolidation).
 
 ## Branch / PR
@@ -7,10 +9,11 @@ Updated: 2026-11-08 20:25 America/New_York (final evidence consolidation).
 - Repository: https://github.com/franklinburrus/Joey
 - Branch: `cursor/integrity-security-repairs-79c7`
 - Base: `main` @ `1e6092c7fe6de85d405fa53bb93c9ab16854b624`
-- Draft PR: https://github.com/franklinburrus/Joey/pull/19 — **draft, do not merge**
+- PR: https://github.com/franklinburrus/Joey/pull/19 — **merged** (historical draft/do-not-merge notes below are superseded by the top status)
 - Head SHA: branch tip of `cursor/integrity-security-repairs-79c7` (exact value in CI matrix after tip verification)
 - Workflow: `.github/workflows/macos-verify.yml` (`macos-latest`)
-- Local Mac backup: `Tools/verify-macos-repairs.sh`
+- Local Mac backup (PR #19 repair gate): `Tools/verify-macos-repairs.sh`
+- Native Mac acceptance (post-merge): `Tools/verify-macos-acceptance.sh` + `docs/MAC_ACCEPTANCE_HANDOFF.md`
 
 ## A. Repair Evidence Matrix
 
@@ -71,4 +74,4 @@ Toolchain on verified runner: Apple Swift 6.3.3, Xcode 26.6, `macos-26-arm64`, `
 
 ## Next owner decision
 
-Review draft PR #19. Approve/merge only after owner acceptance. Do not merge/deploy from the agent. No production Drive/media destruction occurred.
+PR #19 is merged. Run native Mac acceptance per `docs/MAC_ACCEPTANCE_HANDOFF.md` / `Tools/verify-macos-acceptance.sh`. Do not deploy from the agent. No production Drive/media destruction occurred. (Historical pre-merge text retained in evidence matrix above.)
