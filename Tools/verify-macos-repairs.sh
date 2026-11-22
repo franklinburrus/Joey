@@ -53,10 +53,10 @@ RELEASE_CODE=0
 run_check full-swift-test test || FULL_CODE=$?
 run_check integrity-security-repair-tests test --filter IntegritySecurityRepairTests || FILTER_CODE=$?
 
-if xcodebuild -list -project Joey.xcodeproj 2>/dev/null | grep -q "Joey Native"; then
-  run_check release-build xcodebuild -project Joey.xcodeproj -scheme "Joey Native" -configuration Release -destination 'platform=macOS' build || RELEASE_CODE=$?
+if xcodebuild -list -project Joey.xcodeproj 2>/dev/null | grep -Eq '(^|[[:space:]])Joey($|[[:space:]])'; then
+  run_check release-build xcodebuild -project Joey.xcodeproj -target Joey -configuration Release MACOSX_DEPLOYMENT_TARGET=14.0 CODE_SIGNING_ALLOWED=NO build || RELEASE_CODE=$?
 else
-  echo "Shared scheme 'Joey Native' absent; using swift build -c release." | tee -a "$REPORT"
+  echo "Xcode target 'Joey' absent; using swift build -c release." | tee -a "$REPORT"
   run_check release-build build -c release || RELEASE_CODE=$?
 fi
 

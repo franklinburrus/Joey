@@ -286,4 +286,58 @@ final class TimingRegressionTests: XCTestCase {
         XCTAssertNotNil(qa.checks["source_picture_timeline"])
         XCTAssertNotNil(qa.checks["approved_logo"]);XCTAssertNotNil(qa.checks["approved_outro"])
     }
+
+    func testAACTransientPreEchoIntoNearSilentWindowPassesWhileShortSpeechDropoutFails() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("joey-pre-echo-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:dir)}
+        let original = dir.appendingPathComponent("transient-step.mp4")
+        // Place a faint pre-attack onset in the last 4 ms of the 0.150..0.200s
+        // 50 ms window so its source energy exceeds quietBudget (0.00005),
+        // followed by a steep step attack at 0.200s encoded through aac_at 112k.
+        let expr = "if(lt(t\\,0.196)\\,0\\,if(lt(t\\,0.200)\\,0.006*sin(2*PI*900*t)\\,0.35*(sin(2*PI*220*t)+0.6*sin(2*PI*880*t)+0.3*sin(2*PI*1760*t))))"
+        _ = try await Processes.run("ffmpeg",["-v","error","-f","lavfi","-i","testsrc2=s=160x90:r=30:d=2",
+            "-f","lavfi","-i","aevalsrc=\(expr)|\(expr):s=48000:d=2:c=stereo",
+            "-c:v","libx264","-preset","veryfast","-pix_fmt","yuv420p","-c:a","pcm_s16le",original.path])
+        let source = try await Media.inspect(original,request:Fixtures.request(dir:dir,path:original.path))
+        let profile = try Fixtures.landscapeProfile(dir:dir)
+        let (output,clip,receipt) = try await render(source,dir,profile,intervals:[Interval(0,2)])
+        let qa = try await Media.validate(output:output,source:source,clip:clip,profile:profile,render:receipt,work:dir)
+        XCTAssertTrue(qa.passed)
+
+        // Verify the exact Episode 980 Clip 2 boundary regime: a near-silent
+        // 50 ms window (sourceEnergy ~0.00039) immediately before a loud attack
+        // (adjacent 50 ms sourceEnergy ~18.5) where aac_at MDCT pre-echo adds
+        // errorEnergy ~0.00395 in the final 2 ms before the attack.
+        let channels = 2, rate = 12_000
+        var expected = [Float](repeating:0,count:rate*2*channels)
+        for sample in 576..<600 {
+            let value = Float(0.0057 * sin(2 * .pi * 900 * Double(sample) / Double(rate)))
+            expected[sample*channels] = value
+            expected[sample*channels+1] = value
+        }
+        for sample in 600..<(rate*2) {
+            let value = Float(0.28 * sin(2 * .pi * 330 * Double(sample) / Double(rate)))
+            expected[sample*channels] = value
+            expected[sample*channels+1] = value
+        }
+        var preEchoOutput = expected
+        for sample in 576..<600 {
+            let ring = Float(0.018 * cos(2 * .pi * 900 * Double(sample) / Double(rate)))
+            preEchoOutput[sample*channels] += ring
+            preEchoOutput[sample*channels+1] += ring
+        }
+        XCTAssertNoThrow(try Media.validateAudioSamples(expected,preEchoOutput,channels:channels,duration:2))
+
+        // A genuine 50 ms dropout (600 samples per channel) during active
+        // speech/program audio must still fail short-window fidelity QA.
+        var dropoutOutput = preEchoOutput
+        for sample in 1_800..<2_400 {
+            dropoutOutput[sample*channels] = 0
+            dropoutOutput[sample*channels+1] = 0
+        }
+        XCTAssertThrowsError(try Media.validateAudioSamples(expected,dropoutOutput,channels:channels,duration:2)) {
+            XCTAssertTrue($0.localizedDescription.contains("Audio short-window fidelity failed"),"\($0)")
+        }
+    }
 }

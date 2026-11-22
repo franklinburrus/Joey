@@ -58,9 +58,9 @@ jobs:
       - name: Release build
         run: |
           set -euo pipefail
-          if python3 Tools/run-local.py xcodebuild -list -project Joey.xcodeproj 2>/dev/null | grep -q "Joey Native"; then
-            python3 Tools/run-local.py xcodebuild -project Joey.xcodeproj -scheme "Joey Native" -configuration Release -destination 'platform=macOS' build
+          if python3 Tools/run-local.py xcodebuild -list -project Joey.xcodeproj 2>/dev/null | grep -Eq '(^|[[:space:]])Joey($|[[:space:]])'; then
+            python3 Tools/run-local.py xcodebuild -project Joey.xcodeproj -target Joey -configuration Release MACOSX_DEPLOYMENT_TARGET=14.0 CODE_SIGNING_ALLOWED=NO build
           else
-            echo "Shared scheme 'Joey Native' not present; building Swift package Release instead."
+            echo "Xcode target 'Joey' not present; building Swift package Release instead."
             python3 Tools/run-local.py swift build -c release
           fi

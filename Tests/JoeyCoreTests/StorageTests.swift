@@ -75,6 +75,8 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(try protected.map {try Integrity.sha256($0)},hashes)
         XCTAssertTrue(FileManager.default.fileExists(atPath:jobDir.appendingPathComponent("storage-attempts/\(f.work.lastPathComponent)-render.json").path))
         XCTAssertEqual(try f.manager.clean().removedBytes,0)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath:f.root.appendingPathComponent("storage-cleanup").path).count,1,
+            "No-op cleanup must not accumulate empty storage-cleanup receipts")
         XCTAssertGreaterThan(result.freeBytesBefore,0);XCTAssertGreaterThan(result.freeBytesAfter,0)
     }
     func testAcceptedScratchWithoutDriveReceiptIsRetained() throws {

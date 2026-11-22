@@ -604,7 +604,7 @@ public final class StorageManager {
         let audit = root.appendingPathComponent("storage-cleanup")
         if fm.fileExists(atPath:audit.path) {try Self.noLinks(audit)}
         let receipt = audit.appendingPathComponent(UUID().uuidString+".json")
-        try Persistence.save(result,to:receipt) // Fail closed if audit cannot be saved.
+        var receiptWritten = false
         for var a in try candidates() {
             do {
                 guard try accepted(a) else {continue}
@@ -614,6 +614,10 @@ public final class StorageManager {
                 var directoryStat = stat()
                 guard fstat(fd,&directoryStat) == 0,UInt64(directoryStat.st_ino) == a.inode,directoryStat.st_dev == a.device,
                       try files(url) == a.files else {throw JoeyError.invalid("Scratch changed before cleanup")}
+                if !receiptWritten {
+                    try Persistence.save(result,to:receipt) // Fail closed if audit cannot be saved.
+                    receiptWritten = true
+                }
                 for file in a.files {
                     var st = stat()
                     guard fstatat(fd,file.name,&st,AT_SYMLINK_NOFOLLOW) == 0,
@@ -640,7 +644,9 @@ public final class StorageManager {
             } catch {result.errors.append("\(a.jobID)/\(a.id): \(error.localizedDescription)")}
         }
         result.freeBytesAfter = try Self.capacity(at:root).free
-        try Persistence.save(result,to:receipt)
+        if receiptWritten || result.removedFiles > 0 || !result.errors.isEmpty {
+            try Persistence.save(result,to:receipt)
+        }
         return result
     }
 }

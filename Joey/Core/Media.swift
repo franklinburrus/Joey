@@ -498,8 +498,19 @@ public enum Media {
         // Only the shared planned span is examined, preserving AAC priming and
         // the existing 75 ms endpoint allowance.
         for channel in 0..<channels {
-            for start in stride(from:channel,to:count,by:300*channels) {
-                let end = min(count,start+600*channels)
+            let step = 300*channels, window = 600*channels
+            func windowSourceEnergy(at windowStart: Int) -> Double {
+                guard windowStart >= channel, windowStart < count else {return 0}
+                let windowEnd = min(count,windowStart+window)
+                var energy = 0.0
+                for index in stride(from:windowStart,to:windowEnd,by:channels) {
+                    let source = Double(a[index])
+                    energy += source*source
+                }
+                return energy
+            }
+            for start in stride(from:channel,to:count,by:step) {
+                let end = min(count,start+window)
                 var sourceEnergy = 0.0, errorEnergy = 0.0, sampleCount = 0
                 for index in stride(from:start,to:end,by:channels) {
                     let source = Double(a[index]), difference = source-Double(b[index])
@@ -509,7 +520,14 @@ public enum Media {
                 }
                 let quietBudget = 0.001*Double(sampleCount)/12000
                 if sourceEnergy > quietBudget {
-                    guard errorEnergy <= max(quietBudget,sourceEnergy*0.5) else {
+                    // Apple AudioToolbox AAC-LC uses 2048-sample (42.67 ms at
+                    // 48 kHz) overlapping MDCT frames. A near-silent 50 ms
+                    // window immediately adjacent to a steep transient can
+                    // receive MDCT pre-echo or post-ringing from the shared
+                    // ±25 ms neighbor while 1-second zero-lag correlation passes.
+                    let adjacentSourceEnergy = max(windowSourceEnergy(at:start-step),windowSourceEnergy(at:start+step))
+                    let transientLeakageBudget = sourceEnergy < adjacentSourceEnergy*0.02 ? adjacentSourceEnergy*0.01 : 0
+                    guard errorEnergy <= max(quietBudget,sourceEnergy*0.5,transientLeakageBudget) else {
                         throw JoeyError.failed("Audio short-window fidelity failed at sample \(start): error energy \(errorEnergy), source energy \(sourceEnergy)")
                     }
                     shortComparisons += 1

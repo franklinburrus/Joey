@@ -440,7 +440,18 @@ public actor Coordinator {
             }
             let sourceURL: URL
             var reusableTranscript: Transcript?
-            if let prior = job.source {sourceURL = URL(fileURLWithPath:prior.path)}
+            if let prior = job.source {
+                if FileManager.default.fileExists(atPath:prior.path) {
+                    sourceURL = URL(fileURLWithPath:prior.path)
+                } else {
+                    sourceURL = try await Self.materializeReusableSource(prior,directory:dir,
+                        expectedSHA256:request.expectedSourceSHA256 ?? prior.sha256,
+                        archiveFallback:request.archiveReference ?? prior.archiveReference) {reference,directory in
+                            try await delivery.downloadOriginal(reference:reference,directory:directory)
+                        }
+                    var restored = prior;restored.path = sourceURL.path;job.source = restored
+                }
+            }
             else if request.localPath == nil, let prior = reusable?.source {
                 sourceURL = try await Self.materializeReusableSource(prior,directory:dir,
                     expectedSHA256:request.expectedSourceSHA256,archiveFallback:request.archiveReference,
@@ -593,21 +604,52 @@ public actor Coordinator {
                     try authorizeNewOperation()
                     if request.productionWorkflow == .joeBudden,branding == nil {branding = try JoeBranding.load(root:root)}
                     let render: RenderReceipt
-                    if FileManager.default.fileExists(atPath:partial.path), FileManager.default.fileExists(atPath:work.appendingPathComponent("render.json").path),
-                       let existing: RenderReceipt = try? Persistence.load(work.appendingPathComponent("render.json")),
-                       (try? await Media.validate(output:partial,source:source,clip:clip,profile:request.profile,render:existing,work:work)) != nil {
+                    var prevalidatedQA: QAReport?
+                    let candidateDirs = ([work] + ((try? FileManager.default.contentsOfDirectory(
+                        at:work.deletingLastPathComponent(),
+                        includingPropertiesForKeys:[.contentModificationDateKey],
+                        options:.skipsHiddenFiles
+                    ))?.filter {$0.standardizedFileURL != work.standardizedFileURL}.sorted {
+                        let a = (try? $0.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                        let b = (try? $1.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                        return a > b
+                    } ?? []))
+                    var reused: (RenderReceipt, QAReport)?
+                    for candidate in candidateDirs {
+                        let candidatePartial = candidate.appendingPathComponent("render.partial.mp4")
+                        let candidateReceiptURL = candidate.appendingPathComponent("render.json")
+                        guard FileManager.default.fileExists(atPath:candidatePartial.path),
+                              FileManager.default.fileExists(atPath:candidateReceiptURL.path),
+                              let existing: RenderReceipt = try? Persistence.load(candidateReceiptURL),
+                              let validated = try? await Media.validate(output:candidatePartial,source:source,clip:clip,profile:request.profile,render:existing,work:work) else {
+                            continue
+                        }
+                        if candidate.standardizedFileURL != work.standardizedFileURL {
+                            if FileManager.default.fileExists(atPath:partial.path) {try FileManager.default.removeItem(at:partial)}
+                            try FileManager.default.copyItem(at:candidatePartial,to:partial)
+                            try Persistence.save(existing,to:work.appendingPathComponent("render.json"))
+                        }
+                        reused = (existing,validated)
+                        break
+                    }
+                    if let (existing,validated) = reused {
                         render = existing
+                        prevalidatedQA = validated
                     } else {render = try await Media.render(source:source,clip:clip,profile:request.profile,artwork:artwork,work:work,output:partial,branding:branding)}
                     job.stage = "QA clip \(clip.id)"; try await save()
                     var qa: QAReport
-                    do {qa = try await Media.validate(output:partial,source:source,clip:clip,profile:request.profile,render:render,work:work)}
-                    catch {
-                        if error is CancellationError || error is StorageBlocked {throw error}
-                        // One supported clean re-encode repairs partial/corrupt
-                        // local writes. Deterministic failure stays an error.
-                        try authorizeNewOperation()
-                        let repaired = try await Media.render(source:source,clip:clip,profile:request.profile,artwork:artwork,work:work,output:partial,branding:branding)
-                        qa = try await Media.validate(output:partial,source:source,clip:clip,profile:request.profile,render:repaired,work:work)
+                    if let prevalidatedQA {
+                        qa = prevalidatedQA
+                    } else {
+                        do {qa = try await Media.validate(output:partial,source:source,clip:clip,profile:request.profile,render:render,work:work)}
+                        catch {
+                            if error is CancellationError || error is StorageBlocked {throw error}
+                            // One supported clean re-encode repairs partial/corrupt
+                            // local writes. Deterministic failure stays an error.
+                            try authorizeNewOperation()
+                            let repaired = try await Media.render(source:source,clip:clip,profile:request.profile,artwork:artwork,work:work,output:partial,branding:branding)
+                            qa = try await Media.validate(output:partial,source:source,clip:clip,profile:request.profile,render:repaired,work:work)
+                        }
                     }
                     if !job.unavailableTranscriptFeatures.isEmpty {
                         qa.limitations += job.unavailableTranscriptFeatures.map {"UNAVAILABLE: "+$0}

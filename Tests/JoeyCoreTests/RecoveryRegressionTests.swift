@@ -658,6 +658,32 @@ final class RecoveryRegressionTests: XCTestCase {
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(at:nextDirectory,includingPropertiesForKeys:nil).isEmpty)
     }
 
+    func testResumingExistingJobWithMissingLocalOriginalRestoresFromVerifiedArchive() async throws {
+        let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
+        var request = try Fixtures.request(dir:root,path:"unused")
+        request.localPath = nil
+        request.sourceID = "youtube:synthetic-ep979"
+        request.originalURL = "https://www.youtube.com/watch?v=synthetic979"
+        request.fileToDrive = true
+        var (saved,directory) = try completed(request,root:root)
+        let sourceURL = URL(fileURLWithPath:saved.source!.path)
+        let sourceBytes = try Data(contentsOf:sourceURL)
+        try FileManager.default.removeItem(at:sourceURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath:sourceURL.path))
+        saved.state = .qaPassed;saved.clips[0].drive = nil;saved.companions = [:];saved.registerRows = []
+        try Persistence.save(saved,to:directory.appendingPathComponent("job.json"))
+
+        let provider = RecoveryDelivery(archivedSourceBytes:sourceBytes,successfulMediaUploads:true)
+        let coordinator = try Coordinator(root:root)
+        let resumed = try await Coordinator.$deliveryOverride.withValue(provider) {
+            try await coordinator.run(request)
+        }
+        XCTAssertEqual(resumed.state,.completed,resumed.error ?? "")
+        let downloads = await provider.downloads
+        XCTAssertEqual(downloads,1,"Missing local original on an existing job must restore once from its verified Drive archive")
+        XCTAssertEqual(resumed.source?.sha256,saved.source?.sha256)
+    }
+
     func testIncompleteDrivePackagePreservesLocalMedia() async throws {
         let root = try workspace();defer {try? FileManager.default.removeItem(at:root)}
         var request = try Fixtures.request(dir:root,path:"unused")
@@ -1469,14 +1495,16 @@ private actor RecoveryDelivery: CoordinatorDelivery {
     private var companionFailureTriggered = false
     let suspendAfterCommit: Bool
     let original: URL?
+    let archivedSourceBytes: Data?
     let filingFault: String
     let companionFailureName: String?
     let companionFailureAfterCommit: Bool
     let successfulMediaUploads: Bool
-    init(suspendAfterCommit: Bool = false, original: URL? = nil, filingFault: String = "none",
-         companionFailureName: String? = nil, companionFailureAfterCommit: Bool = true,
-         successfulMediaUploads: Bool = false) {
-        self.suspendAfterCommit = suspendAfterCommit;self.original = original;self.filingFault = filingFault
+    init(suspendAfterCommit: Bool = false, original: URL? = nil, archivedSourceBytes: Data? = nil,
+         filingFault: String = "none", companionFailureName: String? = nil,
+         companionFailureAfterCommit: Bool = true, successfulMediaUploads: Bool = false) {
+        self.suspendAfterCommit = suspendAfterCommit;self.original = original
+        self.archivedSourceBytes = archivedSourceBytes;self.filingFault = filingFault
         self.companionFailureName = companionFailureName;self.companionFailureAfterCommit = companionFailureAfterCommit
         self.successfulMediaUploads = successfulMediaUploads
     }
@@ -1484,6 +1512,11 @@ private actor RecoveryDelivery: CoordinatorDelivery {
     func metadata(_ id: String) async throws -> [String:Any] {throw JoeyError.failed("Unexpected metadata lookup in synthetic recovery")}
     func downloadOriginal(reference: String, directory: URL) async throws -> URL {
         downloads += 1
+        if let archivedSourceBytes {
+            let restored = directory.appendingPathComponent("original.mp4")
+            try archivedSourceBytes.write(to:restored)
+            return restored
+        }
         guard let original else {throw JoeyError.failed("Saved original must be reused")}
         return original
     }
