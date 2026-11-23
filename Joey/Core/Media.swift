@@ -757,7 +757,7 @@ public enum Media {
             // second output tick. Batches cap decoded source pixels at 4096
             // frames and output samples at 16, independent of clip duration.
             var outputTicks = Set([0.1,0.5,0.9].map {Int(floor((offset+interval.duration*$0)*30))})
-            for tick in stride(from:Int(ceil(offset*2))*15,to:Int(ceil((offset+interval.duration)*30)),by:15) {
+            for tick in stride(from:Int(ceil(offset*2))*15,to:Int(ceil(((offset+interval.duration)*30)-1e-6)),by:15) {
                 let time = Double(tick)/30, end = offset+interval.duration
                 // A fractional concat boundary can assign its crossing video
                 // frame to either neighboring interval while audio keeps the
@@ -765,6 +765,7 @@ public enum Media {
                 // omit an added grid sample only within that one-frame region.
                 let fractionalStart = abs(offset*30-(offset*30).rounded()) > max(1,(offset*30).ulp)*1e-9
                 let fractionalEnd = abs(end*30-(end*30).rounded()) > max(1,(end*30).ulp)*1e-9
+                if end-time < 1e-6 {continue}
                 if fractionalStart && time-offset < 1.0/30 {continue}
                 if fractionalEnd && end-time < 1.0/30 {continue}
                 outputTicks.insert(tick)

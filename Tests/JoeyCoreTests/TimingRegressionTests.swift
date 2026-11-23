@@ -340,4 +340,31 @@ final class TimingRegressionTests: XCTestCase {
             XCTAssertTrue($0.localizedDescription.contains("Audio short-window fidelity failed"),"\($0)")
         }
     }
+
+    func testJoePictureTimingExcludesOutroBoundaryWhenFloatingPointDurationOvershootsIntegerTick() async throws {
+        let ep980Clip4 = Interval(1798.18,1798.18+600.0)
+        XCTAssertGreaterThan(ep980Clip4.duration,600.0,"IEEE 754 addition/subtraction across the 2048s exponent boundary overshoots 600.0s")
+        XCTAssertEqual(Int(ceil((ep980Clip4.duration*30)-1e-6)),18_000,"Clamped 30 fps tick ceiling must stop at 18000 and exclude tick 18000 (outro frame 0)")
+
+        let assets = Persistence.defaultRoot
+        guard FileManager.default.fileExists(atPath:assets.appendingPathComponent("assets/joe-approved-outro.mov").path) else {
+            throw XCTSkip("Approved local Joe assets are not installed on this test host")
+        }
+        let branding = try JoeBranding.load(root:assets)
+        let (dir,source,_) = try await fixture(audioDelay:0)
+        defer {try? FileManager.default.removeItem(at:dir)}
+        // Reproduce the exact IEEE 754 +2.2737e-13 duration overshoot from
+        // Interval(1798.18, 2398.18) inside a 2-second source interval so
+        // unguarded ceil(duration * 30) would sample tick 60 (output 2.0s,
+        // the first frame of the appended Joe Budden outro).
+        let overshootDuration = ep980Clip4.duration - 598.0
+        let clip = ClipRecord(id:4,title:"Joe IEEE 754 endpoint boundary",intervals:[Interval(0.18,0.18+overshootDuration)],filename:"joe-ep980-clip4.mp4")
+        let output = dir.appendingPathComponent(clip.filename)
+        let profile = SharedProfile.joeBuddenDrive
+        let receipt = try await Media.render(source:source,clip:clip,profile:profile,artwork:nil,work:dir,output:output,branding:branding)
+        let qa = try await Media.validate(output:output,source:source,clip:clip,profile:profile,render:receipt,work:dir)
+        XCTAssertTrue(qa.passed)
+        XCTAssertNotNil(qa.checks["source_picture_timeline"])
+        XCTAssertNotNil(qa.checks["approved_outro"])
+    }
 }
