@@ -773,6 +773,7 @@ public actor Coordinator {
             try await progress(job)
             do {
                 try storage.resumePostDeliveryMediaCleanup(job:&job,checkpoint:checkpoint)
+                if StorageManager.automaticCleanupEnabled(root:root) {_ = try? storage.clean()}
                 try await progress(job)
             } catch {
                 job.storageWarnings = (job.storageWarnings ?? []) + ["Post-delivery media cleanup remains resumable: "+error.localizedDescription]

@@ -250,8 +250,17 @@ public final class StorageManager {
               clip.qa?.passed == true,let hash = clip.sha256,clip.qa?.outputSHA256 == hash,
               Self.component(clip.filename) else {return false}
         let output = jobDir.appendingPathComponent(clip.filename)
-        try Self.noLinks(output)
-        guard try Integrity.sha256(output) == hash else {return false}
+        if fm.fileExists(atPath:output.path) {
+            try Self.noLinks(output)
+            guard try Integrity.sha256(output) == hash else {return false}
+        } else {
+            guard job.state == .completed, job.hasRequiredCompletionEvidence,
+                  clip.drive?.sha256 == hash,
+                  job.postDeliveryMediaCleanup?.files.contains(where:{
+                      $0.role == .acceptedClip && $0.sha256 == hash && $0.driveID == clip.drive?.id &&
+                      ($0.outcome == .removed || $0.outcome == .absent)
+                  }) == true else {return false}
+        }
         let evidence = jobDir.appendingPathComponent("evidence/\(a.clipID)/qa.json")
         try Self.noLinks(evidence)
         let qa: QAReport = try Persistence.load(evidence)
