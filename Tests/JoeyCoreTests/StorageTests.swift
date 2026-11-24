@@ -64,6 +64,7 @@ final class StorageTests: XCTestCase {
     func testClosedScratchCleanupMeasuresDeletionAndProtectsFiledAcceptedOutput() throws {
         let f = try fixture()
         let jobDir = f.root.appendingPathComponent("jobs/"+f.job.id)
+        try Data([0,1,2,3]).write(to:f.root.appendingPathComponent("jobs/.DS_Store"))
         let protected = [f.root.appendingPathComponent("original.mp4"),jobDir.appendingPathComponent("accepted.mp4"),jobDir.appendingPathComponent("transcript.json"),jobDir.appendingPathComponent("job.json")]
         let hashes = try protected.map {try Integrity.sha256($0)}
         try f.manager.closeAttempt(f.work,jobID:f.job.id)

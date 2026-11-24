@@ -230,10 +230,10 @@ public final class StorageManager {
         guard fm.fileExists(atPath:jobs.path) else {return []}
         try Self.noLinks(jobs)
         var result: [ScratchAttempt] = []
-        for job in try fm.contentsOfDirectory(at:jobs,includingPropertiesForKeys:nil) {
+        for job in try fm.contentsOfDirectory(at:jobs,includingPropertiesForKeys:nil,options:.skipsHiddenFiles) {
             let dir = job.appendingPathComponent("storage-attempts")
             guard (try? Self.noLinks(dir)) != nil else {continue}
-            for receipt in try fm.contentsOfDirectory(at:dir,includingPropertiesForKeys:nil) where UUID(uuidString:receipt.deletingPathExtension().lastPathComponent) != nil {
+            for receipt in try fm.contentsOfDirectory(at:dir,includingPropertiesForKeys:nil,options:.skipsHiddenFiles) where UUID(uuidString:receipt.deletingPathExtension().lastPathComponent) != nil {
                 guard (try? Self.noLinks(receipt)) != nil, let a: ScratchAttempt = try? Persistence.load(receipt),
                       a.jobID == job.lastPathComponent, receipt.path == receiptURL(a).path, !a.removed else {continue}
                 result.append(a)
@@ -271,8 +271,10 @@ public final class StorageManager {
         // Never discard a scratch dependency named by any job's immutable
         // request or accepted source, even if malformed metadata references it.
         let prefix = try work(a).path + "/"
-        for dir in try fm.contentsOfDirectory(at:root.appendingPathComponent("jobs"),includingPropertiesForKeys:nil) {
+        for dir in try fm.contentsOfDirectory(at:root.appendingPathComponent("jobs"),includingPropertiesForKeys:nil,options:.skipsHiddenFiles) {
             try Self.noLinks(dir)
+            var directoryStat = stat()
+            guard lstat(dir.path,&directoryStat) == 0,(directoryStat.st_mode & S_IFMT) == S_IFDIR else {continue}
             let other: JobRecord = try Persistence.load(dir.appendingPathComponent("job.json"))
             let refs = [other.source?.path,other.request.localPath,other.request.transcriptPath,other.request.artwork?.file.path].compactMap {$0}
             if refs.contains(where: {(try? Self.canonicalRoot(URL(fileURLWithPath:$0)).path.hasPrefix(prefix)) == true}) {return false}
